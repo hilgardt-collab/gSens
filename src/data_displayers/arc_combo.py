@@ -25,15 +25,12 @@ class ArcComboDisplayer(DataDisplayer):
         self._cached_center_pixbuf = None
         self._cached_image_path = None
         
-        # --- Animation State ---
         self._animation_timer_id = None
-        # Dictionary to hold {'arc1': {'current': 0.0, 'target': 0.0}, ...}
         self._arc_values = {}
 
         super().__init__(panel_ref, config)
-        populate_defaults_from_model(self.config, self.get_config_model())
+        populate_defaults_from_model(self.config, self._get_static_config_model())
 
-        # Connect signals for starting and stopping the animation timer
         self.widget.connect("realize", self._start_animation_timer)
         self.widget.connect("unrealize", self._stop_animation_timer)
 
@@ -43,21 +40,16 @@ class ArcComboDisplayer(DataDisplayer):
         return drawing_area
 
     def update_display(self, value):
-        """
-        Receives the rich data bundle from the ComboDataSource and updates animation targets.
-        """
         if not self.panel_ref: 
             return
         if isinstance(value, dict):
             self.data_bundle = value
 
-        # Update target values for animation based on the received bundle
         num_arcs = int(self.config.get("combo_arc_count", 5))
         for i in range(1, num_arcs + 1):
             arc_key = f"arc{i}"
             source_key = f"{arc_key}_source"
             
-            # Initialize state if it doesn't exist
             if arc_key not in self._arc_values:
                 self._arc_values[arc_key] = {'current': 0.0, 'target': 0.0, 'first_update': True}
 
@@ -67,104 +59,82 @@ class ArcComboDisplayer(DataDisplayer):
             if isinstance(num_val, (int, float)):
                 new_value = num_val
             
-            # On first update, snap current value to target to avoid animating from 0
             if self._arc_values[arc_key]['first_update']:
                 self._arc_values[arc_key]['current'] = new_value
                 self._arc_values[arc_key]['first_update'] = False
 
             self._arc_values[arc_key]['target'] = new_value
-        
-        self.widget.queue_draw()
 
     def reset_state(self):
-        """Clears the animation values to force a snap to new data."""
         self._arc_values.clear()
         super().reset_state()
 
     @staticmethod
     def get_config_model():
-        model = DataDisplayer.get_config_model()
-        image_file_filters = [{"name": "Image Files", "patterns": ["*.png", "*.jpg", "*.jpeg", "*.bmp", "*.svg"]}, {"name": "All Files", "patterns": ["*"]}]
-        
-        model["Overall Layout"] = [
-            ConfigOption("combo_vertical_offset", "spinner", "Vertical Offset (px):", 0, -200, 200, 1, 0, tooltip="Move the entire gauge up or down."),
-            ConfigOption("combo_scale_factor", "scale", "Manual Scale:", 1.0, 0.5, 2.0, 0.05, 2, tooltip="Increase or decrease the size of the entire gauge.")
-        ]
-        model["Center Circle Background"] = [
-            ConfigOption("center_bg_type", "dropdown", "Style:", "solid", 
-                         options_dict={"Solid Color": "solid", "Linear Gradient": "gradient_linear", 
-                                       "Radial Gradient": "gradient_radial", "Image": "image"}),
-            ConfigOption("center_bg_color", "color", "Color:", "rgba(30,30,30,1)"),
-            ConfigOption("center_gradient_linear_color1", "color", "Start Color:", "#444444"),
-            ConfigOption("center_gradient_linear_color2", "color", "End Color:", "#222222"),
-            ConfigOption("center_gradient_linear_angle_deg", "spinner", "Angle (°):", 90.0, 0, 359, 1, 0),
-            ConfigOption("center_gradient_radial_color1", "color", "Center Color:", "#444444"),
-            ConfigOption("center_gradient_radial_color2", "color", "Edge Color:", "#222222"),
-            ConfigOption("center_background_image_path", "file", "Image File:", "", file_filters=image_file_filters),
-            ConfigOption("center_background_image_alpha", "scale", "Image Opacity:", "1.0", min_val=0.0, max_val=1.0, step=0.05, digits=2),
-        ]
-        model["Center Circle Text"] = [
-            ConfigOption("center_text_vertical_offset", "spinner", "V. Offset:", 0, -100, 100, 1, 0),
-            ConfigOption("center_text_spacing", "spinner", "Text Spacing:", 2, 0, 50, 1, 0)
-        ]
-        model["Center Primary Text"] = [
-            ConfigOption("center_show_primary_text", "bool", "Show Primary Text:", "True"),
-            ConfigOption("center_primary_text_font", "font", "Primary Font:", "Sans 10"),
-            ConfigOption("center_primary_text_color", "color", "Primary Color:", "rgba(200,200,200,1)")
-        ]
-        model["Center Secondary Text"] = [
-            ConfigOption("center_show_secondary_text", "bool", "Show Secondary Text:", "True"),
-            ConfigOption("center_secondary_text_font", "font", "Secondary Font:", "Sans Bold 18"),
-            ConfigOption("center_secondary_text_color", "color", "Secondary Color:", "rgba(255,255,255,1)")
-        ]
-        model["Center Caption"] = [
-            ConfigOption("center_caption_text", "string", "Caption Text:", ""),
-            ConfigOption("center_caption_position", "dropdown", "Position:", "top", 
-                         options_dict={"None": "none", "Top": "top", "Bottom": "bottom", "Left": "left", "Right": "right"}),
-            ConfigOption("center_caption_font", "font", "Font:", "Sans 9"),
-            ConfigOption("center_caption_color", "color", "Color:", "rgba(220,220,220,1)")
-        ]
-        model["Animation"] = [
-            ConfigOption("combo_animation_enabled", "bool", "Enable Arc Animation:", "True")
-        ]
-        return model
+        return {}
+    
+    @staticmethod
+    def _get_static_config_model():
+        return {
+            "Overall Layout": [
+                ConfigOption("combo_vertical_offset", "spinner", "Vertical Offset (px):", 0, -200, 200, 1, 0),
+                ConfigOption("combo_scale_factor", "scale", "Manual Scale:", 1.0, 0.5, 2.0, 0.05, 2)
+            ],
+            "Center Circle Text": [
+                ConfigOption("center_text_vertical_offset", "spinner", "V. Offset:", 0, -100, 100, 1, 0),
+                ConfigOption("center_text_spacing", "spinner", "Text Spacing:", 2, 0, 50, 1, 0)
+            ],
+            "Center Primary Text": [
+                ConfigOption("center_show_primary_text", "bool", "Show Primary Text:", "True"),
+                ConfigOption("center_primary_text_font", "font", "Primary Font:", "Sans 10"),
+                ConfigOption("center_primary_text_color", "color", "Primary Color:", "rgba(200,200,200,1)")
+            ],
+            "Center Secondary Text": [
+                ConfigOption("center_show_secondary_text", "bool", "Show Secondary Text:", "True"),
+                ConfigOption("center_secondary_text_font", "font", "Secondary Font:", "Sans Bold 18"),
+                ConfigOption("center_secondary_text_color", "color", "Secondary Color:", "rgba(255,255,255,1)")
+            ],
+            "Center Caption": [
+                ConfigOption("center_caption_text", "string", "Caption Text:", ""),
+                ConfigOption("center_caption_position", "dropdown", "Position:", "top", 
+                             options_dict={"None": "none", "Top": "top", "Bottom": "bottom", "Left": "left", "Right": "right"}),
+                ConfigOption("center_caption_font", "font", "Font:", "Sans 9"),
+                ConfigOption("center_caption_color", "color", "Color:", "rgba(220,220,220,1)")
+            ],
+            "Animation": [
+                ConfigOption("combo_animation_enabled", "bool", "Enable Arc Animation:", "True")
+            ]
+        }
 
     def get_configure_callback(self):
         """
-        Builds the UI for configuring the *appearance* of the arcs and center display.
+        Builds the entire UI for the "Display" tab from scratch.
         """
         def build_style_tabs(dialog, content_box, widgets, available_sources, panel_config):
-            arc_count = int(panel_config.get("combo_arc_count", 5))
+            full_model = self._get_static_config_model()
+            dialog.dynamic_models.append(full_model)
 
             display_notebook = Gtk.Notebook(margin_top=10)
-            content_box.append(Gtk.Separator(margin_top=15, margin_bottom=5))
-            content_box.append(Gtk.Label(label="<b>Display Appearance</b>", use_markup=True, xalign=0))
+            content_box.append(Gtk.Label(label="<b>Display Appearance</b>", use_markup=True, xalign=0, margin_top=5))
             content_box.append(display_notebook)
 
-            # --- Overall Layout Tab ---
+            # Create and populate the "Layout" tab.
             layout_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
             layout_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
             layout_scroll.set_child(layout_box)
             display_notebook.append_page(layout_scroll, Gtk.Label(label="Layout"))
-            layout_model = {
-                "Overall Layout": self.get_config_model()["Overall Layout"],
-                "Animation": self.get_config_model()["Animation"]
-            }
-            build_ui_from_model(layout_box, panel_config, layout_model, widgets)
+            build_ui_from_model(layout_box, panel_config, {"Overall Layout": full_model["Overall Layout"], "Animation": full_model["Animation"]}, widgets)
 
-            # --- Center Appearance Tab ---
+            # Create and populate the "Center" tab.
             center_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
             center_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
             center_scroll.set_child(center_box)
             display_notebook.append_page(center_scroll, Gtk.Label(label="Center"))
-            
             build_background_config_ui(center_box, panel_config, widgets, dialog, prefix="center_", title="Center Circle Background")
-            
-            center_model_full = {k: v for k, v in self.get_config_model().items() if k.startswith("Center")}
-            center_model_filtered = {k: v for k, v in center_model_full.items() if k != "Center Circle Background"}
-            build_ui_from_model(center_box, panel_config, center_model_filtered, widgets)
+            center_model = {k: v for k, v in full_model.items() if k.startswith("Center")}
+            build_ui_from_model(center_box, panel_config, center_model, widgets)
 
-            # --- Arcs Appearance Tab ---
+            # Create and populate the dynamic "Arcs" tab.
             arcs_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
             arcs_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
             arcs_scroll.set_child(arcs_box)
@@ -178,28 +148,25 @@ class ArcComboDisplayer(DataDisplayer):
                     f"Arc {i} Style": [
                         ConfigOption(f"arc{i}_start_angle", "spinner", "Start Angle (deg):", -225, -360, 360, 5, 0),
                         ConfigOption(f"arc{i}_end_angle", "spinner", "End Angle (deg):", 45, -360, 360, 5, 0),
-                        ConfigOption(f"arc{i}_fill_direction", "dropdown", "Fill Direction:", "start", 
-                                     options_dict={"From Start": "start", "From End": "end"}),
+                        ConfigOption(f"arc{i}_fill_direction", "dropdown", "Fill Direction:", "start", options_dict={"From Start": "start", "From End": "end"}),
                         ConfigOption(f"arc{i}_bg_color", "color", "Background Color:", "rgba(40,40,40,0.5)"),
                         ConfigOption(f"arc{i}_fg_color", "color", "Foreground Color:", f"rgba({min(255, 50*i)}, {max(0, 255-i*20)}, 255, 1.0)"),
                         ConfigOption(f"arc{i}_width_factor", "scale", "Width (% of radius):", "0.1", 0.02, 0.2, 0.01, 2),
-                        ConfigOption(f"arc{i}_label_position", "dropdown", "Label Position:", "start", 
-                                     options_dict={"None": "none", "Start": "start", "Middle": "middle", "End": "end"}),
-                        ConfigOption(f"arc{i}_label_content", "dropdown", "Label Content:", "caption",
-                                     options_dict={"Caption Only": "caption", "Value Only": "value", "Caption and Value": "both"}),
-                        ConfigOption(f"arc{i}_label_font", "font", "Label Font:", "Sans 8"),
+                        ConfigOption(f"arc{i}_label_position", "dropdown", "Label Position:", "start", options_dict={"None": "none", "Start": "start", "Middle": "middle", "End": "end"}),
+                        ConfigOption(f"arc{i}_label_content", "dropdown", "Label Content:", "caption", options_dict={"Caption Only": "caption", "Value Only": "value", "Caption and Value": "both"}),
+                        ConfigOption(f"arc{i}_label_font", "font", "Font:", "Sans 8"),
                         ConfigOption(f"arc{i}_label_color", "color", "Label Color:", "rgba(200,200,200,1)")
                     ]
                 }
 
-            def build_arc_tabs(arc_count):
+            def build_arc_tabs(spinner):
+                arc_count = spinner.get_value_as_int()
                 while style_notebook.get_n_pages() > arc_count:
                     style_notebook.remove_page(-1)
                 
                 for i in range(1, arc_count + 1):
                     if i > style_notebook.get_n_pages():
                         tab_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
-                        tab_scroll.set_min_content_height(300)
                         tab_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
                         tab_scroll.set_child(tab_box)
                         style_notebook.append_page(tab_scroll, Gtk.Label(label=f"Style {i}"))
@@ -209,11 +176,10 @@ class ArcComboDisplayer(DataDisplayer):
                         build_ui_from_model(tab_box, panel_config, arc_model, widgets)
                         dialog.dynamic_models.append(arc_model)
 
-            build_arc_tabs(arc_count)
-
             arc_count_spinner = widgets.get("combo_arc_count")
             if arc_count_spinner:
-                arc_count_spinner.connect("value-changed", lambda spinner: build_arc_tabs(spinner.get_value_as_int()))
+                arc_count_spinner.connect("value-changed", build_arc_tabs)
+                GLib.idle_add(build_arc_tabs, arc_count_spinner)
 
         return build_style_tabs
 
@@ -271,7 +237,6 @@ class ArcComboDisplayer(DataDisplayer):
         scale_factor = float(self.config.get("combo_scale_factor", 1.0))
 
         cx, cy = width / 2, (height / 2) + v_offset
-        
         max_radius = ((min(width, height) / 2) * 0.90) * scale_factor
         
         if max_radius <= 0: 
@@ -324,12 +289,9 @@ class ArcComboDisplayer(DataDisplayer):
                 value_str = data_packet.get('display_string', '')
                 
                 label_text = ""
-                if label_content_type == "caption":
-                    label_text = caption
-                elif label_content_type == "value":
-                    label_text = value_str
-                elif label_content_type == "both":
-                    label_text = f"{caption}: {value_str}"
+                if label_content_type == "caption": label_text = caption
+                elif label_content_type == "value": label_text = value_str
+                elif label_content_type == "both": label_text = f"{caption}: {value_str}"
 
                 arc_key = f"arc{i}"
                 value = self._arc_values.get(arc_key, {}).get('current', 0.0)
@@ -360,56 +322,39 @@ class ArcComboDisplayer(DataDisplayer):
             Gdk.cairo_set_source_pixbuf(ctx, self._cached_center_pixbuf, 0, 0)
             ctx.paint_with_alpha(float(self.config.get("center_background_image_alpha", 1.0))); ctx.restore()
         elif bg_type == "gradient_linear":
-            c1_str = self.config.get("center_gradient_linear_color1")
-            c2_str = self.config.get("center_gradient_linear_color2")
+            c1_str = self.config.get("center_gradient_linear_color1", "#444444")
+            c2_str = self.config.get("center_gradient_linear_color2", "#222222")
             angle = float(self.config.get("center_gradient_linear_angle_deg", 90.0))
-            
             angle_rad = angle * math.pi / 180
             x1, y1 = cx - radius * math.cos(angle_rad), cy - radius * math.sin(angle_rad)
             x2, y2 = cx + radius * math.cos(angle_rad), cy + radius * math.sin(angle_rad)
-            
             pat = cairo.LinearGradient(x1, y1, x2, y2)
-            c1=Gdk.RGBA(); c1.parse(c1_str)
-            c2=Gdk.RGBA(); c2.parse(c2_str)
-            pat.add_color_stop_rgba(0, c1.red,c1.green,c1.blue,c1.alpha)
-            pat.add_color_stop_rgba(1, c2.red,c2.green,c2.blue,c2.alpha)
+            c1=Gdk.RGBA(); c1.parse(c1_str); c2=Gdk.RGBA(); c2.parse(c2_str)
+            pat.add_color_stop_rgba(0, c1.red,c1.green,c1.blue,c1.alpha); pat.add_color_stop_rgba(1, c2.red,c2.green,c2.blue,c2.alpha)
             ctx.set_source(pat); ctx.paint()
         elif bg_type == "gradient_radial":
-            c1_str = self.config.get("center_gradient_radial_color1")
-            c2_str = self.config.get("center_gradient_radial_color2")
-            c1=Gdk.RGBA(); c1.parse(c1_str)
-            c2=Gdk.RGBA(); c2.parse(c2_str)
+            c1_str = self.config.get("center_gradient_radial_color1", "#444444")
+            c2_str = self.config.get("center_gradient_radial_color2", "#222222")
             pat = cairo.RadialGradient(cx, cy, 0, cx, cy, radius)
-            pat.add_color_stop_rgba(0, c1.red,c1.green,c1.blue,c1.alpha)
-            pat.add_color_stop_rgba(1, c2.red,c2.green,c2.blue,c2.alpha)
+            c1=Gdk.RGBA(); c1.parse(c1_str); c2=Gdk.RGBA(); c2.parse(c2_str)
+            pat.add_color_stop_rgba(0, c1.red,c1.green,c1.blue,c1.alpha); pat.add_color_stop_rgba(1, c2.red,c2.green,c2.blue,c2.alpha)
             ctx.set_source(pat); ctx.paint()
         else:
-            bg_color_str = self.config.get("center_bg_color")
-            bg_color = Gdk.RGBA(); bg_color.parse(bg_color_str); ctx.set_source_rgba(bg_color.red, bg_color.green, bg_color.blue, bg_color.alpha); ctx.paint()
+            bg_color_str = self.config.get("center_bg_color", "rgba(40,40,40,1)")
+            bg_color = Gdk.RGBA(); bg_color.parse(bg_color_str)
+            ctx.set_source_rgba(bg_color.red, bg_color.green, bg_color.blue, bg_color.alpha); ctx.paint()
         ctx.restore()
 
         self._draw_center_caption(ctx, cx, cy, radius)
 
         center_data_packet = self.data_bundle.get('center_source', {})
+        primary_text, value_text, unit_text = center_data_packet.get('primary_label', ''), "N/A", ""
         
-        center_source_type = self.config.get("center_source")
-        
-        primary_text = ""
-        value_text = "N/A"
-        unit_text = ""
-
-        if center_source_type == 'analog_clock':
-            primary_text = center_data_packet.get('primary_label', '')
-            value_text = center_data_packet.get('display_string', 'N/A')
-        else:
-            primary_text = center_data_packet.get('primary_label', '')
-            display_string = center_data_packet.get('display_string', 'N/A')
-            if display_string and display_string != "N/A":
-                match = re.match(r'\s*([+-]?\d+\.?\d*)\s*(.*)', display_string)
-                if match:
-                    value_text, unit_text = match.group(1), match.group(2).strip()
-                else:
-                    value_text = display_string
+        display_string = center_data_packet.get('display_string', 'N/A')
+        if display_string and display_string != "N/A":
+            match = re.match(r'\s*([+-]?\d+\.?\d*)\s*(.*)', display_string)
+            if match: value_text, unit_text = match.group(1), match.group(2).strip()
+            else: value_text = display_string
 
         show_primary = str(self.config.get("center_show_primary_text", "True")).lower() == 'true'
         show_secondary = str(self.config.get("center_show_secondary_text", "True")).lower() == 'true'
@@ -429,15 +374,11 @@ class ArcComboDisplayer(DataDisplayer):
             layout_u.set_font_description(Pango.FontDescription.from_string(self.config.get("center_primary_text_font")))
             layout_u.set_text(unit_text, -1); _, log_u = layout_u.get_pixel_extents()
 
-        spacing = float(self.config.get("center_text_spacing", 2))
-        v_offset = float(self.config.get("center_text_vertical_offset", 0))
+        spacing, v_offset = float(self.config.get("center_text_spacing", 2)), float(self.config.get("center_text_vertical_offset", 0))
         
-        total_h = 0
-        if layout_p: total_h += log_p.height
-        if layout_s: total_h += log_s.height
-        if layout_u: total_h += log_u.height
-        if layout_p and (layout_s or layout_u): total_h += spacing
-        if layout_s and layout_u: total_h += spacing
+        total_h = sum(filter(None, [log_p.height if log_p else 0, log_s.height if log_s else 0, log_u.height if log_u else 0]))
+        if log_p and (log_s or log_u): total_h += spacing
+        if log_s and log_u: total_h += spacing
 
         current_y = (cy - total_h / 2) + v_offset
 
@@ -459,10 +400,8 @@ class ArcComboDisplayer(DataDisplayer):
             ctx.move_to(cx - log_u.width / 2, current_y); PangoCairo.show_layout(ctx, layout_u)
 
     def _draw_center_caption(self, ctx, cx, cy, radius):
-        text = self.config.get("center_caption_text")
-        pos = self.config.get("center_caption_position")
-        if not text or pos == "none":
-            return
+        text, pos = self.config.get("center_caption_text"), self.config.get("center_caption_position")
+        if not text or pos == "none": return
         
         font_desc = Pango.FontDescription.from_string(self.config.get("center_caption_font"))
         rgba = Gdk.RGBA(); rgba.parse(self.config.get("center_caption_color"))
@@ -472,25 +411,22 @@ class ArcComboDisplayer(DataDisplayer):
         
         char_widths = []
         for char in text:
-            layout.set_text(char, -1); _, log = layout.get_pixel_extents()
-            char_widths.append(log.width)
+            layout.set_text(char, -1)
+            char_widths.append(layout.get_pixel_extents()[1].width)
         
-        text_radius = radius * 0.85
         total_width_pixels = sum(char_widths)
-        total_text_angular_width = total_width_pixels / text_radius if text_radius > 0 else 0
+        total_text_angular_width = total_width_pixels / (radius * 0.85) if radius > 0 else 0
         
         angle_map = {"top": -math.pi/2, "bottom": math.pi/2, "left": math.pi, "right": 0}
-        start_angle = angle_map.get(pos, -math.pi/2) - (total_text_angular_width / 2.0)
+        text_angle = angle_map.get(pos, -math.pi/2) - (total_text_angular_width / 2.0)
         
         ctx.save(); ctx.translate(cx, cy)
-        text_angle = start_angle
         for i, char in enumerate(text):
             layout.set_text(char, -1); _, log = layout.get_pixel_extents()
-            char_width = char_widths[i]
-            char_angle = char_width / radius if radius > 0 else 0
+            char_angle = char_widths[i] / (radius * 0.85) if radius > 0 else 0
             rotation_angle = text_angle + (char_angle / 2.0)
             ctx.save()
-            ctx.rotate(rotation_angle); ctx.translate(radius, 0); ctx.rotate(math.pi / 2)
+            ctx.rotate(rotation_angle); ctx.translate(radius * 0.85, 0); ctx.rotate(math.pi / 2)
             ctx.move_to(-log.width / 2.0, -log.height / 2.0)
             PangoCairo.show_layout(ctx, layout)
             ctx.restore()
@@ -504,46 +440,40 @@ class ArcComboDisplayer(DataDisplayer):
         if total_angle <= 0: total_angle += 2 * math.pi
         
         ctx.new_path()
-        bg_color_str = self.config.get(f"arc{index}_bg_color", "rgba(40,40,40,0.5)")
-        bg_color = Gdk.RGBA(); bg_color.parse(bg_color_str)
+        bg_color = Gdk.RGBA(); bg_color.parse(self.config.get(f"arc{index}_bg_color", "rgba(40,40,40,0.5)"))
         ctx.set_source_rgba(bg_color.red, bg_color.green, bg_color.blue, bg_color.alpha)
         ctx.set_line_width(width); ctx.set_line_cap(cairo.LINE_CAP_ROUND)
         ctx.arc(cx, cy, radius, start_angle, end_angle); ctx.stroke()
         
         if percent > 0:
             ctx.new_path()
-            fg_color_str = self.config.get(f"arc{index}_fg_color", f"rgba({min(255, 50*index)}, {max(0, 255-index*20)}, 255, 1.0)")
-            fg_color = Gdk.RGBA(); fg_color.parse(fg_color_str)
+            fg_color = Gdk.RGBA(); fg_color.parse(self.config.get(f"arc{index}_fg_color"))
             ctx.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha)
             
             fill_direction = self.config.get(f"arc{index}_fill_direction", "start")
-            if fill_direction == "end":
-                ctx.arc_negative(cx, cy, radius, end_angle, end_angle - total_angle * min(1.0, percent))
-            else:
-                ctx.arc(cx, cy, radius, start_angle, start_angle + total_angle * min(1.0, percent))
+            if fill_direction == "end": ctx.arc_negative(cx, cy, radius, end_angle, end_angle - total_angle * min(1.0, percent))
+            else: ctx.arc(cx, cy, radius, start_angle, start_angle + total_angle * min(1.0, percent))
             ctx.stroke()
 
-        label_pos = self.config.get(f"arc{index}_label_position", "start")
-        if label_pos != "none" and label_text:
+        if self.config.get(f"arc{index}_label_position", "start") != "none" and label_text:
             self._draw_text_on_arc(ctx, cx, cy, radius, width, label_text, index, start_angle, total_angle)
 
     def _draw_text_on_arc(self, ctx, cx, cy, radius, arc_width, text, index, start_angle, total_angle):
-        font_desc = Pango.FontDescription.from_string(self.config.get(f"arc{index}_label_font", "Sans 8"))
-        rgba = Gdk.RGBA(); rgba.parse(self.config.get(f"arc{index}_label_color", "rgba(200,200,200,1)"))
+        font_desc = Pango.FontDescription.from_string(self.config.get(f"arc{index}_label_font"))
+        rgba = Gdk.RGBA(); rgba.parse(self.config.get(f"arc{index}_label_color"))
         ctx.set_source_rgba(rgba.red, rgba.green, rgba.blue, rgba.alpha)
         
-        pos = self.config.get(f"arc{index}_label_position")
         layout = PangoCairo.create_layout(ctx); layout.set_font_description(font_desc)
         
         char_widths = []
         for char in text:
             layout.set_text(char, -1)
-            _, log = layout.get_pixel_extents()
-            char_widths.append(log.width)
-        
+            char_widths.append(layout.get_pixel_extents()[1].width)
+
         total_width_pixels = sum(char_widths)
         total_text_angular_width = total_width_pixels / radius if radius > 0 else 0
         
+        pos = self.config.get(f"arc{index}_label_position")
         if pos == 'middle': text_angle = start_angle + (total_angle - total_text_angular_width) / 2.0
         elif pos == 'end': text_angle = start_angle + total_angle - total_text_angular_width
         else: text_angle = start_angle
@@ -551,8 +481,7 @@ class ArcComboDisplayer(DataDisplayer):
         ctx.save(); ctx.translate(cx, cy)
         for i, char in enumerate(text):
             layout.set_text(char, -1); _, log = layout.get_pixel_extents()
-            char_width = char_widths[i]
-            char_angle = char_width / radius if radius > 0 else 0
+            char_angle = char_widths[i] / radius if radius > 0 else 0
             rotation_angle = text_angle + (char_angle / 2.0)
             ctx.save()
             ctx.rotate(rotation_angle); ctx.translate(radius, 0); ctx.rotate(math.pi / 2)

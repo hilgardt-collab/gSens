@@ -11,7 +11,6 @@ from data_displayer import DataDisplayer
 from config_dialog import ConfigOption, build_ui_from_model
 from ui_helpers import ScrollingLabel, CustomDialog
 from utils import populate_defaults_from_model
-# Import the global config manager to save changes
 from config_manager import config_manager
 
 gi.require_version("Gtk", "4.0")
@@ -20,83 +19,7 @@ gi.require_version("PangoCairo", "1.0")
 gi.require_version("Gst", "1.0")
 from gi.repository import Gtk, Gdk, GLib, Pango, PangoCairo, GdkPixbuf, Gio, Gst
 
-# Initialize GStreamer for sound playback
 Gst.init(None)
-
-def _get_analog_clock_config_model():
-    """Returns the comprehensive config model for the analog clock's appearance."""
-    face_styles = {"Solid Color": "solid", "Image Background": "image", "Linear Gradient": "gradient_linear", "Radial Gradient": "gradient_radial"}
-    marking_styles = {"All 12": "all_12", "Cardinal (3,6,9,12)": "cardinal_4", "None": "none"}
-    number_styles = {"Decimal (1,2,3)": "decimal", "Roman (I,II,III)": "roman", "None": "none"}
-    hand_shapes = {"Line": "line", "Rectangle": "rectangle", "Pointer": "pointer"}
-    
-    sound_file_filters = [{"name": "Audio Files", "patterns": ["*.mp3", "*.wav", "*.ogg", "*.flac"]}, {"name": "All Files", "patterns": ["*"]}]
-    image_file_filters = [{"name": "Image Files", "patterns": ["*.png", "*.jpg", "*.jpeg", "*.bmp", "*.svg"]}, {"name": "All Files", "patterns": ["*"]}]
-
-
-    return {
-        "Clock Face": [
-            ConfigOption("clock_face_style", "dropdown", "Style:", "solid", options_dict=face_styles)
-        ],
-        "Face Options (Solid)": [
-            ConfigOption("clock_face_bg_color", "color", "Color:", "rgba(40,40,40,1)")
-        ],
-        "Face Options (Image)": [
-            ConfigOption("clock_face_image_path", "file", "Image File:", "", file_filters=image_file_filters),
-            ConfigOption("clock_face_image_alpha", "scale", "Image Opacity:", 1.0, 0.0, 1.0, 0.05, 2)
-        ],
-        "Face Options (Linear Gradient)": [
-            ConfigOption("clock_face_gradient_linear_color1", "color", "Start Color:", "rgba(220,220,240,1)"),
-            ConfigOption("clock_face_gradient_linear_color2", "color", "End Color:", "rgba(200,200,220,1)"),
-            ConfigOption("clock_face_gradient_linear_angle_deg", "spinner", "Angle (°):", 90.0, 0, 359, 1, 0),
-        ],
-        "Face Options (Radial Gradient)": [
-            ConfigOption("clock_face_gradient_radial_color1", "color", "Center Color:", "rgba(250,250,250,1)"),
-            ConfigOption("clock_face_gradient_radial_color2", "color", "Edge Color:", "rgba(200,200,200,1)"),
-        ],
-        "Labels": [
-            ConfigOption("show_date", "bool", "Show Date Label", "True"),
-            ConfigOption("date_font", "font", "Date Font:", "Sans 8"),
-            ConfigOption("date_color", "color", "Date Color:", "rgba(200,200,200,1)"),
-            ConfigOption("show_timezone", "bool", "Show Timezone Label", "True"),
-            ConfigOption("tz_font", "font", "Timezone Font:", "Sans Italic 8"),
-            ConfigOption("tz_color", "color", "Timezone Color:", "rgba(180,180,180,1)"), 
-        ],
-        "Border, Marks & Numbers": [
-            ConfigOption("show_clock_border", "bool", "Show Border", "True"),
-            ConfigOption("clock_border_color", "color", "Border Color:", "rgba(200,200,200,0.8)"),
-            ConfigOption("clock_border_width", "scale", "Border Width (px):", 2.0, 0.5, 10, 0.5, 1),
-            ConfigOption("clock_marking_position", "dropdown", "Show Marks:", "all_12", options_dict=marking_styles),
-            ConfigOption("clock_marking_color", "color", "Marks Color:", "rgba(220,220,220,1.0)"),
-            ConfigOption("clock_number_position", "dropdown", "Show Numbers:", "all_12", options_dict=marking_styles),
-            ConfigOption("clock_number_style", "dropdown", "Number Style:", "decimal", options_dict=number_styles),
-            ConfigOption("clock_number_color", "color", "Number Color:", "rgba(220,220,220,1.0)"),
-            ConfigOption("clock_number_font", "font", "Number Font:", "Sans 10"),
-        ],
-        "Hands & Center Dot": [
-            ConfigOption("hour_hand_shape", "dropdown", "Hour Hand Shape:", "rectangle", options_dict=hand_shapes),
-            ConfigOption("hour_hand_color", "color", "Hour Hand Color:", "rgba(220,220,220,1.0)"),
-            ConfigOption("minute_hand_color", "color", "Minute Hand Color:", "rgba(220,220,220,1.0)"),
-            ConfigOption("show_second_hand", "bool", "Show Second Hand", "True"),
-            ConfigOption("second_hand_color", "color", "Second Hand Color:", "rgba(255,0,0,0.9)"),
-            ConfigOption("show_center_dot", "bool", "Show Center Dot", "True"),
-            ConfigOption("center_dot_color", "color", "Center Dot Color:", "rgba(220,220,220,1.0)"),
-        ],
-        "Alarm Settings": [
-            ConfigOption("alarm_color", "color", "Panel Flash Color:", "rgba(255, 215, 0, 0.7)"), 
-            ConfigOption("alarm_sound_file", "file", "Alarm Sound File:", "", tooltip="Select a sound file (WAV, MP3, OGG)", file_filters=sound_file_filters),
-            ConfigOption("alarm_repeat_count", "spinner", "Repeat Sound (times):", 1, 0, 10, 1, 0),
-            ConfigOption("alarm_icon_size", "spinner", "Icon Size (px):", 20, 12, 48, 1, 0),
-            ConfigOption("alarm_icon_base_color", "color", "Icon Base Color:", "rgba(128,128,128,0.7)"),
-            ConfigOption("alarm_icon_set_color", "color", "Icon Alarm Set Color:", "rgba(255,255,255,0.9)"),
-            ConfigOption("alarm_icon_ringing_color", "color", "Icon Ringing Color:", "rgba(255,0,0,1.0)"),
-        ],
-        "Timer Settings": [
-            ConfigOption("timer_icon_color", "color", "Timer Icon Color:", "rgba(200, 200, 200, 0.8)"),
-            ConfigOption("timer_countdown_font", "font", "Countdown Font:", "Sans Bold 10"),
-            ConfigOption("timer_countdown_color", "color", "Countdown Color:", "rgba(255, 255, 255, 1.0)"),
-        ]
-    }
 
 def _draw_clock_hand(context, center_x, center_y, angle, length, width, color_str, shape):
     """Helper function to draw a single clock hand using Cairo."""
@@ -129,7 +52,6 @@ def _draw_hands(context, center_x, center_y, radius, config, now):
     """Draws the hour, minute, and second hands on the clock face."""
     if not now or radius <= 0: return
 
-    # Calculate hand angles based on current time
     sec_fraction = now.second / 60.0
     min_fraction = (now.minute + sec_fraction) / 60.0
     hour_fraction = ((now.hour % 12) + min_fraction) / 12.0
@@ -298,7 +220,7 @@ class AnalogClockDisplayer(DataDisplayer):
         self._date_str, self._tz_str = "", ""
         
         super().__init__(panel_ref, config)
-        populate_defaults_from_model(self.config, self.get_config_model())
+        populate_defaults_from_model(self.config, self._get_static_config_model())
         self.widget.connect("realize", self._start_visual_update_timer)
         self.widget.connect("unrealize", self._stop_visual_update_timer)
 
@@ -335,7 +257,7 @@ class AnalogClockDisplayer(DataDisplayer):
         alarm_icon_size = float(self.config.get("alarm_icon_size"))
         alarm_icon_x, alarm_icon_y = padding, height - alarm_icon_size - padding
         
-        timer_icon_size = 24 # Assuming a fixed size for the timer icon/text area
+        timer_icon_size = 24
         timer_icon_x, timer_icon_y = width - timer_icon_size - padding, height - timer_icon_size - padding
         
         if alarm_icon_x <= x <= (alarm_icon_x + alarm_icon_size) and alarm_icon_y <= y <= (alarm_icon_y + alarm_icon_size):
@@ -350,6 +272,8 @@ class AnalogClockDisplayer(DataDisplayer):
                 if self._sound_player: self._sound_player.set_state(Gst.State.NULL)
                 self.drawing_area.queue_draw()
             else:
+                # This now handles both the "running" and "not running" cases.
+                # The dialog itself will show the correct UI based on the timer's state.
                 self._show_timer_management_dialog()
             
     def _disable_ringing_alarm(self):
@@ -357,61 +281,124 @@ class AnalogClockDisplayer(DataDisplayer):
         if not self._current_time_data.get("datetime"):
             return
 
-        # Stop the sound and visual alarm immediately
         if self._sound_player:
             self._sound_player.set_state(Gst.State.NULL)
         if hasattr(self.panel_ref.data_source, 'stop_ringing_alarms'):
             self.panel_ref.data_source.stop_ringing_alarms()
         self.panel_ref.exit_alarm_state()
 
-        # Now, permanently disable it in the config
         now = self._current_time_data["datetime"]
         current_time_hm = now.strftime("%H:%M")
         
         all_alarms = self.panel_ref.data_source._parse_alarms_from_config()
         
-        # Find and disable the matching alarm
         config_changed = False
         for alarm in all_alarms:
             if alarm['time'] == current_time_hm and alarm['enabled']:
                 alarm['enabled'] = False
                 config_changed = True
 
-        # If a change was made, rebuild the config string and save it
         if config_changed:
             new_alarms_str = ";".join(
                 f"{a['time']},{str(a['enabled']).lower()}" for a in all_alarms
             )
             self.config["alarms"] = new_alarms_str
             config_manager.update_panel_config(self.config["id"], self.config)
-            config_manager.save() # Persist the change to the file
+            config_manager.save()
             
-            # Force the data source to re-read its config immediately
             self.panel_ref.data_source.force_update()
             self.drawing_area.queue_draw()
         
     @staticmethod
     def get_config_model():
-        """Returns the complete configuration model for the clock, used for saving."""
-        return _get_analog_clock_config_model()
+        return {}
+
+    @staticmethod
+    def _get_static_config_model():
+        face_styles = {"Solid Color": "solid", "Image Background": "image", "Linear Gradient": "gradient_linear", "Radial Gradient": "gradient_radial"}
+        marking_styles = {"All 12": "all_12", "Cardinal (3,6,9,12)": "cardinal_4", "None": "none"}
+        number_styles = {"Decimal (1,2,3)": "decimal", "Roman (I,II,III)": "roman", "None": "none"}
+        hand_shapes = {"Line": "line", "Rectangle": "rectangle", "Pointer": "pointer"}
+        sound_file_filters = [{"name": "Audio Files", "patterns": ["*.mp3", "*.wav", "*.ogg", "*.flac"]}, {"name": "All Files", "patterns": ["*"]}]
+        image_file_filters = [{"name": "Image Files", "patterns": ["*.png", "*.jpg", "*.jpeg", "*.bmp", "*.svg"]}, {"name": "All Files", "patterns": ["*"]}]
+
+        return {
+            "Clock Face": [ ConfigOption("clock_face_style", "dropdown", "Style:", "solid", options_dict=face_styles) ],
+            "Face Options (Solid)": [ ConfigOption("clock_face_bg_color", "color", "Color:", "rgba(40,40,40,1)") ],
+            "Face Options (Image)": [
+                ConfigOption("clock_face_image_path", "file", "Image File:", "", file_filters=image_file_filters),
+                ConfigOption("clock_face_image_alpha", "scale", "Image Opacity:", 1.0, 0.0, 1.0, 0.05, 2)
+            ],
+            "Face Options (Linear Gradient)": [
+                ConfigOption("clock_face_gradient_linear_color1", "color", "Start Color:", "rgba(220,220,240,1)"),
+                ConfigOption("clock_face_gradient_linear_color2", "color", "End Color:", "rgba(200,200,220,1)"),
+                ConfigOption("clock_face_gradient_linear_angle_deg", "spinner", "Angle (°):", 90.0, 0, 359, 1, 0),
+            ],
+            "Face Options (Radial Gradient)": [
+                ConfigOption("clock_face_gradient_radial_color1", "color", "Center Color:", "rgba(250,250,250,1)"),
+                ConfigOption("clock_face_gradient_radial_color2", "color", "Edge Color:", "rgba(200,200,200,1)"),
+            ],
+            "Labels": [
+                ConfigOption("show_date", "bool", "Show Date Label", "True"),
+                ConfigOption("date_font", "font", "Date Font:", "Sans 8"),
+                ConfigOption("date_color", "color", "Date Color:", "rgba(200,200,200,1)"),
+                ConfigOption("show_timezone", "bool", "Show Timezone Label", "True"),
+                ConfigOption("tz_font", "font", "Timezone Font:", "Sans Italic 8"),
+                ConfigOption("tz_color", "color", "Timezone Color:", "rgba(180,180,180,1)"), 
+            ],
+            "Border, Marks & Numbers": [
+                ConfigOption("show_clock_border", "bool", "Show Border", "True"),
+                ConfigOption("clock_border_color", "color", "Border Color:", "rgba(200,200,200,0.8)"),
+                ConfigOption("clock_border_width", "scale", "Border Width (px):", 2.0, 0.5, 10, 0.5, 1),
+                ConfigOption("clock_marking_position", "dropdown", "Show Marks:", "all_12", options_dict=marking_styles),
+                ConfigOption("clock_marking_color", "color", "Marks Color:", "rgba(220,220,220,1.0)"),
+                ConfigOption("clock_number_position", "dropdown", "Show Numbers:", "all_12", options_dict=marking_styles),
+                ConfigOption("clock_number_style", "dropdown", "Number Style:", "decimal", options_dict=number_styles),
+                ConfigOption("clock_number_color", "color", "Number Color:", "rgba(220,220,220,1.0)"),
+                ConfigOption("clock_number_font", "font", "Number Font:", "Sans 10"),
+            ],
+            "Hands & Center Dot": [
+                ConfigOption("hour_hand_shape", "dropdown", "Hour Hand Shape:", "rectangle", options_dict=hand_shapes),
+                ConfigOption("hour_hand_color", "color", "Hour Hand Color:", "rgba(220,220,220,1.0)"),
+                ConfigOption("minute_hand_color", "color", "Minute Hand Color:", "rgba(220,220,220,1.0)"),
+                ConfigOption("show_second_hand", "bool", "Show Second Hand", "True"),
+                ConfigOption("second_hand_color", "color", "Second Hand Color:", "rgba(255,0,0,0.9)"),
+                ConfigOption("show_center_dot", "bool", "Show Center Dot", "True"),
+                ConfigOption("center_dot_color", "color", "Center Dot Color:", "rgba(220,220,220,1.0)"),
+            ],
+            "Alarm Settings": [
+                ConfigOption("alarm_color", "color", "Panel Flash Color:", "rgba(255, 215, 0, 0.7)"), 
+                ConfigOption("alarm_sound_file", "file", "Alarm Sound File:", "", tooltip="Select a sound file (WAV, MP3, OGG)", file_filters=sound_file_filters),
+                ConfigOption("alarm_repeat_count", "spinner", "Repeat Sound (times):", 1, 0, 10, 1, 0),
+                ConfigOption("alarm_icon_size", "spinner", "Icon Size (px):", 20, 12, 48, 1, 0),
+                ConfigOption("alarm_icon_base_color", "color", "Icon Base Color:", "rgba(128,128,128,0.7)"),
+                ConfigOption("alarm_icon_set_color", "color", "Icon Alarm Set Color:", "rgba(255,255,255,0.9)"),
+                ConfigOption("alarm_icon_ringing_color", "color", "Icon Ringing Color:", "rgba(255,0,0,1.0)"),
+            ],
+            "Timer Settings": [
+                ConfigOption("timer_icon_color", "color", "Timer Icon Color:", "rgba(200, 200, 200, 0.8)"),
+                ConfigOption("timer_countdown_font", "font", "Countdown Font:", "Sans Bold 10"),
+                ConfigOption("timer_countdown_color", "color", "Countdown Color:", "rgba(255, 255, 255, 1.0)"),
+            ]
+        }
 
     def get_configure_callback(self):
         """A custom callback to build the specialized config UI for the clock."""
         def build_clock_config_tab(dialog, content_box, widgets, available_sources, panel_config):
-            full_model = self.get_config_model()
+            full_model = self._get_static_config_model()
+            dialog.dynamic_models.append(full_model)
 
             section_to_id_map = {
-                "Face Options (Solid)": "solid",
-                "Face Options (Image)": "image",
-                "Face Options (Linear Gradient)": "gradient_linear",
-                "Face Options (Radial Gradient)": "gradient_radial",
+                "Face Options (Solid)": "solid", "Face Options (Image)": "image",
+                "Face Options (Linear Gradient)": "gradient_linear", "Face Options (Radial Gradient)": "gradient_radial",
             }
 
             dynamic_face_sections = {k: v for k, v in full_model.items() if k.startswith("Face Options")}
             static_sections = {k: v for k, v in full_model.items() if not k.startswith("Face Options") and k != "Clock Face"}
+            
             build_ui_from_model(content_box, self.config, static_sections, widgets)
             
-            face_section_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            face_section_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10)
             build_ui_from_model(face_section_box, self.config, {"Clock Face": full_model["Clock Face"]}, widgets)
             
             stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.SLIDE_LEFT_RIGHT, margin_top=4)
@@ -435,26 +422,18 @@ class AnalogClockDisplayer(DataDisplayer):
                 face_style_combo.connect("changed", on_face_style_changed)
                 GLib.idle_add(on_face_style_changed, face_style_combo)
 
-            # Inject the sound previewer into the correct location
             alarm_file_widget = widgets.get("alarm_sound_file")
             if alarm_file_widget:
                 alarm_section_box = alarm_file_widget.get_parent().get_parent()
                 if alarm_section_box and isinstance(alarm_section_box, Gtk.Box):
                     preview_sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL, margin_top=8, margin_bottom=4)
-                    
                     preview_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
                     preview_vbox.append(Gtk.Label(label="Sound Preview:", xalign=0))
-                    
                     controls_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
                     btn = Gtk.Button(icon_name="media-playback-start-symbolic")
                     bar = Gtk.ProgressBar(show_text=True, hexpand=True)
-                    
-                    controls_row.append(btn)
-                    controls_row.append(bar)
-                    preview_vbox.append(controls_row)
-                    
-                    alarm_section_box.append(preview_sep)
-                    alarm_section_box.append(preview_vbox)
+                    controls_row.append(btn); controls_row.append(bar); preview_vbox.append(controls_row)
+                    alarm_section_box.append(preview_sep); alarm_section_box.append(preview_vbox)
 
                     player_data = {'player': None, 'is_playing': False, 'progress_timer_id': None}
                     def _update_progress_bar():
@@ -506,12 +485,12 @@ class AnalogClockDisplayer(DataDisplayer):
         self._static_surface = None; self.drawing_area.queue_draw()
     
     def update_display(self, data):
-        if not self.panel_ref: return # Guard against race condition on close
+        if not self.panel_ref: return
         if not data: return 
         self._current_time_data = data 
         if self.panel_ref and self.panel_ref.data_source:
-            self._date_str = self.panel_ref.data_source.get_secondary_display_string(data)
-            self._tz_str = self.panel_ref.data_source.get_timezone_display_string(data)
+            self._date_str = self.panel_ref.data_source.get_primary_label_string(data)
+            self._tz_str = self.panel_ref.data_source.get_secondary_display_string(data)
         
         is_alarm_ringing = data.get("is_alarm_ringing", False)
         is_timer_ringing = data.get("is_timer_ringing", False)
@@ -547,7 +526,6 @@ class AnalogClockDisplayer(DataDisplayer):
         _draw_hands(context, width/2, (height-bottom_margin)/2, min(width/2,(height-bottom_margin)/2), self.config, now)
         _draw_info_labels(context, width, height, self.config, self._date_str, self._tz_str, bottom_margin)
         
-        # Draw Alarm Icon
         alarm_icon_size=float(self.config.get("alarm_icon_size"))
         padding=5
         alarm_icon_x, alarm_icon_y = padding, height-alarm_icon_size-padding
@@ -556,7 +534,6 @@ class AnalogClockDisplayer(DataDisplayer):
         self._draw_alarm_icon(area, context, alarm_icon_size, alarm_icon_size)
         context.restore()
 
-        # Draw Timer Icon/Countdown
         self._draw_timer_indicator(context, width, height)
         
     def close(self):
@@ -629,8 +606,7 @@ class AnalogClockDisplayer(DataDisplayer):
 
     def _play_timer_sound(self):
         sound_file = self.config.get("timer_sound_file")
-        # For timers, we loop the sound until it's manually stopped.
-        self._play_sound(sound_file, 999) # Use a high number to simulate looping
+        self._play_sound(sound_file, 999)
 
     def _play_sound(self, sound_file, repeat):
         if not sound_file or not os.path.exists(sound_file) or repeat < 1: return
@@ -679,7 +655,7 @@ class AnalogClockDisplayer(DataDisplayer):
         data = self._current_time_data
         if data.get("is_timer_running") or data.get("is_timer_ringing"):
             remaining = data.get("timer_remaining_seconds")
-            if remaining is None: remaining = 0 # Fix for the TypeError
+            if remaining is None: remaining = 0
             
             mins, secs = divmod(int(remaining), 60)
             text = f"{mins:02d}:{secs:02d}"
@@ -700,15 +676,12 @@ class AnalogClockDisplayer(DataDisplayer):
             ctx.set_source_rgba(rgba.red, rgba.green, rgba.blue, rgba.alpha)
             ctx.set_line_width(1.5)
             
-            # Bell shape
             ctx.move_to(icon_size * 0.2, icon_size * 0.8)
             ctx.curve_to(icon_size * 0.2, icon_size * 0.4, icon_size * 0.8, icon_size * 0.4, icon_size * 0.8, icon_size * 0.8)
             ctx.close_path()
             ctx.stroke()
-            # Clapper
             ctx.arc(icon_size * 0.5, icon_size * 0.8, icon_size * 0.05, 0, 2 * math.pi)
             ctx.fill()
-            # Ring
             ctx.move_to(icon_size * 0.4, icon_size * 0.3)
             ctx.curve_to(icon_size * 0.4, icon_size * 0.2, icon_size * 0.6, icon_size * 0.2, icon_size * 0.6, icon_size * 0.3)
             ctx.stroke()

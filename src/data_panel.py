@@ -62,9 +62,9 @@ class DataPanel(BasePanel):
 
             if value is not None:
                 numerical_value = self.data_source.get_numerical_value(value)
-                self.check_and_update_alarm_state(numerical_value, self.data_source.alarm_config_prefix)
+                GLib.idle_add(self.check_and_update_alarm_state, numerical_value, self.data_source.alarm_config_prefix)
             else:
-                self.exit_alarm_state()
+                GLib.idle_add(self.exit_alarm_state)
             
             if self.data_displayer:
                 GLib.idle_add(self.data_displayer.update_display, value)
@@ -170,44 +170,21 @@ class DataPanel(BasePanel):
             ConfigOption("height", "spinner", "Height (grid units):", self.config.get("height", 2), 1, 128, 1)
         ]}
         source_model = self.data_source.get_config_model()
-        
-        has_custom_displayer_ui = hasattr(self.data_displayer, 'get_configure_callback') and self.data_displayer.get_configure_callback() is not None
-
-        def build_new_display_tab():
-            """Builds or rebuilds the 'Display' tab in the config notebook."""
-            scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vscrollbar_policy=Gtk.PolicyType.AUTOMATIC)
-            tab_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
-            scroll.set_child(tab_box)
-            scroll.set_vexpand(True)
-            
-            custom_builder_callback = getattr(self.data_displayer, 'get_configure_callback', lambda: None)()
-            if custom_builder_callback:
-                custom_builder_callback(dialog, tab_box, all_widgets, AVAILABLE_DATA_SOURCES, self.config)
-            else:
-                display_model = self.data_displayer.get_config_model()
-                build_ui_from_model(tab_box, self.config, display_model, all_widgets)
-
-            notebook.append_page(scroll, Gtk.Label(label="Display"))
+        display_model = self.data_displayer.get_config_model()
 
         def on_display_type_changed(combo):
-            """Handles changing the displayer type."""
             selected_displayer_key = combo.get_active_id()
-            
             if not selected_displayer_key or self.config.get('displayer_type') == selected_displayer_key:
                 return
-
             self.config['displayer_type'] = selected_displayer_key
             config_manager.update_panel_config(self.config["id"], self.config)
-            
             if main_window and hasattr(main_window, 'grid_manager'):
                  main_window.grid_manager.recreate_panel(self.config['id'])
-            
             dialog.destroy()
-            
             print("INFO: Panel display type changed. Please re-open configuration for the new panel.")
             return
 
-        # Build Notebook Tab 1: General Panel Settings
+        # 1. Build Tab 1: General Panel Settings
         panel_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vscrollbar_policy=Gtk.PolicyType.AUTOMATIC)
         panel_tab_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
         panel_scroll.set_child(panel_tab_box)
@@ -215,60 +192,49 @@ class DataPanel(BasePanel):
         build_ui_from_model(panel_tab_box, self.config, display_type_model, all_widgets)
         all_widgets['displayer_type'].connect('changed', on_display_type_changed)
         build_ui_from_model(panel_tab_box, self.config, panel_model, all_widgets)
-        
         build_background_config_ui(panel_tab_box, self.config, all_widgets, dialog, prefix="panel_", title="Panel Background")
 
-        # Build Notebook Tab 2: Data Source Settings
+        # 2. Build Tab 2: Data Source Settings
         source_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vscrollbar_policy=Gtk.PolicyType.AUTOMATIC, vexpand=True)
         source_tab_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
         source_scroll.set_child(source_tab_box)
         notebook.append_page(source_scroll, Gtk.Label(label="Data Source"))
         build_ui_from_model(source_tab_box, self.config, source_model, all_widgets)
 
+        # 3. Build Tab 3: Display Settings (Static Part)
+        display_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vscrollbar_policy=Gtk.PolicyType.AUTOMATIC, vexpand=True)
+        display_tab_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
+        display_scroll.set_child(display_tab_box)
+        notebook.append_page(display_scroll, Gtk.Label(label="Display"))
+        build_ui_from_model(display_tab_box, self.config, display_model, all_widgets)
+
+        # 4. AFTER all static widgets are created, call the custom callbacks to add dynamic behavior
         source_custom_builder = getattr(self.data_source, 'get_configure_callback', lambda: None)()
         if source_custom_builder:
             source_custom_builder(dialog, source_tab_box, all_widgets, AVAILABLE_DATA_SOURCES, self.config)
-
-        # Build Notebook Tab 3: Display Settings (initial build)
-        build_new_display_tab()
+            
+        display_custom_builder = getattr(self.data_displayer, 'get_configure_callback', lambda: None)()
+        if display_custom_builder:
+            display_custom_builder(dialog, display_tab_box, all_widgets, AVAILABLE_DATA_SOURCES, self.config)
         
         def apply_changes(widget=None):
-            """Gathers all values from UI widgets and applies them to the config."""
             dialog_state['changes_applied'] = True 
-            
-            models_to_check = [
-                panel_model,
-                display_type_model,
-                source_model,
-                self.data_displayer.get_config_model(), 
-                *dialog.dynamic_models
-            ]
-
-            if hasattr(dialog, 'ui_models'):
-                models_to_check.extend(dialog.ui_models.values())
-            
+            models_to_check = [ panel_model, display_type_model, source_model, self.data_displayer.get_config_model(), *dialog.dynamic_models ]
+            if hasattr(dialog, 'ui_models'): models_to_check.extend(dialog.ui_models.values())
             new_conf = get_config_from_widgets(all_widgets, models_to_check)
-            
             if hasattr(dialog, 'custom_value_getter') and callable(dialog.custom_value_getter):
                 custom_values = dialog.custom_value_getter()
-                if custom_values:
-                    new_conf.update(custom_values)
-                    
+                if custom_values: new_conf.update(custom_values)
             final_displayer_key = new_conf.get('displayer_type', original_displayer_key_on_open)
-            
             self.config.update(new_conf)
             self.config['displayer_type'] = final_displayer_key
-            
             config_manager.update_panel_config(self.config["id"], self.config)
-
             if original_displayer_key_on_open != final_displayer_key:
                 main_window.grid_manager.recreate_panel(self.config['id'])
             else:
                 self.apply_all_configurations()
-
             self.start_update_thread()
 
-        # Dialog Actions
         cancel_button = dialog.add_non_modal_button("_Cancel", style_class="destructive-action")
         cancel_button.connect("clicked", lambda w: dialog.destroy())
         apply_button = dialog.add_non_modal_button("_Apply")
@@ -276,8 +242,7 @@ class DataPanel(BasePanel):
         accept_button = dialog.add_non_modal_button("_Accept", style_class="suggested-action", is_default=True)
         def on_accept(widget):
             apply_changes(widget)
-            if dialog.is_visible():
-                dialog.destroy()
+            if dialog.is_visible(): dialog.destroy()
         accept_button.connect("clicked", on_accept)
 
         def on_dialog_destroy(d):
@@ -285,11 +250,9 @@ class DataPanel(BasePanel):
                 if self.data_displayer is not original_displayer_on_open:
                     self.data_displayer.close()
                     self.data_displayer = original_displayer_on_open
-                
                 self.config = original_config_on_open
                 self.set_displayer_widget()
                 self.apply_all_configurations()
-            
             self.on_config_dialog_destroy(d)
 
         dialog.connect("destroy", on_dialog_destroy)

@@ -1,3 +1,4 @@
+
 # data_sources/gpu_source.py
 from data_source import DataSource
 from config_dialog import ConfigOption, build_ui_from_model
@@ -16,6 +17,7 @@ class GPUDataSource(DataSource):
         Fetches a dictionary of all metrics for the selected GPU.
         """
         gpu_index = int(self.config.get("gpu_index", "0"))
+        # --- FIX: Fetch all available metrics from the GPU manager ---
         return {
             "temperature": gpu_manager.get_temperature(gpu_index),
             "utilization": gpu_manager.get_utilization(gpu_index),
@@ -67,6 +69,7 @@ class GPUDataSource(DataSource):
             if style == "gb_only": return f"{value['used_gb']:.1f}/{value['total_gb']:.1f} GB"
             if style == "percent_only": return f"{value['percent']:.1f}%"
             return f"{value['used_gb']:.1f}/{value['total_gb']:.1f} GB ({value['percent']:.1f}%)"
+        # --- FIX: Add display formatting for the new metrics ---
         elif metric == "power":
             return f"{value:.1f} W"
         elif metric == "fan_speed":
@@ -88,6 +91,7 @@ class GPUDataSource(DataSource):
         model["GPU Selection"] = [
             ConfigOption("gpu_index", "dropdown", "Monitored GPU:", "0", options_dict=gpu_opts)
         ]
+        # --- FIX: Add all available metrics to the configuration dropdown ---
         model["Metric & Display"] = [
             ConfigOption("gpu_metric_to_display", "dropdown", "Metric to Display:", "utilization",
                          options_dict={
@@ -121,7 +125,6 @@ class GPUDataSource(DataSource):
 
     def get_configure_callback(self):
         """Dynamically shows/hides UI sections based on the selected metric."""
-        # --- FIX: Add 'prefix=None' to make the argument optional ---
         def setup_dynamic_options(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
             metric_combo = widgets.get("gpu_metric_to_display")
             if not metric_combo: return
@@ -132,11 +135,14 @@ class GPUDataSource(DataSource):
             
             for title in section_titles:
                 try:
+                    # Find the Gtk.Label widget that serves as the section header
                     header_label = next(c for c in all_children if isinstance(c, Gtk.Label) and c.get_label() == f"<b>{title}</b>")
                     header_index = all_children.index(header_label)
+                    # The Gtk.Separator is right before the header
                     separator = all_children[header_index - 1]
                     
                     section_content = [separator, header_label]
+                    # Collect all widgets following the header until the next separator
                     for child in all_children[header_index + 1:]:
                         if isinstance(child, Gtk.Separator): break
                         section_content.append(child)

@@ -78,15 +78,12 @@ class CPUDataSource(DataSource):
         
         selected_key = self.config.get("cpu_temp_sensor_key", "")
         
-        # --- FIX: If no sensor is selected, try to use the first one from the cache ---
         if not selected_key or '::' not in selected_key:
             cached_sensors = SENSOR_CACHE.get('cpu_temp', {})
             if cached_sensors:
-                # Find the first valid sensor key (not the empty placeholder)
                 first_valid_key = next((k for k in cached_sensors if k), None)
                 if first_valid_key:
                     selected_key = first_valid_key
-                    # Store this choice back to the config for consistency
                     self.config["cpu_temp_sensor_key"] = selected_key
 
         if '::' not in selected_key: return None
@@ -171,6 +168,30 @@ class CPUDataSource(DataSource):
             return f"{value:.0f} MHz"
         return "N/A"
 
+    # --- FIX: Implement get_primary_label_string to provide useful context ---
+    def get_primary_label_string(self, data):
+        """Returns a descriptive label for the currently displayed metric."""
+        metric = self.config.get("cpu_metric_to_display", "usage")
+        
+        if metric == "usage":
+            mode = self.config.get("cpu_usage_mode", "overall")
+            if "core_" in mode:
+                return f"Core {mode.split('_')[1]} Usage"
+            return "Overall CPU Usage"
+            
+        elif metric == "temperature":
+            sensor_key = self.config.get("cpu_temp_sensor_key", "")
+            if sensor_key and '::' in sensor_key:
+                return f"{sensor_key.split('::')[1]} Temp"
+            return "CPU Temperature"
+
+        elif metric == "frequency":
+            mode = self.config.get("cpu_freq_mode", "overall")
+            if "core_" in mode:
+                return f"Core {mode.split('_')[1]} Freq"
+            return "Average Frequency"
+        return "CPU"
+
     @staticmethod
     def get_config_model():
         """Returns a combined configuration model for all CPU metrics."""
@@ -220,7 +241,6 @@ class CPUDataSource(DataSource):
             config = panel_config if is_combo_child else self.config
             
             if is_combo_child:
-                # --- FIX: Track all relevant config keys for saving ---
                 temp_state = {
                     "cpu_metric_to_display": config.get("cpu_metric_to_display", "usage"),
                     "cpu_usage_mode": config.get("cpu_usage_mode", "overall"),
@@ -271,7 +291,6 @@ class CPUDataSource(DataSource):
             metric_combo.connect("changed", on_metric_changed)
             
             if is_combo_child:
-                # --- FIX: Connect signals for all tracked widgets ---
                 widgets_to_track = {
                     "cpu_usage_mode": "changed",
                     "cpu_temp_sensor_key": "changed",

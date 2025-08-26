@@ -103,14 +103,8 @@ class SpeedometerDisplayer(DataDisplayer):
         Builds the UI for configuring the speedometer's appearance, including the dial background.
         """
         def build_dial_config(dialog, content_box, widgets, available_sources, panel_config):
-            # First, build the unified background UI
+            # --- FIX: The main UI is now built by DataPanel. This callback only needs to add the background section. ---
             build_background_config_ui(content_box, panel_config, widgets, dialog, prefix="speedo_", title="Dial Background")
-            
-            # Then, get the rest of the model
-            full_model = self.get_config_model()
-            
-            # And build the rest of the UI from that model
-            build_ui_from_model(content_box, panel_config, full_model, widgets)
         
         return build_dial_config
 
@@ -132,14 +126,21 @@ class SpeedometerDisplayer(DataDisplayer):
             self._animation_timer_id = None
             return GLib.SOURCE_REMOVE
 
+        needs_redraw = False
         diff = self._target_value - self._current_display_value
+        
         if abs(diff) < 0.1:
-            self._current_display_value = self._target_value
+            if self._current_display_value != self._target_value:
+                self._current_display_value = self._target_value
+                needs_redraw = True
         else:
             # Simple easing for smoother animation
             self._current_display_value += diff * 0.1
+            needs_redraw = True
 
-        self.widget.queue_draw()
+        if needs_redraw:
+            self.widget.queue_draw()
+            
         return GLib.SOURCE_CONTINUE
 
     def on_draw_speedometer(self, area, ctx, width, height):

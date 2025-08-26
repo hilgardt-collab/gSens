@@ -29,9 +29,27 @@ class DataSource(ABC):
         pass
 
     def get_display_string(self, value):
-        """Returns a formatted string representation of the data for display."""
+        """
+        Returns a formatted string representation of the data for display.
+        This base implementation is a safe fallback.
+        """
         if value is None: return "N/A"
-        return f"{value:.1f}"
+        
+        # --- FIX: The original implementation would crash if 'value' was a dictionary. ---
+        # This version safely attempts to get a numerical value first.
+        # If that fails, it falls back to a simple string representation.
+        try:
+            numerical_value = self.get_numerical_value(value)
+            if numerical_value is not None and isinstance(numerical_value, (int, float)):
+                return f"{numerical_value:.1f}"
+        except (TypeError, ValueError):
+            pass
+
+        # Fallback for non-numerical data or complex dicts
+        if isinstance(value, dict):
+             # Don't show a raw dictionary, return a placeholder
+             return "..." 
+        return str(value)
         
     def get_numerical_value(self, data):
         """
@@ -76,16 +94,13 @@ class DataSource(ABC):
     
     def get_configure_callback(self):
         """A custom callback to dynamically show/hide alarm options."""
-        # --- FIX: Add a placeholder for the 'prefix' argument to make the signature compatible ---
         def setup_dynamic_alarm_options(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
             config_prefix = self.alarm_config_prefix
             enable_widget = widgets.get(f"{config_prefix}enable_alarm")
             
-            # Find all other alarm widgets to hide/show them
             alarm_widgets_to_toggle = []
             for key in widgets:
                 if key.startswith(config_prefix) and key != f"{config_prefix}enable_alarm":
-                    # The parent of the widget is the Gtk.Box row
                     if widgets[key].get_parent():
                         alarm_widgets_to_toggle.append(widgets[key].get_parent())
 
@@ -96,7 +111,6 @@ class DataSource(ABC):
 
             if enable_widget:
                 enable_widget.connect("notify::active", on_alarm_toggled)
-                # Set initial visibility
                 GLib.idle_add(on_alarm_toggled, enable_widget, None)
 
         return setup_dynamic_alarm_options
