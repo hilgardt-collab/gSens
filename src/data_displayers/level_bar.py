@@ -173,12 +173,16 @@ class LevelBarDisplayer(DataDisplayer):
 
         return setup_dynamic_effects
 
-    def apply_styles(self):
-        super().apply_styles()
+    def _sync_state_with_config(self):
+        """Ensures internal state like segment_states matches the current config."""
         num_segments = int(self.config.get("level_bar_segment_count", 30))
         if self._last_segment_count != num_segments:
             self.segment_states = [{'is_on': False, 'off_timestamp': 0} for _ in range(num_segments)]
             self._last_segment_count = num_segments
+
+    def apply_styles(self):
+        super().apply_styles()
+        self._sync_state_with_config()
         
         if self.widget.get_realized(): self._start_animation_timer()
         self.widget.queue_draw()

@@ -4,7 +4,7 @@ import math
 import cairo
 import re
 import os
-from data_displayer import DataDisplayer
+from .combo_base import ComboBase  # Inherit from the new base class
 from config_dialog import ConfigOption, build_ui_from_model, get_config_from_widgets
 from utils import populate_defaults_from_model
 from ui_helpers import build_background_config_ui
@@ -14,36 +14,31 @@ gi.require_version("Pango", "1.0")
 gi.require_version("PangoCairo", "1.0")
 from gi.repository import Gtk, Gdk, GLib, Pango, PangoCairo, GdkPixbuf
 
-class ArcComboDisplayer(DataDisplayer):
+class ArcComboDisplayer(ComboBase): # Changed parent to ComboBase
     """
     A complex, 3D-effect displayer with a central radial gauge and multiple
     concentric arcs, each representing a different data source. Arcs can share
     the same ring if their angles do not overlap.
     """
     def __init__(self, panel_ref, config):
-        self.data_bundle = {}
         self._cached_center_pixbuf = None
         self._cached_image_path = None
         
         self._animation_timer_id = None
         self._arc_values = {}
 
+        # Call ComboBase's __init__ via super()
         super().__init__(panel_ref, config)
         populate_defaults_from_model(self.config, self._get_static_config_model())
 
         self.widget.connect("realize", self._start_animation_timer)
         self.widget.connect("unrealize", self._stop_animation_timer)
 
-    def _create_widget(self):
-        drawing_area = Gtk.DrawingArea(hexpand=True, vexpand=True)
-        drawing_area.set_draw_func(self.on_draw)
-        return drawing_area
+    # _create_widget is now inherited from ComboBase, so it's removed from here.
 
     def update_display(self, value):
-        if not self.panel_ref: 
-            return
-        if isinstance(value, dict):
-            self.data_bundle = value
+        # The base update_display is sufficient, but we override to add animation logic.
+        super().update_display(value) # This stores the data_bundle and queues a draw
 
         num_arcs = int(self.config.get("combo_arc_count", 5))
         for i in range(1, num_arcs + 1):
@@ -71,6 +66,8 @@ class ArcComboDisplayer(DataDisplayer):
 
     @staticmethod
     def get_config_model():
+        # Configuration is handled by the ComboDataSource, so the displayer
+        # only needs style options, which are handled in get_configure_callback.
         return {}
     
     @staticmethod
@@ -351,23 +348,17 @@ class ArcComboDisplayer(DataDisplayer):
         primary_text = center_data_packet.get('primary_label', '')
         display_string = center_data_packet.get('display_string', 'N/A')
         
-        # Default values
         value_text = "N/A"
         unit_text = ""
 
-        # Check if the display string looks like a time (contains a colon).
-        # This is more robust than checking the config key.
         if ":" in display_string:
             value_text = display_string
-            # The primary text (date) is handled separately.
         else:
-            # For other sources, try to split the numerical value from its unit.
             if display_string and display_string != "N/A":
                 match = re.match(r'\s*([+-]?\d+\.?\d*)\s*(.*)', display_string)
                 if match:
                     value_text, unit_text = match.group(1), match.group(2).strip()
                 else:
-                    # If no number is found, just display the whole string as the main value.
                     value_text = display_string
 
         show_primary = str(self.config.get("center_show_primary_text", "True")).lower() == 'true'

@@ -113,6 +113,7 @@ class ComboDataSource(DataSource):
                     child_config = {}
                     for key, value in panel_config.items():
                         if key.startswith(sub_opt_prefix):
+                            # --- BUG FIX: Use the correct variable name ---
                             unprefixed_key = key[len(sub_opt_prefix):]
                             child_config[unprefixed_key] = value
                     
@@ -204,6 +205,63 @@ class ComboDataSource(DataSource):
                     arc_combo.connect("changed", lambda c, cb=callback: cb(source_key=c.get_active_id()))
                     _rebuild_slot_config_ui(panel_config.get(slot_key, "none"), sub_config_box, prefix, dialog, widgets, available_sources, panel_config)
 
+        def _build_level_bar_config_ui(dialog, content_box, widgets, available_sources, panel_config, source_opts):
+            """Builds the configuration UI for the Level Bar Combo mode."""
+            bar_count_model = {"": [ConfigOption("number_of_bars", "spinner", "Number of Bars:", 3, 1, 12, 1, 0)]}
+            build_ui_from_model(content_box, panel_config, bar_count_model, widgets)
+            dialog.dynamic_models.append(bar_count_model)
+            
+            bar_notebook = Gtk.Notebook()
+            content_box.append(Gtk.Separator(margin_top=15, margin_bottom=5))
+            content_box.append(Gtk.Label(label="<b>Bar Data Sources</b>", use_markup=True, xalign=0))
+            content_box.append(bar_notebook)
+
+            bar_count_spinner = widgets["number_of_bars"]
+            bar_count_spinner.connect("value-changed", lambda s: _create_or_update_bar_tabs(s, bar_notebook, dialog, widgets, available_sources, panel_config, source_opts))
+            _create_or_update_bar_tabs(bar_count_spinner, bar_notebook, dialog, widgets, available_sources, panel_config, source_opts)
+
+        def _create_or_update_bar_tabs(spinner, notebook, dialog, widgets, available_sources, panel_config, source_opts):
+            """Dynamically adds or removes configuration tabs for each bar."""
+            count = spinner.get_value_as_int()
+            dialog.dynamic_models = [m for m in dialog.dynamic_models if not any(opt.key.startswith("bar") for section in m.values() for opt in section)]
+            while notebook.get_n_pages() > count: notebook.remove_page(-1)
+            
+            for i in range(1, count + 1):
+                if i > notebook.get_n_pages():
+                    scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
+                    scroll.set_min_content_height(300)
+                    
+                    tab_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
+                    scroll.set_child(tab_box)
+                    notebook.append_page(scroll, Gtk.Label(label=f"Bar {i}"))
+                    prefix, slot_key = f"bar{i}_", f"bar{i}_source"
+                    
+                    bar_source_model = {
+                        f"Bar {i} Data Source": [
+                            ConfigOption(slot_key, "dropdown", "Source:", "none", options_dict=source_opts),
+                            ConfigOption(f"{prefix}caption", "string", "Caption:", "", tooltip="Overrides the default source name. Used as the Primary Label.")
+                        ]
+                    }
+                    build_ui_from_model(tab_box, panel_config, bar_source_model, widgets)
+                    dialog.dynamic_models.append(bar_source_model)
+                    sub_config_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=20)
+                    tab_box.append(sub_config_box)
+                    
+                    bar_combo = widgets[slot_key]
+                    caption_entry = widgets[f"{prefix}caption"]
+                    
+                    def on_source_changed(combo, entry):
+                        if not entry.get_text():
+                            display_name = combo.get_active_text()
+                            if display_name and "None" not in display_name:
+                                entry.set_text(display_name)
+                    
+                    bar_combo.connect("changed", on_source_changed, caption_entry)
+                    
+                    callback = partial(_rebuild_slot_config_ui, parent_box=sub_config_box, prefix=prefix, dialog=dialog, widgets=widgets, available_sources=available_sources, panel_config=panel_config)
+                    bar_combo.connect("changed", lambda c, cb=callback: cb(source_key=c.get_active_id()))
+                    _rebuild_slot_config_ui(panel_config.get(slot_key, "none"), sub_config_box, prefix, dialog, widgets, available_sources, panel_config)
+
         def build_main_config_ui(dialog, content_box, widgets, available_sources, panel_config):
             source_opts = {"None": "none", **{info['name']: info['key'] for info in available_sources.values() if info['key'] != 'combo'}}
             mode = panel_config.get('combo_mode', 'arc')
@@ -227,6 +285,9 @@ class ComboDataSource(DataSource):
                 return all_values
             dialog.custom_value_getter = get_all_custom_values
             
-            _build_arc_config_ui(dialog, content_box, widgets, available_sources, panel_config, source_opts)
+            if mode == 'level_bar':
+                _build_level_bar_config_ui(dialog, content_box, widgets, available_sources, panel_config, source_opts)
+            else: # Default to arc
+                _build_arc_config_ui(dialog, content_box, widgets, available_sources, panel_config, source_opts)
 
         return build_main_config_ui
