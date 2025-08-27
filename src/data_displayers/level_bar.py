@@ -306,70 +306,69 @@ class LevelBarDisplayer(DataDisplayer):
                 ctx.set_source_rgba(color_s.red, color_s.green, color_s.blue, color_s.alpha)
                 ctx.move_to(current_x, s_y); PangoCairo.show_layout(ctx, layout_s)
 
-    def _draw_parallelogram(self, ctx, x, y, w, h, slant, is_vertical):
-        ctx.new_path()
-        if is_vertical: ctx.move_to(x, y); ctx.line_to(x + w, y); ctx.line_to(x + w + slant, y + h); ctx.line_to(x + slant, y + h)
-        else: ctx.move_to(x, y); ctx.line_to(x + w, y + slant); ctx.line_to(x + w, y + h + slant); ctx.line_to(x, y + h)
-        ctx.close_path()
-
     def draw_bar(self, ctx, bar_x, bar_y, bar_width, bar_height):
         if bar_width <= 0 or bar_height <= 0: return
         
-        num_segments = int(self.config.get("level_bar_segment_count", 30))
-        spacing, orientation, slant = float(self.config.get("level_bar_spacing", 2)), self.config.get("level_bar_orientation", "vertical"), float(self.config.get("level_bar_slant_px", 0))
+        slant = float(self.config.get("level_bar_slant_px", 0))
+        orientation = self.config.get("level_bar_orientation", "vertical")
         
+        # Adjust the drawing area to prevent cropping from the slant
+        if orientation == "vertical":
+            rect_width = bar_width - abs(slant)
+            rect_x = bar_x + abs(slant) / 2.0
+            rect_y = bar_y
+            rect_height = bar_height
+        else: # Horizontal
+            rect_height = bar_height - abs(slant)
+            rect_y = bar_y + abs(slant) / 2.0
+            rect_x = bar_x
+            rect_width = bar_width
+
+        if rect_width <= 0 or rect_height <= 0: return
+
+        ctx.save()
+        ctx.translate(rect_x, rect_y)
+
+        # Apply a shear transformation to the entire context
+        if orientation == "vertical":
+            if rect_height > 0:
+                tan_angle = slant / rect_height
+                matrix = cairo.Matrix(1, 0, tan_angle, 1, 0, 0)
+                ctx.transform(matrix)
+        else: # Horizontal
+            if rect_width > 0:
+                tan_angle = slant / rect_width
+                matrix = cairo.Matrix(1, tan_angle, 0, 1, 0, 0)
+                ctx.transform(matrix)
+
+        # Draw the background as a single rectangle
         bg_rgba = Gdk.RGBA(); bg_rgba.parse(self.config.get("level_bar_background_color"))
         ctx.set_source_rgba(bg_rgba.red, bg_rgba.green, bg_rgba.blue, bg_rgba.alpha)
-        self._draw_parallelogram(ctx, bar_x, bar_y, bar_width, bar_height, slant, orientation == "vertical"); ctx.fill()
+        ctx.rectangle(0, 0, rect_width, rect_height)
+        ctx.fill()
         
-        if spacing == 0:
-            on_grad_enabled = str(self.config.get("level_bar_on_gradient_enabled", "False")).lower() == 'true'
-            on_color1_str, on_color2_str, off_color_str = self.config.get("level_bar_on_color"), self.config.get("level_bar_on_color2"), self.config.get("level_bar_off_color")
-            on_ratio = self.current_on_level / num_segments if num_segments > 0 else 0
-            
-            if orientation == "vertical":
-                on_height, off_height = bar_height * on_ratio, bar_height - on_height
-                off_rgba = Gdk.RGBA(); off_rgba.parse(off_color_str)
-                ctx.set_source_rgba(off_rgba.red, off_rgba.green, off_rgba.blue, off_rgba.alpha)
-                self._draw_parallelogram(ctx, bar_x, bar_y, bar_width, off_height, slant, True); ctx.fill()
-                if on_height > 0:
-                    if on_grad_enabled:
-                        pat = cairo.LinearGradient(bar_x, bar_y + bar_height, bar_x, bar_y + off_height)
-                        c1, c2 = Gdk.RGBA(), Gdk.RGBA(); c1.parse(on_color1_str); c2.parse(on_color2_str)
-                        pat.add_color_stop_rgba(0, c1.red, c1.green, c1.blue, c1.alpha); pat.add_color_stop_rgba(1, c2.red, c2.green, c2.blue, c2.alpha)
-                        ctx.set_source(pat)
-                    else:
-                        on_rgba = Gdk.RGBA(); on_rgba.parse(on_color1_str); ctx.set_source_rgba(on_rgba.red, on_rgba.green, on_rgba.blue, on_rgba.alpha)
-                    self._draw_parallelogram(ctx, bar_x, bar_y + off_height, bar_width, on_height, slant, True); ctx.fill()
-            else: # Horizontal
-                on_width, off_width = bar_width * on_ratio, bar_width - on_ratio
-                off_rgba = Gdk.RGBA(); off_rgba.parse(off_color_str)
-                ctx.set_source_rgba(off_rgba.red, off_rgba.green, off_rgba.blue, off_rgba.alpha)
-                self._draw_parallelogram(ctx, bar_x + on_width, bar_y, off_width, bar_height, slant, False); ctx.fill()
-                if on_width > 0:
-                    if on_grad_enabled:
-                        pat = cairo.LinearGradient(bar_x, bar_y, bar_x + on_width, bar_y)
-                        c1, c2 = Gdk.RGBA(), Gdk.RGBA(); c1.parse(on_color1_str); c2.parse(on_color2_str)
-                        pat.add_color_stop_rgba(0, c1.red, c1.green, c1.blue, c1.alpha); pat.add_color_stop_rgba(1, c2.red, c2.green, c2.blue, c2.alpha)
-                        ctx.set_source(pat)
-                    else:
-                        on_rgba = Gdk.RGBA(); on_rgba.parse(on_color1_str); ctx.set_source_rgba(on_rgba.red, on_rgba.green, on_rgba.blue, on_rgba.alpha)
-                    self._draw_parallelogram(ctx, bar_x, bar_y, on_width, bar_height, slant, False); ctx.fill()
-            return
-
-        on_color_str, off_color_str = self.config.get("level_bar_on_color"), self.config.get("level_bar_off_color")
-        fade_enabled, fade_duration_s, now = str(self.config.get("level_bar_fade_enabled", "True")).lower() == 'true', float(self.config.get("level_bar_fade_duration_ms", 500))/1000.0, time.monotonic()
-        on_grad_enabled, on_pulse_enabled = str(self.config.get("level_bar_on_gradient_enabled", "False")).lower() == 'true', str(self.config.get("level_bar_on_pulse_enabled", "False")).lower() == 'true'
-        on_color1_str, on_color2_str = self.config.get("level_bar_on_color"), self.config.get("level_bar_on_color2")
-        pulse_color1_str, pulse_color2_str = self.config.get("level_bar_on_pulse_color1"), self.config.get("level_bar_on_pulse_color2")
+        # Get settings for drawing segments
+        num_segments = int(self.config.get("level_bar_segment_count", 30))
+        spacing = float(self.config.get("level_bar_spacing", 2))
+        on_color1_str = self.config.get("level_bar_on_color")
+        off_color_str = self.config.get("level_bar_off_color")
+        fade_enabled = str(self.config.get("level_bar_fade_enabled", "True")).lower() == 'true'
+        fade_duration_s = float(self.config.get("level_bar_fade_duration_ms", 500))/1000.0
+        now = time.monotonic()
+        on_grad_enabled = str(self.config.get("level_bar_on_gradient_enabled", "False")).lower() == 'true'
+        on_pulse_enabled = str(self.config.get("level_bar_on_pulse_enabled", "False")).lower() == 'true'
+        on_color2_str = self.config.get("level_bar_on_color2")
+        pulse_color1_str = self.config.get("level_bar_on_pulse_color1")
+        pulse_color2_str = self.config.get("level_bar_on_pulse_color2")
 
         if orientation == "vertical":
-            segment_height = (bar_height - (num_segments - 1) * spacing) / num_segments if num_segments > 0 else 0
-            if segment_height <= 0: return
+            segment_height = (rect_height - (num_segments - 1) * spacing) / num_segments if num_segments > 0 else 0
+            if segment_height <= 0: ctx.restore(); return
         else: # Horizontal
-            segment_width = (bar_width - (num_segments - 1) * spacing) / num_segments if num_segments > 0 else 0
-            if segment_width <= 0: return
+            segment_width = (rect_width - (num_segments - 1) * spacing) / num_segments if num_segments > 0 else 0
+            if segment_width <= 0: ctx.restore(); return
 
+        # Draw each segment as a simple rectangle (the transform handles the slant)
         for i in range(num_segments):
             base_color_str = on_color1_str
             if i < self.current_on_level: 
@@ -394,12 +393,14 @@ class LevelBarDisplayer(DataDisplayer):
             ctx.set_source_rgba(color_rgba.red, color_rgba.green, color_rgba.blue, color_rgba.alpha)
             
             if orientation == "vertical":
-                seg_y = bar_y + bar_height - (i + 1) * segment_height - i * spacing
-                self._draw_parallelogram(ctx, bar_x, seg_y, bar_width, segment_height, slant, True)
+                seg_y = rect_height - (i + 1) * segment_height - i * spacing
+                ctx.rectangle(0, seg_y, rect_width, segment_height)
             else:
-                seg_x = bar_x + i * (segment_width + spacing)
-                self._draw_parallelogram(ctx, seg_x, bar_y, segment_width, bar_height, slant, False)
+                seg_x = i * (segment_width + spacing)
+                ctx.rectangle(seg_x, 0, segment_width, rect_height)
             ctx.fill()
+        
+        ctx.restore()
 
     def close(self):
         self._stop_animation_timer(); super().close()
