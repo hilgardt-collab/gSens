@@ -38,16 +38,12 @@ def build_background_config_ui(parent_box, config, widgets, dialog_parent, prefi
     if not hasattr(dialog_parent, 'ui_models'):
         dialog_parent.ui_models = {}
     
-    # --- FIX: Store the model using a key that perfectly matches the prefix ---
-    # This ensures it can be retrieved correctly later.
     dialog_parent.ui_models[f'background_{prefix}'] = {title: list(bg_model.values())}
 
-    # Build the main type selector
     build_ui_from_model(parent_box, config, {"": [bg_model["bg_type"]]}, widgets)
     
     bg_type_combo = widgets[f"{prefix}bg_type"]
 
-    # --- Create containers for each background type ---
     solid_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=5)
     parent_box.append(solid_box)
     build_ui_from_model(solid_box, config, {"": [bg_model["bg_color"]]}, widgets)
@@ -64,7 +60,6 @@ def build_background_config_ui(parent_box, config, widgets, dialog_parent, prefi
     parent_box.append(image_box)
     build_ui_from_model(image_box, config, {"": [bg_model["background_image_path"], bg_model["background_image_style"], bg_model["background_image_alpha"]]}, widgets)
 
-    # --- Logic to show/hide the containers ---
     def on_bg_type_changed(combo):
         active_id = combo.get_active_id()
         solid_box.set_visible(active_id == "solid")
@@ -77,10 +72,6 @@ def build_background_config_ui(parent_box, config, widgets, dialog_parent, prefi
 
 
 class ScrollingLabel(Gtk.DrawingArea):
-    """
-    A Gtk.DrawingArea that displays text and automatically scrolls it
-    horizontally if it's wider than the allocated space.
-    """
     SCROLL_PIXELS_PER_TICK = 1
     SCROLL_TICK_INTERVAL_MS = 50
 
@@ -102,20 +93,17 @@ class ScrollingLabel(Gtk.DrawingArea):
         self.connect("unrealize", self._on_unrealize)
 
     def do_size_allocate(self, width, height, baseline):
-        """Overrides the virtual method to handle size allocation changes."""
         Gtk.Widget.do_size_allocate(self, width, height, baseline)
         if self._last_width != width:
             self._last_width = width
             self._setup_scrolling()
 
     def _on_unrealize(self, widget):
-        """Ensure the timer is stopped when the widget is destroyed."""
         if self._scroll_timer_id is not None:
             GLib.source_remove(self._scroll_timer_id)
             self._scroll_timer_id = None
 
     def set_text(self, text):
-        """Sets the text to be displayed."""
         text = text if text is not None else ""
         if self._text == text:
             return
@@ -129,11 +117,9 @@ class ScrollingLabel(Gtk.DrawingArea):
         self.queue_resize()
 
     def get_text(self):
-        """Returns the current text of the label."""
         return self._text
 
     def set_font_description(self, font_desc):
-        """Sets the Pango.FontDescription for the text."""
         self._font_desc = font_desc
         if self._pango_layout:
             self._pango_layout.set_font_description(self._font_desc)
@@ -143,15 +129,10 @@ class ScrollingLabel(Gtk.DrawingArea):
         self.queue_resize()
 
     def set_color(self, rgba):
-        """Sets the Gdk.RGBA color for the text."""
         self._rgba = rgba
         self.queue_draw()
 
     def _update_layout_height(self):
-        """
-        Calculates and sets the widget's height based on the font,
-        not the current text, to ensure it has a height even when empty.
-        """
         dummy_layout = self.create_pango_layout("Mg")
         if dummy_layout:
             dummy_layout.set_font_description(self._font_desc)
@@ -161,7 +142,6 @@ class ScrollingLabel(Gtk.DrawingArea):
             self.set_content_height(20)
 
     def _setup_scrolling(self):
-        """Checks if scrolling is needed and starts/stops the timer."""
         if not self._pango_layout or not self.get_realized():
             return
 
@@ -186,7 +166,6 @@ class ScrollingLabel(Gtk.DrawingArea):
             self.queue_draw()
 
     def _scroll_tick(self):
-        """Callback to advance the scroll position."""
         if not self.is_scrolling:
             self._scroll_timer_id = None
             return GLib.SOURCE_REMOVE
@@ -200,7 +179,6 @@ class ScrollingLabel(Gtk.DrawingArea):
         return GLib.SOURCE_CONTINUE
 
     def on_draw(self, area, ctx, width, height):
-        """The main drawing function."""
         if self._pango_layout:
             _ink, logical = self._pango_layout.get_pixel_extents()
 
@@ -231,10 +209,6 @@ class ScrollingLabel(Gtk.DrawingArea):
             PangoCairo.show_layout(ctx, self._pango_layout)
 
 class CustomDialog(Gtk.Window):
-    """
-    A custom, reusable dialog class. Can be run modally (blocking) or
-    non-modally (non-blocking).
-    """
     def __init__(self, parent=None, title="", primary_text=None, secondary_text=None, icon_name=None, modal=True, **kwargs):
         super().__init__(**kwargs)
 
@@ -288,6 +262,14 @@ class CustomDialog(Gtk.Window):
 
     def get_content_area(self):
         return self._content_area
+
+    def respond(self, response_id):
+        if not self.is_modal:
+            print("Warning: respond() called on a non-modal dialog.")
+            return
+        self._response = response_id
+        if self._loop and self._loop.is_running():
+            self._loop.quit()
 		
     def run(self):
         if not self.is_modal:
@@ -301,17 +283,11 @@ class CustomDialog(Gtk.Window):
         return response
 
     def _on_close_request(self, window):
-        self._response = Gtk.ResponseType.CANCEL
-        if self.is_modal and self._loop and self._loop.is_running():
-            self._loop.quit()
-        return False
+        self.respond(Gtk.ResponseType.CANCEL)
+        return True
 
     def _on_button_clicked(self, button, response_id):
-        if not self.is_modal:
-            return
-        self._response = response_id
-        if self._loop and self._loop.is_running():
-            self._loop.quit()
+        self.respond(response_id)
 
     def add_button(self, label, response_id):
         button = Gtk.Button.new_with_mnemonic(label)

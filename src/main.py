@@ -69,14 +69,14 @@ def discover_and_cache_sensors():
     print("Sensor discovery complete.")
 
 SOURCE_METADATA = sorted([
-    {'key': 'analog_clock', 'class_name': 'AnalogClockDataSource', 'name': 'Clock', "displayers": ["analog_clock", "text"], "default_size": (4, 4)},
-    {'key': 'combo', 'class_name': 'ComboDataSource', 'name': 'Combo Panel', "displayers": ["combo"], "default_size": (6, 6)},
-    {'key': 'cpu', 'class_name': 'CPUDataSource', 'name': 'CPU Monitor', "displayers": ["text", "graph", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (4, 4)},
-    {'key': 'disk_usage', 'class_name': 'DiskUsageDataSource', 'name': 'Disk Usage', "displayers": ["text", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (3, 3)},
-    {'key': 'fan_speed', 'class_name': 'FanSpeedDataSource', 'name': 'Fan Speed', "displayers": ["text", "graph", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (4, 3)},
-    {'key': 'gpu', 'class_name': 'GPUDataSource', 'name': 'GPU Monitor', "displayers": ["text", "graph", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (4, 4)},
-    {'key': 'memory_usage', 'class_name': 'MemoryUsageDataSource', 'name': 'Memory Usage', "displayers": ["text", "graph", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (3, 3)},
-    {'key': 'system_temp', 'class_name': 'SystemTempDataSource', 'name': 'System Temperature', "displayers": ["graph", "text", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (4, 4)},
+    {'key': 'analog_clock', 'class_name': 'AnalogClockDataSource', 'name': 'Clock', "displayers": ["analog_clock", "text"], "default_size": (16, 16)},
+    {'key': 'combo', 'class_name': 'ComboDataSource', 'name': 'Combo Panel', "displayers": ["combo"], "default_size": (16, 16)},
+    {'key': 'cpu', 'class_name': 'CPUDataSource', 'name': 'CPU Monitor', "displayers": ["text", "graph", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (16, 16)},
+    {'key': 'disk_usage', 'class_name': 'DiskUsageDataSource', 'name': 'Disk Usage', "displayers": ["text", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (16, 16)},
+    {'key': 'fan_speed', 'class_name': 'FanSpeedDataSource', 'name': 'Fan Speed', "displayers": ["text", "graph", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (16, 16)},
+    {'key': 'gpu', 'class_name': 'GPUDataSource', 'name': 'GPU Monitor', "displayers": ["text", "graph", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (16, 16)},
+    {'key': 'memory_usage', 'class_name': 'MemoryUsageDataSource', 'name': 'Memory Usage', "displayers": ["text", "graph", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (16, 16)},
+    {'key': 'system_temp', 'class_name': 'SystemTempDataSource', 'name': 'System Temperature', "displayers": ["graph", "text", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (16, 16)},
 ], key=lambda x: x['name'])
 
 DISPLAYER_METADATA = sorted([
@@ -106,12 +106,12 @@ for meta in DISPLAYER_METADATA:
         AVAILABLE_DISPLAYERS[meta['key']]['class'] = ALL_DISPLAYER_CLASSES[class_name]
 
 DEFAULT_PANEL_LAYOUT = [
-    {'type': 'cpu', 'displayer_type': 'arc_gauge', 'width': '4', 'height': '4', 'grid_x': '0', 'grid_y': '0', 'title_text': 'CPU Usage', 'cpu_metric_to_display': 'usage'},
-    {'type': 'cpu', 'displayer_type': 'arc_gauge', 'width': '4', 'height': '4', 'grid_x': '4', 'grid_y': '0', 'title_text': 'CPU Temperature', 'cpu_metric_to_display': 'temperature'},
-    {'type': 'analog_clock', 'displayer_type': 'analog_clock', 'width': '4', 'height': '4', 'grid_x': '8', 'grid_y': '0', 'title_text': 'Clock'},
-    {'type': 'memory_usage', 'displayer_type': 'arc_gauge', 'width': '3', 'height': '3', 'grid_x': '0', 'grid_y': '4', 'title_text': 'RAM'},
-    {'type': 'disk_usage', 'displayer_type': 'arc_gauge', 'width': '3', 'height': '3', 'grid_x': '3', 'grid_y': '4', 'title_text': 'Disk'},
-    {'type': 'gpu', 'displayer_type': 'level_bar', 'width': '2', 'height': '7', 'grid_x': '12', 'grid_y': '0', 'title_text': 'GPU TEMP', 'gpu_metric_to_display': 'temperature'},
+    {'type': 'cpu', 'displayer_type': 'arc_gauge', 'width': '16', 'height': '16', 'grid_x': '0', 'grid_y': '0', 'title_text': 'CPU Usage', 'cpu_metric_to_display': 'usage'},
+    {'type': 'cpu', 'displayer_type': 'arc_gauge', 'width': '16', 'height': '16', 'grid_x': '16', 'grid_y': '0', 'title_text': 'CPU Temperature', 'cpu_metric_to_display': 'temperature'},
+    {'type': 'analog_clock', 'displayer_type': 'analog_clock', 'width': '16', 'height': '16', 'grid_x': '32', 'grid_y': '0', 'title_text': 'Clock'},
+    {'type': 'memory_usage', 'displayer_type': 'arc_gauge', 'width': '16', 'height': '16', 'grid_x': '0', 'grid_y': '16', 'title_text': 'RAM'},
+    {'type': 'disk_usage', 'displayer_type': 'arc_gauge', 'width': '16', 'height': '16', 'grid_x': '16', 'grid_y': '16', 'title_text': 'Disk'},
+    {'type': 'gpu', 'displayer_type': 'level_bar', 'width': '16', 'height': '16', 'grid_x': '32', 'grid_y': '16', 'title_text': 'GPU TEMP', 'gpu_metric_to_display': 'temperature'},
 ]
 
 class MainWindow(Gtk.ApplicationWindow):
@@ -195,7 +195,7 @@ class MainWindow(Gtk.ApplicationWindow):
 
     def load_window_dimensions(self):
         window_cfg = config_manager.get_window_config()
-        self.set_default_size(int(window_cfg.get("width", CELL_SIZE * 16)), int(window_cfg.get("height", CELL_SIZE * 12)))
+        self.set_default_size(int(window_cfg.get("width", CELL_SIZE * 48)), int(window_cfg.get("height", CELL_SIZE * 32)))
 
     def on_add_panel_activate(self, *args):
         """Opens the new Panel Builder dialog."""

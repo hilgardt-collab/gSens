@@ -348,13 +348,27 @@ class ArcComboDisplayer(DataDisplayer):
         self._draw_center_caption(ctx, cx, cy, radius)
 
         center_data_packet = self.data_bundle.get('center_source', {})
-        primary_text, value_text, unit_text = center_data_packet.get('primary_label', ''), "N/A", ""
-        
+        primary_text = center_data_packet.get('primary_label', '')
         display_string = center_data_packet.get('display_string', 'N/A')
-        if display_string and display_string != "N/A":
-            match = re.match(r'\s*([+-]?\d+\.?\d*)\s*(.*)', display_string)
-            if match: value_text, unit_text = match.group(1), match.group(2).strip()
-            else: value_text = display_string
+        
+        # Default values
+        value_text = "N/A"
+        unit_text = ""
+
+        # Check if the display string looks like a time (contains a colon).
+        # This is more robust than checking the config key.
+        if ":" in display_string:
+            value_text = display_string
+            # The primary text (date) is handled separately.
+        else:
+            # For other sources, try to split the numerical value from its unit.
+            if display_string and display_string != "N/A":
+                match = re.match(r'\s*([+-]?\d+\.?\d*)\s*(.*)', display_string)
+                if match:
+                    value_text, unit_text = match.group(1), match.group(2).strip()
+                else:
+                    # If no number is found, just display the whole string as the main value.
+                    value_text = display_string
 
         show_primary = str(self.config.get("center_show_primary_text", "True")).lower() == 'true'
         show_secondary = str(self.config.get("center_show_secondary_text", "True")).lower() == 'true'

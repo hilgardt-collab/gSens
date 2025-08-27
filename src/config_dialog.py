@@ -11,7 +11,7 @@ class ConfigOption:
                  min_val=None, max_val=None, step=None, digits=0, 
                  options_dict=None, tooltip=None, file_filters=None):
         self.key = key
-        # Valid types: "string", "bool", "color", "font", "scale", "spinner", "dropdown", "file"
+        # Valid types: "string", "bool", "color", "font", "scale", "spinner", "dropdown", "file", "timezone_selector"
         self.type = option_type 
         self.label = label
         self.default = default
@@ -134,6 +134,19 @@ def build_ui_from_model(parent_box, config, model, widgets=None):
                 
                 row.append(file_box)
 
+            elif option.type == "timezone_selector":
+                tz_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, hexpand=True)
+                
+                widget = Gtk.Entry(text=config.get(option.key, option.default), hexpand=True, editable=False)
+                tz_box.append(widget)
+                
+                choose_button = Gtk.Button(label="Choose…")
+                widgets[f"{option.key}_button"] = choose_button # Store button for callback
+                tz_box.append(choose_button)
+                
+                row.append(tz_box)
+
+
             if widget:
                 if option.tooltip:
                     widget.set_tooltip_text(option.tooltip)
@@ -141,7 +154,7 @@ def build_ui_from_model(parent_box, config, model, widgets=None):
                 if option.type == "scale":
                     container.append(widget)
                     parent_box.append(container)
-                elif option.type != "file":
+                elif option.type not in ["file", "timezone_selector"]:
                     row.append(widget)
 
                 if option.type != "scale":
@@ -177,12 +190,16 @@ def get_config_from_widgets(widgets, models_list):
                 all_option_defs[option.key] = option
 
     for key, widget in widgets.items():
+        # Skip derivative widgets like buttons
+        if key.endswith("_button"):
+            continue
+
         option_def = all_option_defs.get(key)
         
         if not option_def:
             continue
 
-        if option_def.type == "string" or option_def.type == "file":
+        if option_def.type in ["string", "file", "timezone_selector"]:
             new_config[key] = widget.get_text()
         elif option_def.type == "bool":
             new_config[key] = str(widget.get_active())

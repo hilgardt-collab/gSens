@@ -1,4 +1,3 @@
-
 # data_sources/gpu_source.py
 from data_source import DataSource
 from config_dialog import ConfigOption, build_ui_from_model

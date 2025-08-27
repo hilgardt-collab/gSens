@@ -1,13 +1,14 @@
 # gpu_managers.py
-# Provides a unified interface for GPU monitoring, supporting both NVIDIA and AMD.
+# Provides a unified interface for GPU monitoring, supporting NVIDIA, AMD, and Intel.
 
 from nvidia_manager import nvml_manager
 from amd_manager import amd_manager
+from intel_manager import intel_manager
 
 class GPUManager:
     """
     A unified singleton manager that detects and delegates to the appropriate
-    vendor-specific manager (NVIDIA's NVMLManager or the AMDManager).
+    vendor-specific manager (NVIDIA, AMD, or Intel).
     """
     _instance = None
 
@@ -23,6 +24,7 @@ class GPUManager:
         
         self.nvml_manager = nvml_manager
         self.amd_manager = amd_manager
+        self.intel_manager = intel_manager
         
         self.all_gpus = []
         self.device_count = 0
@@ -32,6 +34,7 @@ class GPUManager:
         """Initializes all available vendor managers and builds a unified device list."""
         self.nvml_manager.init()
         self.amd_manager.init()
+        self.intel_manager.init()
         
         # Build a unified list of all detected GPUs
         if self.nvml_manager.nvml_is_available:
@@ -41,6 +44,10 @@ class GPUManager:
         if self.amd_manager.amd_gpus_found:
             for i in range(self.amd_manager.device_count):
                 self.all_gpus.append({"vendor": "amd", "original_index": i})
+
+        if self.intel_manager.intel_gpus_found:
+            for i in range(self.intel_manager.device_count):
+                self.all_gpus.append({"vendor": "intel", "original_index": i})
                 
         self.device_count = len(self.all_gpus)
         print(f"Unified GPUManager initialized. Found {self.device_count} total GPU(s).")
@@ -48,13 +55,14 @@ class GPUManager:
     def shutdown(self):
         """Shuts down all vendor-specific managers."""
         self.nvml_manager.shutdown()
-        # AMD manager does not require a shutdown call
+        # AMD and Intel managers do not require a shutdown call
 
     def get_gpu_names(self):
         """Returns a dictionary of combined GPU indices and their names."""
         names = {}
         nvidia_names = self.nvml_manager.get_gpu_names()
         amd_names = self.amd_manager.get_gpu_names()
+        intel_names = self.intel_manager.get_gpu_names()
         
         current_index = 0
         for i in range(self.nvml_manager.device_count):
@@ -67,6 +75,10 @@ class GPUManager:
             
         for i in range(self.amd_manager.device_count):
             names[current_index] = amd_names.get(i, "Unknown AMD GPU")
+            current_index += 1
+
+        for i in range(self.intel_manager.device_count):
+            names[current_index] = intel_names.get(i, "Unknown Intel GPU")
             current_index += 1
             
         return names
@@ -84,6 +96,8 @@ class GPUManager:
             return self.nvml_manager.get_temperature(original_index)
         elif vendor == "amd":
             return self.amd_manager.get_temperature(original_index)
+        elif vendor == "intel":
+            return self.intel_manager.get_temperature(original_index)
         return None
 
     def get_utilization(self, gpu_index):
@@ -93,6 +107,8 @@ class GPUManager:
             return self.nvml_manager.get_utilization(original_index)
         elif vendor == "amd":
             return self.amd_manager.get_utilization(original_index)
+        elif vendor == "intel":
+            return self.intel_manager.get_utilization(original_index)
         return None
 
     def get_graphics_clock(self, gpu_index):
@@ -102,6 +118,8 @@ class GPUManager:
             return self.nvml_manager.get_graphics_clock(original_index)
         elif vendor == "amd":
             return self.amd_manager.get_graphics_clock(original_index)
+        elif vendor == "intel":
+            return self.intel_manager.get_graphics_clock(original_index)
         return None
 
     def get_vram_usage(self, gpu_index):
@@ -111,6 +129,8 @@ class GPUManager:
             return self.nvml_manager.get_vram_usage(original_index)
         elif vendor == "amd":
             return self.amd_manager.get_vram_usage(original_index)
+        elif vendor == "intel":
+            return self.intel_manager.get_vram_usage(original_index)
         return None
 
     def get_power_usage(self, gpu_index):
@@ -118,14 +138,14 @@ class GPUManager:
         vendor, original_index = self._get_gpu_info(gpu_index)
         if vendor == "nvidia":
             return self.nvml_manager.get_power_usage(original_index)
-        return None # AMD sysfs does not reliably provide this
+        return None # AMD/Intel sysfs does not reliably provide this
 
     def get_fan_speed(self, gpu_index):
         """Gets fan speed, delegating to the correct manager."""
         vendor, original_index = self._get_gpu_info(gpu_index)
         if vendor == "nvidia":
             return self.nvml_manager.get_fan_speed(original_index)
-        return None # AMD sysfs does not reliably provide this
+        return None # AMD/Intel sysfs does not reliably provide this
 
     def get_running_processes_count(self, gpu_index):
         """Gets running processes count, delegating to the correct manager."""
