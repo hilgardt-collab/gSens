@@ -14,7 +14,7 @@ from gi.repository import Gtk, Gdk, GLib, Pango, PangoCairo
 class LevelBarComboDisplayer(ComboBase):
     """
     A displayer that arranges a configurable number of animated level bars,
-    each tied to a different data source.
+    each tied to a different data source, with individual styling for each bar.
     """
     def __init__(self, panel_ref, config):
         self._animation_timer_id = None
@@ -57,46 +57,82 @@ class LevelBarComboDisplayer(ComboBase):
 
     @staticmethod
     def get_config_model():
-        base_model = LevelBarDisplayer.get_config_model()
-        base_model.pop("Level Bar Range", None)
-
-        combo_model = {
-            "Overall Layout": [
-                ConfigOption("combo_bar_orientation", "dropdown", "Bar Orientation:", "vertical", 
-                             options_dict={"Vertical": "vertical", "Horizontal": "horizontal"}),
-                ConfigOption("combo_bar_spacing", "spinner", "Spacing Between Bars (px):", 10, 0, 50, 1, 0),
-                ConfigOption("combo_animation_enabled", "bool", "Enable Bar Animation:", "True")
-            ]
-        }
-
-        for section, options in base_model.items():
-            if section == "Overall Layout": continue 
-
-            prefixed_options = []
-            for opt in options:
-                prefixed_options.append(ConfigOption(
-                    f"combo_{opt.key}", opt.type, opt.label, opt.default, 
-                    opt.min_val, opt.max_val, opt.step, opt.digits, 
-                    opt.options_dict, opt.tooltip, opt.file_filters
-                ))
-            
-            combo_model[section] = prefixed_options
-            
-        return combo_model
+        # --- BUG FIX: Return an empty model here. ---
+        # The entire UI for this complex displayer is built by the custom
+        # configure_callback to prevent duplicate widget creation by the DataPanel.
+        return {}
 
     def get_configure_callback(self):
-        """Builds the UI for the Display tab."""
+        """Builds the UI for the Display tab with per-bar styling."""
         def build_display_ui(dialog, content_box, widgets, available_sources, panel_config):
-            model = self.get_config_model()
+            # --- BUG FIX: Define the model INSIDE the callback ---
+            # This ensures it's only built once, by this callback.
+            model = {
+                "Overall Layout": [
+                    ConfigOption("combo_bar_orientation", "dropdown", "Bar Orientation:", "vertical", 
+                                 options_dict={"Vertical": "vertical", "Horizontal": "horizontal"}),
+                    ConfigOption("combo_bar_spacing", "spinner", "Spacing Between Bars (px):", 10, 0, 50, 1, 0),
+                    ConfigOption("combo_animation_enabled", "bool", "Enable Bar Animation:", "True")
+                ]
+            }
+
+            # 1. Build the static layout controls
             dialog.dynamic_models.append(model)
             build_ui_from_model(content_box, panel_config, model, widgets)
             
-            unprefixed_widgets = {k.replace('combo_', ''): v for k, v in widgets.items() if k.startswith('combo_')}
-            
-            if hasattr(self._drawer, 'get_configure_callback'):
-                cb = self._drawer.get_configure_callback()
-                if cb:
-                    cb(dialog, content_box, unprefixed_widgets, available_sources, panel_config)
+            content_box.append(Gtk.Separator(margin_top=15, margin_bottom=5))
+            content_box.append(Gtk.Label(label="<b>Individual Bar Styles</b>", use_markup=True, xalign=0))
+
+            # 2. Create a notebook for per-bar styles
+            style_notebook = Gtk.Notebook()
+            content_box.append(style_notebook)
+
+            # 3. Helper function to create the model for a single bar's style tab
+            def get_bar_style_model(i):
+                base_model = LevelBarDisplayer.get_config_model()
+                prefixed_model = {}
+                for section, options in base_model.items():
+                    # We don't need these per-bar, they are data-driven
+                    if section in ["Level Bar Range"]:
+                        continue
+                    
+                    prefixed_options = []
+                    for opt in options:
+                        prefixed_options.append(ConfigOption(
+                            f"bar{i}_{opt.key}", opt.type, opt.label, opt.default, 
+                            opt.min_val, opt.max_val, opt.step, opt.digits, 
+                            opt.options_dict, opt.tooltip, opt.file_filters
+                        ))
+                    prefixed_model[section] = prefixed_options
+                return prefixed_model
+
+            # 4. Function to dynamically create/remove style tabs
+            def build_bar_style_tabs(spinner):
+                count = spinner.get_value_as_int()
+                
+                # Remove old models to prevent key conflicts
+                dialog.dynamic_models = [m for m in dialog.dynamic_models if not any(opt.key.startswith("bar") for s in m.values() for opt in s)]
+                
+                while style_notebook.get_n_pages() > count:
+                    style_notebook.remove_page(-1)
+                
+                for i in range(1, count + 1):
+                    if i > style_notebook.get_n_pages():
+                        scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
+                        tab_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
+                        scroll.set_child(tab_box)
+                        style_notebook.append_page(scroll, Gtk.Label(label=f"Style {i}"))
+                        
+                        bar_model = get_bar_style_model(i)
+                        populate_defaults_from_model(panel_config, bar_model)
+                        build_ui_from_model(tab_box, panel_config, bar_model, widgets)
+                        dialog.dynamic_models.append(bar_model)
+
+            # 5. Connect to the 'number_of_bars' spinner from the Data Source tab
+            bar_count_spinner = widgets.get("number_of_bars")
+            if bar_count_spinner:
+                bar_count_spinner.connect("value-changed", build_bar_style_tabs)
+                GLib.idle_add(build_bar_style_tabs, bar_count_spinner)
 
         return build_display_ui
 
@@ -166,10 +202,15 @@ class LevelBarComboDisplayer(ComboBase):
             source_key = f"{bar_key}_source"
             data_packet = self.data_bundle.get(source_key, {})
             
-            drawer_config = self.config.copy()
+            # --- BUG FIX: Populate a clean config with defaults first ---
+            drawer_config = {}
+            populate_defaults_from_model(drawer_config, LevelBarDisplayer.get_config_model())
+
+            # Then, override with per-bar settings from the main config
+            bar_prefix = f"bar{i}_"
             for key, value in self.config.items():
-                if key.startswith('combo_'):
-                    drawer_config[key.replace('combo_', '')] = value
+                if key.startswith(bar_prefix):
+                    drawer_config[key.replace(bar_prefix, '')] = value
             
             drawer_config['level_min_value'] = data_packet.get('min_value', 0.0)
             drawer_config['level_max_value'] = data_packet.get('max_value', 100.0)
@@ -183,7 +224,7 @@ class LevelBarComboDisplayer(ComboBase):
             current_animated_val = self._bar_values.get(bar_key, {}).get('current', 0.0)
             self._drawer.current_value = current_animated_val
             
-            min_v, max_v = drawer_config['level_min_value'], drawer_config['level_max_value']
+            min_v, max_v = drawer_config.get('level_min_value', 0.0), drawer_config.get('level_max_value', 100.0)
             v_range = max_v - min_v if max_v > min_v else 1
             num_segments = int(drawer_config.get("level_bar_segment_count", 30))
             
