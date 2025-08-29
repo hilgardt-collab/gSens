@@ -254,6 +254,8 @@ class PanelBuilderDialog:
         if self.selected_source_key == 'combo':
             if self.selected_displayer_key == 'level_bar_combo':
                 final_config['combo_mode'] = 'level_bar'
+            elif self.selected_displayer_key == 'lcars_combo':
+                final_config['combo_mode'] = 'lcars'
             else: # Default to arc combo
                 final_config['combo_mode'] = 'arc'
         

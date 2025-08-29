@@ -6,12 +6,18 @@ import uuid
 import importlib
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version('GdkPixbuf', '2.0')
 from gi.repository import Gtk, Gio, GLib, Gdk, GdkPixbuf
 
+# --- Centralized Module & Data Loading ---
+import module_registry
+module_registry.discover_and_load_modules()
+from module_registry import AVAILABLE_DATA_SOURCES, AVAILABLE_DISPLAYERS, ALL_SOURCE_CLASSES
+# -----------------------------------------
 
 from config_manager import config_manager
 from grid_layout_manager import GridLayoutManager, CELL_SIZE
@@ -20,91 +26,6 @@ from ui_helpers import CustomDialog
 from panel_builder_dialog import PanelBuilderDialog
 from data_panel import DataPanel
 from gpu_managers import gpu_manager
-from sensor_cache import SENSOR_CACHE
-
-# --- Dynamic Module Loading ---
-
-def load_modules_from_directory(directory, base_class, target_dict):
-    """Dynamically loads modules and populates a target dictionary mapping ClassName to ClassObject."""
-    dir_path = os.path.join(APP_DIR, directory)
-    if not os.path.isdir(dir_path):
-        return
-        
-    for filename in os.listdir(dir_path):
-        if filename.endswith(".py") and not filename.startswith("__"):
-            module_name = filename[:-3]
-            module_path = f"{directory}.{module_name}"
-            try:
-                module = importlib.import_module(module_path)
-                for attr_name in dir(module):
-                    attr = getattr(module, attr_name)
-                    if isinstance(attr, type) and issubclass(attr, base_class) and attr is not base_class:
-                        target_dict[attr_name] = attr
-            except ImportError as e:
-                print(f"Error importing module {module_path}: {e}")
-
-
-# Base classes for dynamic loading
-from data_source import DataSource
-from data_displayer import DataDisplayer
-
-# Dictionaries to hold the dynamically loaded classes
-ALL_SOURCE_CLASSES = {}
-ALL_DISPLAYER_CLASSES = {}
-load_modules_from_directory('data_sources', DataSource, ALL_SOURCE_CLASSES)
-load_modules_from_directory('data_displayers', DataDisplayer, ALL_DISPLAYER_CLASSES)
-
-def discover_and_cache_sensors():
-    """
-    Calls the static discovery methods on relevant data source classes
-    and stores the results in the global SENSOR_CACHE.
-    """
-    print("Discovering and caching hardware sensors...")
-    if 'CPUDataSource' in ALL_SOURCE_CLASSES:
-        SENSOR_CACHE['cpu_temp'] = ALL_SOURCE_CLASSES['CPUDataSource']._discover_cpu_temp_sensors_statically()
-    if 'FanSpeedDataSource' in ALL_SOURCE_CLASSES:
-        SENSOR_CACHE['fan_speed'] = ALL_SOURCE_CLASSES['FanSpeedDataSource']._discover_fans_statically()
-    if 'SystemTempDataSource' in ALL_SOURCE_CLASSES:
-        SENSOR_CACHE['system_temp'] = ALL_SOURCE_CLASSES['SystemTempDataSource']._discover_temp_sensors_statically()
-    print("Sensor discovery complete.")
-
-SOURCE_METADATA = sorted([
-    {'key': 'analog_clock', 'class_name': 'AnalogClockDataSource', 'name': 'Clock', "displayers": ["analog_clock", "text"], "default_size": (16, 16)},
-    {'key': 'combo', 'class_name': 'ComboDataSource', 'name': 'Combo Panel', "displayers": ["combo", "level_bar_combo"], "default_size": (16, 16)},
-    {'key': 'cpu', 'class_name': 'CPUDataSource', 'name': 'CPU Monitor', "displayers": ["text", "graph", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (16, 16)},
-    {'key': 'disk_usage', 'class_name': 'DiskUsageDataSource', 'name': 'Disk Usage', "displayers": ["text", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (16, 16)},
-    {'key': 'fan_speed', 'class_name': 'FanSpeedDataSource', 'name': 'Fan Speed', "displayers": ["text", "graph", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (16, 16)},
-    {'key': 'gpu', 'class_name': 'GPUDataSource', 'name': 'GPU Monitor', "displayers": ["text", "graph", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (16, 16)},
-    {'key': 'memory_usage', 'class_name': 'MemoryUsageDataSource', 'name': 'Memory Usage', "displayers": ["text", "graph", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (16, 16)},
-    {'key': 'system_temp', 'class_name': 'SystemTempDataSource', 'name': 'System Temperature', "displayers": ["graph", "text", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (16, 16)},
-], key=lambda x: x['name'])
-
-DISPLAYER_METADATA = sorted([
-    {'key': 'analog_clock', 'class_name': 'AnalogClockDisplayer', 'name': 'Analog Clock'},
-    {'key': 'arc_gauge', 'class_name': 'ArcGaugeDisplayer', 'name': 'Arc Gauge'},
-    {'key': 'bar', 'class_name': 'BarDisplayer', 'name': 'Bar Chart'},
-    {'key': 'combo', 'class_name': 'ArcComboDisplayer', 'name': 'Combo (Arcs)'},
-    {'key': 'level_bar_combo', 'class_name': 'LevelBarComboDisplayer', 'name': 'Combo (Level Bars)'},
-    {'key': 'graph', 'class_name': 'GraphDisplayer', 'name': 'Graph'},
-    {'key': 'indicator', 'class_name': 'IndicatorDisplayer', 'name': 'Indicator'},
-    {'key': 'level_bar', 'class_name': 'LevelBarDisplayer', 'name': 'Level Bar'},
-    {'key': 'speedometer', 'class_name': 'SpeedometerDisplayer', 'name': 'Speedometer'},
-    {'key': 'text', 'class_name': 'TextDisplayer', 'name': 'Text'},
-], key=lambda x: x['name'])
-
-AVAILABLE_DATA_SOURCES = {}
-for meta in SOURCE_METADATA:
-    class_name = meta['class_name']
-    if class_name in ALL_SOURCE_CLASSES:
-        AVAILABLE_DATA_SOURCES[meta['key']] = meta.copy()
-        AVAILABLE_DATA_SOURCES[meta['key']]['class'] = ALL_SOURCE_CLASSES[class_name]
-
-AVAILABLE_DISPLAYERS = {}
-for meta in DISPLAYER_METADATA:
-    class_name = meta['class_name']
-    if class_name in ALL_DISPLAYER_CLASSES:
-        AVAILABLE_DISPLAYERS[meta['key']] = meta.copy()
-        AVAILABLE_DISPLAYERS[meta['key']]['class'] = ALL_DISPLAYER_CLASSES[class_name]
 
 DEFAULT_PANEL_LAYOUT = [
     {'type': 'cpu', 'displayer_type': 'arc_gauge', 'width': '16', 'height': '16', 'grid_x': '0', 'grid_y': '0', 'title_text': 'CPU Usage', 'cpu_metric_to_display': 'usage'},
@@ -120,6 +41,7 @@ class MainWindow(Gtk.ApplicationWindow):
         super().__init__(title="GTK System Monitor", application=app)
         self.app = app
         
+        # Use the centrally loaded module data
         self.AVAILABLE_DATA_SOURCES = AVAILABLE_DATA_SOURCES
         self.AVAILABLE_DISPLAYERS = AVAILABLE_DISPLAYERS
         self.ALL_SOURCE_CLASSES = ALL_SOURCE_CLASSES
@@ -322,7 +244,7 @@ class SystemMonitorApp(Gtk.Application):
             print(f"An unexpected error occurred while setting default icon: {e}")
 
         gpu_manager.init()
-        discover_and_cache_sensors()
+        # Sensor discovery is now handled by the module_registry
         
         for sig in [signal.SIGINT, signal.SIGTERM]:
             GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, sig, self.on_signal, sig)
@@ -348,6 +270,5 @@ class SystemMonitorApp(Gtk.Application):
         return True
 
 if __name__ == "__main__":
-    sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
     app = SystemMonitorApp()
     sys.exit(app.run(sys.argv))

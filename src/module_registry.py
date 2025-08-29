@@ -45,7 +45,7 @@ def discover_and_load_modules():
     # Step 2: Define metadata linking keys to classes and defining relationships
     SOURCE_METADATA = sorted([
         {'key': 'analog_clock', 'class_name': 'AnalogClockDataSource', 'name': 'Clock', "displayers": ["analog_clock", "text"], "default_size": (16, 16)},
-        {'key': 'combo', 'class_name': 'ComboDataSource', 'name': 'Combo Panel', "displayers": ["combo", "level_bar_combo"], "default_size": (16, 16)},
+        {'key': 'combo', 'class_name': 'ComboDataSource', 'name': 'Combo Panel', "displayers": ["combo", "level_bar_combo", "lcars_combo"], "default_size": (24, 20)},
         {'key': 'cpu', 'class_name': 'CPUDataSource', 'name': 'CPU Monitor', "displayers": ["text", "graph", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (16, 16)},
         {'key': 'disk_usage', 'class_name': 'DiskUsageDataSource', 'name': 'Disk Usage', "displayers": ["text", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (16, 16)},
         {'key': 'fan_speed', 'class_name': 'FanSpeedDataSource', 'name': 'Fan Speed', "displayers": ["text", "graph", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (16, 16)},
@@ -60,6 +60,7 @@ def discover_and_load_modules():
         {'key': 'bar', 'class_name': 'BarDisplayer', 'name': 'Bar Chart'},
         {'key': 'combo', 'class_name': 'ArcComboDisplayer', 'name': 'Combo (Arcs)'},
         {'key': 'level_bar_combo', 'class_name': 'LevelBarComboDisplayer', 'name': 'Combo (Level Bars)'},
+        {'key': 'lcars_combo', 'class_name': 'LCARSComboDisplayer', 'name': 'Combo (LCARS)'},
         {'key': 'graph', 'class_name': 'GraphDisplayer', 'name': 'Graph'},
         {'key': 'indicator', 'class_name': 'IndicatorDisplayer', 'name': 'Indicator'},
         {'key': 'level_bar', 'class_name': 'LevelBarDisplayer', 'name': 'Level Bar'},

@@ -220,7 +220,7 @@ class CustomDialog(Gtk.Window):
             self.set_transient_for(parent)
         self.set_title(title)
         self.set_modal(modal)
-        self.set_resizable(False)
+        self.set_resizable(True) # Changed from False to True
         self.set_deletable(True)
         self.set_hide_on_close(not modal) 
 
