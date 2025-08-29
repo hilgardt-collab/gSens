@@ -80,8 +80,8 @@ class SystemTempDataSource(DataSource):
 
     @staticmethod
     def get_config_model():
-        # Read the discovered sensors from the global cache instead of re-discovering.
-        discovered_sensors = SENSOR_CACHE.get('system_temp', {"": {"display_name": "Cache not ready"}})
+        # --- FIX: Read discovered sensors from the global cache instead of re-discovering. ---
+        discovered_sensors = SENSOR_CACHE.get('system_temp', {"": {"display_name": "Scanning..."}})
         sensor_options = {v['display_name']: k for k, v in sorted(discovered_sensors.items(), key=lambda item: item[1]['display_name'])}
         
         model = DataSource.get_config_model()
@@ -115,3 +115,4 @@ class SystemTempDataSource(DataSource):
             GLib.idle_add(on_sensor_changed, sensor_combo)
 
         return setup_auto_title_logic
+

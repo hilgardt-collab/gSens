@@ -13,14 +13,9 @@ class MemoryUsageDataSource(DataSource):
             return {"error": str(e)}
         
     def get_display_string(self, data):
-        # --- BUG FIX ---
-        # Add a type check for robustness. If data is not a dictionary, it's likely
-        # the raw numerical value (percentage) being passed from a compound displayer.
-        # Format it appropriately to prevent a crash.
+        # The robust type checking is now handled by the base DataSource class.
         if not isinstance(data, dict):
-            if isinstance(data, (int, float)):
-                return f"{data:.1f}%"
-            return "N/A"
+            return super().get_display_string(data)
 
         if data.get("error"): return "N/A"
         style = self.config.get("text_content_style", "gb_and_percent")

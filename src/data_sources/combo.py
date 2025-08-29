@@ -37,14 +37,12 @@ class ComboDataSource(DataSource):
                 if source_key and source_key != "none":
                     SourceClass = source_map.get(source_key)
                     if SourceClass:
-                        # Create a clean config dict for the child
                         child_config = {}
                         for key, value in self.config.items():
                             if key.startswith(opt_prefix):
                                 unprefixed_key = key[len(opt_prefix):]
                                 child_config[unprefixed_key] = value
                         
-                        # Instantiate child with its own clean config
                         self.child_sources[f"{slot_prefix}source"] = SourceClass(config=child_config)
 
             if mode == 'level_bar':
@@ -227,7 +225,8 @@ class ComboDataSource(DataSource):
         def _create_or_update_bar_tabs(spinner, notebook, dialog, widgets, available_sources, panel_config, source_opts):
             """Dynamically adds or removes configuration tabs for each bar."""
             count = spinner.get_value_as_int()
-            dialog.dynamic_models = [m for m in dialog.dynamic_models if not any(opt.key.startswith("bar") for section in m.values() for opt in section)]
+            # --- BUG FIX: Removed overly aggressive cleanup of dialog.dynamic_models ---
+            
             while notebook.get_n_pages() > count: notebook.remove_page(-1)
             
             for i in range(1, count + 1):
@@ -268,7 +267,6 @@ class ComboDataSource(DataSource):
         
         def _build_lcars_config_ui(dialog, content_box, widgets, available_sources, panel_config, source_opts):
             """Builds the configuration UI for the LCARS Combo mode."""
-            # Primary Source Selector
             content_box.append(Gtk.Label(label="<b>Primary Data Source</b>", use_markup=True, xalign=0, margin_top=10))
             primary_source_model = {"": [ConfigOption("primary_source", "dropdown", "Source:", "none", options_dict=source_opts)]}
             build_ui_from_model(content_box, panel_config, primary_source_model, widgets)
@@ -280,8 +278,6 @@ class ComboDataSource(DataSource):
             primary_combo.connect("changed", lambda c: _rebuild_slot_config_ui(c.get_active_id(), primary_sub_config_box, "primary_", dialog, widgets, available_sources, panel_config))
             _rebuild_slot_config_ui(panel_config.get("primary_source", "none"), primary_sub_config_box, "primary_", dialog, widgets, available_sources, panel_config)
 
-
-            # Secondary Sources
             sec_count_model = {"": [ConfigOption("number_of_secondary_sources", "spinner", "Number of Secondary Sources:", 4, 1, 10, 1, 0)]}
             build_ui_from_model(content_box, panel_config, sec_count_model, widgets)
             dialog.dynamic_models.append(sec_count_model)
@@ -318,7 +314,12 @@ class ComboDataSource(DataSource):
                     build_ui_from_model(tab_box, panel_config, sec_source_model, widgets)
                     dialog.dynamic_models.append(sec_source_model)
                     
-                    # No sub-config for secondary sources to keep it simple
+                    sub_config_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=20)
+                    tab_box.append(sub_config_box)
+                    callback = partial(_rebuild_slot_config_ui, parent_box=sub_config_box, prefix=prefix, dialog=dialog, widgets=widgets, available_sources=available_sources, panel_config=panel_config)
+                    combo = widgets[slot_key]
+                    combo.connect("changed", lambda c, cb=callback: cb(source_key=c.get_active_id()))
+                    _rebuild_slot_config_ui(panel_config.get(slot_key, "none"), sub_config_box, prefix, dialog, widgets, available_sources, panel_config)
 
         def build_main_config_ui(dialog, content_box, widgets, available_sources, panel_config):
             source_opts = {"None": "none", **{info['name']: info['key'] for info in available_sources.values() if info['key'] != 'combo'}}

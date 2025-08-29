@@ -77,8 +77,8 @@ class FanSpeedDataSource(DataSource):
     
     @staticmethod
     def get_config_model():
-        # Read the discovered sensors from the global cache instead of re-discovering.
-        discovered_fans = SENSOR_CACHE.get('fan_speed', {"": {"display_name": "Cache not ready"}})
+        # --- FIX: Read discovered sensors from the global cache instead of re-discovering. ---
+        discovered_fans = SENSOR_CACHE.get('fan_speed', {"": {"display_name": "Scanning..."}})
         opts = {v['display_name']: k for k, v in sorted(discovered_fans.items(), key=lambda i:i[1]['display_name'])}
         
         model = DataSource.get_config_model()
@@ -124,3 +124,4 @@ class FanSpeedDataSource(DataSource):
             fan_combo.connect("changed", on_fan_changed)
             GLib.idle_add(on_fan_changed, fan_combo)
         return setup_auto_title_logic
+

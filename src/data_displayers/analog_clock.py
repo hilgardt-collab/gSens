@@ -376,6 +376,8 @@ class AnalogClockDisplayer(DataDisplayer):
                 ConfigOption("alarm_icon_ringing_color", "color", "Icon Ringing Color:", "rgba(255,0,0,1.0)"),
             ],
             "Timer Settings": [
+                ConfigOption("timer_sound_file", "file", "Timer Sound File:", "", tooltip="Select a sound file (WAV, MP3, OGG)", file_filters=sound_file_filters),
+                ConfigOption("timer_flash_color", "color", "Timer Panel Flash Color:", "rgba(0, 200, 255, 0.7)"),
                 ConfigOption("timer_icon_color", "color", "Timer Icon Color:", "rgba(200, 200, 200, 0.8)"),
                 ConfigOption("timer_countdown_font", "font", "Countdown Font:", "Sans Bold 10"),
                 ConfigOption("timer_countdown_color", "color", "Countdown Color:", "rgba(255, 255, 255, 1.0)"),

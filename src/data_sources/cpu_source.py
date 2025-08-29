@@ -209,7 +209,8 @@ class CPUDataSource(DataSource):
         ]
         
         # --- Temperature Options ---
-        temp_sensors = SENSOR_CACHE.get('cpu_temp', {"": {"display_name": "Cache not ready"}})
+        # --- FIX: Read discovered sensors from the global cache instead of re-discovering. ---
+        temp_sensors = SENSOR_CACHE.get('cpu_temp', {"": {"display_name": "Scanning..."}})
         temp_opts = {v['display_name']: k for k, v in sorted(temp_sensors.items(), key=lambda i:i[1]['display_name'])}
         model["Temperature Settings"] = [
             ConfigOption("cpu_temp_sensor_key", "dropdown", "Sensor:", "", options_dict=temp_opts),
@@ -309,3 +310,4 @@ class CPUDataSource(DataSource):
             GLib.idle_add(on_metric_changed, metric_combo)
 
         return setup_dynamic_options
+

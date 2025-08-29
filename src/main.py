@@ -4,6 +4,7 @@ import sys
 import signal
 import uuid 
 import importlib
+import threading
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
@@ -26,6 +27,12 @@ from ui_helpers import CustomDialog
 from panel_builder_dialog import PanelBuilderDialog
 from data_panel import DataPanel
 from gpu_managers import gpu_manager
+
+# --- FIX: Import sensor data sources for background discovery ---
+from data_sources.cpu_source import CPUDataSource
+from data_sources.fan_speed import FanSpeedDataSource
+from data_sources.system_temp import SystemTempDataSource
+from sensor_cache import SENSOR_CACHE
 
 DEFAULT_PANEL_LAYOUT = [
     {'type': 'cpu', 'displayer_type': 'arc_gauge', 'width': '16', 'height': '16', 'grid_x': '0', 'grid_y': '0', 'title_text': 'CPU Usage', 'cpu_metric_to_display': 'usage'},
@@ -244,7 +251,9 @@ class SystemMonitorApp(Gtk.Application):
             print(f"An unexpected error occurred while setting default icon: {e}")
 
         gpu_manager.init()
-        # Sensor discovery is now handled by the module_registry
+        # --- FIX: Discover sensors in a background thread to prevent UI freezes ---
+        sensor_discovery_thread = threading.Thread(target=self._discover_sensors_background, daemon=True)
+        sensor_discovery_thread.start()
         
         for sig in [signal.SIGINT, signal.SIGTERM]:
             GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, sig, self.on_signal, sig)
@@ -253,6 +262,28 @@ class SystemMonitorApp(Gtk.Application):
         action.connect("activate", self.on_quit)
         self.add_action(action)
         self.set_accels_for_action("app.quit", ["<Control>q"])
+
+    def _discover_sensors_background(self):
+        """
+        Worker function to discover all hardware sensors in the background.
+        This is run in a separate thread at startup to avoid blocking the UI.
+        The results are stored in the global SENSOR_CACHE.
+        """
+        print("Starting background sensor discovery...")
+        try:
+            SENSOR_CACHE['cpu_temp'] = CPUDataSource._discover_cpu_temp_sensors_statically()
+            print(f"Background discovery: Found {len(SENSOR_CACHE.get('cpu_temp', []))} CPU temperature sensors.")
+            
+            SENSOR_CACHE['fan_speed'] = FanSpeedDataSource._discover_fans_statically()
+            print(f"Background discovery: Found {len(SENSOR_CACHE.get('fan_speed', []))} fans.")
+
+            SENSOR_CACHE['system_temp'] = SystemTempDataSource._discover_temp_sensors_statically()
+            print(f"Background discovery: Found {len(SENSOR_CACHE.get('system_temp', []))} general system temperature sensors.")
+
+        except Exception as e:
+            print(f"Error during background sensor discovery: {e}")
+        
+        print("Background sensor discovery finished.")
 
     def do_shutdown(self):
         gpu_manager.shutdown()
@@ -272,3 +303,4 @@ class SystemMonitorApp(Gtk.Application):
 if __name__ == "__main__":
     app = SystemMonitorApp()
     sys.exit(app.run(sys.argv))
+
