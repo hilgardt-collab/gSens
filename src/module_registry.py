@@ -51,6 +51,9 @@ def discover_and_load_modules():
         {'key': 'fan_speed', 'class_name': 'FanSpeedDataSource', 'name': 'Fan Speed', "displayers": ["text", "graph", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (16, 16)},
         {'key': 'gpu', 'class_name': 'GPUDataSource', 'name': 'GPU Monitor', "displayers": ["text", "graph", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (16, 16)},
         {'key': 'memory_usage', 'class_name': 'MemoryUsageDataSource', 'name': 'Memory Usage', "displayers": ["text", "graph", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (16, 16)},
+        {'key': 'network', 'class_name': 'NetworkDataSource', 'name': 'Network Activity', "displayers": ["text", "graph", "level_bar", "arc_gauge", "speedometer"], "default_size": (16, 10)},
+        {'key': 'processes', 'class_name': 'ProcessDataSource', 'name': 'Process Monitor', "displayers": ["text"], "default_size": (24, 12)},
+        {'key': 'systemd', 'class_name': 'SystemdDataSource', 'name': 'Systemd Services', "displayers": ["text"], "default_size": (24, 8)},
         {'key': 'system_temp', 'class_name': 'SystemTempDataSource', 'name': 'System Temperature', "displayers": ["graph", "text", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (16, 16)},
     ], key=lambda x: x['name'])
 

@@ -69,6 +69,9 @@ class AMDManager:
                 "clocks": os.path.join(device_path, "pp_dpm_sclk"),
                 "vram_used": os.path.join(device_path, "mem_info_vram_used"),
                 "vram_total": os.path.join(device_path, "mem_info_vram_total"),
+                "power": os.path.join(hwmon_path, "power1_average"),
+                "fan_rpm": os.path.join(hwmon_path, "fan1_input"),
+                "fan_max_rpm": os.path.join(hwmon_path, "fan1_max"),
             }
         }
 
@@ -106,9 +109,7 @@ class AMDManager:
         if clocks_str:
             for line in clocks_str.splitlines():
                 if line.endswith('*'): # The active clock level is marked with an asterisk
-                    # --- BUG FIX: Make parsing more robust ---
-                    # The original parsing was brittle and could fail if spacing or capitalization changed.
-                    match = re.search(r':\s*(\d+)\s*Mhz', line, re.IGNORECASE)
+                    match = re.search(r':\s*(\d+)\s*M[Hh][Zz]', line, re.IGNORECASE)
                     if match:
                         return int(match.group(1))
         return None
@@ -131,5 +132,30 @@ class AMDManager:
                 }
         return None
 
+    def get_power_usage(self, gpu_index):
+        """Gets power usage in Watts."""
+        if not (0 <= gpu_index < self.device_count): return None
+        power_str = self._read_sysfs_file(self.devices[gpu_index]["paths"]["power"])
+        # Value is in microwatts, convert to watts
+        return int(power_str) / 1000000.0 if power_str else None
+
+    def get_fan_speed(self, gpu_index):
+        """Gets fan speed as a percentage of max RPM."""
+        if not (0 <= gpu_index < self.device_count): return None
+        
+        rpm_str = self._read_sysfs_file(self.devices[gpu_index]["paths"]["fan_rpm"])
+        max_rpm_str = self._read_sysfs_file(self.devices[gpu_index]["paths"]["fan_max_rpm"])
+
+        if rpm_str and max_rpm_str:
+            try:
+                rpm = int(rpm_str)
+                max_rpm = int(max_rpm_str)
+                if max_rpm > 0:
+                    return (rpm / max_rpm) * 100.0
+            except (ValueError, TypeError):
+                return None
+        return None
+
 # Global instance
 amd_manager = AMDManager()
+

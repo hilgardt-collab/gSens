@@ -132,9 +132,12 @@ class LevelBarDisplayer(DataDisplayer):
             ConfigOption("level_bar_on_pulse_color2", "color", "Pulse End Color:", "rgba(255,255,255,1)"),
             ConfigOption("level_bar_on_pulse_duration_ms", "spinner", "Pulse Duration (ms):", 1000, 100, 5000, 100, 0)
         ]
+        # --- FEATURE: Add text/bar split ratio controls ---
         model["Labels & Layout"] = [
-            ConfigOption("level_bar_text_position", "dropdown", "Text Position:", "superimposed", 
+            ConfigOption("level_bar_text_layout", "dropdown", "Text Layout:", "superimposed", 
                          options_dict={"Superimposed": "superimposed", "Top": "top", "Bottom": "bottom", "Left": "left", "Right": "right"}),
+            ConfigOption("level_bar_split_ratio", "scale", "Text/Bar Split Ratio:", "0.3", 0.1, 0.9, 0.05, 2,
+                         tooltip="Proportion of space for text when not superimposed."),
             ConfigOption("level_bar_label_orientation", "dropdown", "Label Orientation:", "vertical", options_dict={"Vertical": "vertical", "Horizontal": "horizontal"}),
             ConfigOption("level_bar_superimposed_align", "dropdown", "Superimposed Align:", "middle_center", options_dict=super_align_opts),
             ConfigOption("level_bar_show_primary_label", "bool", "Show Primary Label:", "True"),
@@ -149,11 +152,13 @@ class LevelBarDisplayer(DataDisplayer):
         return model
 
     def get_configure_callback(self):
-        """A custom callback to dynamically show/hide effect-specific options."""
-        def setup_dynamic_effects(dialog, content_box, widgets, available_sources, panel_config):
+        """A custom callback to dynamically show/hide effect-specific and layout-specific options."""
+        def setup_dynamic_options(dialog, content_box, widgets, available_sources, panel_config):
             try:
                 grad_switch = widgets["level_bar_on_gradient_enabled"]
                 pulse_switch = widgets["level_bar_on_pulse_enabled"]
+                layout_combo = widgets["level_bar_text_layout"]
+                split_ratio_scale = widgets["level_bar_split_ratio"]
                 grad_end_color = widgets["level_bar_on_color2"].get_parent()
                 pulse_start_color = widgets["level_bar_on_pulse_color1"].get_parent()
                 pulse_end_color = widgets["level_bar_on_pulse_color2"].get_parent()
@@ -168,12 +173,16 @@ class LevelBarDisplayer(DataDisplayer):
                 pulse_start_color.set_visible(is_pulse)
                 pulse_end_color.set_visible(is_pulse)
                 pulse_duration.set_visible(is_pulse)
+                
+                is_superimposed = layout_combo.get_active_id() == "superimposed"
+                split_ratio_scale.get_parent().set_visible(not is_superimposed)
 
             grad_switch.connect("notify::active", update_visibility)
             pulse_switch.connect("notify::active", update_visibility)
+            layout_combo.connect("changed", update_visibility)
             GLib.idle_add(update_visibility)
 
-        return setup_dynamic_effects
+        return setup_dynamic_options
 
     def _sync_state_with_config(self):
         """Ensures internal state like segment_states matches the current config."""
@@ -192,61 +201,63 @@ class LevelBarDisplayer(DataDisplayer):
     def on_draw(self, area, ctx, width, height):
         if width <= 0 or height <= 0: return
         
-        show_primary = str(self.config.get("level_bar_show_primary_label", "True")).lower() == 'true'
-        show_secondary = str(self.config.get("level_bar_show_secondary_label", "True")).lower() == 'true'
-        text_pos = self.config.get("level_bar_text_position", "superimposed")
-        label_orientation = self.config.get("level_bar_label_orientation", "vertical")
+        layout = self.config.get("level_bar_text_layout", "superimposed")
 
-        layout_p = PangoCairo.create_layout(ctx) if show_primary else None
-        layout_s = PangoCairo.create_layout(ctx) if show_secondary else None
-        
-        p_width, p_height, s_width, s_height = 0, 0, 0, 0
-        spacing = 6
+        if layout == "superimposed":
+            self.draw_bar(ctx, 0, 0, width, height)
+            
+            show_primary = str(self.config.get("level_bar_show_primary_label", "True")).lower() == 'true'
+            show_secondary = str(self.config.get("level_bar_show_secondary_label", "True")).lower() == 'true'
+            layout_p = PangoCairo.create_layout(ctx) if show_primary else None
+            layout_s = PangoCairo.create_layout(ctx) if show_secondary else None
+            
+            if layout_p:
+                layout_p.set_font_description(Pango.FontDescription.from_string(self.config.get("level_bar_primary_font")))
+                layout_p.set_text(self.primary_text or "", -1)
+            if layout_s:
+                layout_s.set_font_description(Pango.FontDescription.from_string(self.config.get("level_bar_secondary_font")))
+                layout_s.set_text(self.secondary_text or "", -1)
+            
+            self._draw_superimposed_text(ctx, 0, 0, width, height, layout_p, layout_s)
+        else:
+            ratio = float(self.config.get("level_bar_split_ratio", 0.3))
+            spacing = 4
+            
+            if layout in ["top", "bottom"]:
+                text_h = (height * ratio) - (spacing / 2)
+                bar_h = height * (1 - ratio) - (spacing / 2)
+                text_w, bar_w = width, width
+                bar_x, text_x = 0, 0
+                if layout == "top":
+                    text_y, bar_y = 0, text_h + spacing
+                else: # bottom
+                    bar_y, text_y = 0, bar_h + spacing
+            else: # left, right
+                text_w = (width * ratio) - (spacing / 2)
+                bar_w = width * (1 - ratio) - (spacing / 2)
+                text_h, bar_h = height, height
+                bar_y, text_y = 0, 0
+                if layout == "left":
+                    text_x, bar_x = 0, text_w + spacing
+                else: # right
+                    bar_x, text_x = 0, bar_w + spacing
 
-        if show_primary and layout_p:
-            font_p = Pango.FontDescription.from_string(self.config.get("level_bar_primary_font"))
-            layout_p.set_font_description(font_p)
-            layout_p.set_text(self.primary_text or "", -1)
-            p_width = layout_p.get_pixel_extents()[1].width
-            p_height = layout_p.get_pixel_extents()[1].height
+            self.draw_bar(ctx, bar_x, bar_y, bar_w, bar_h)
+            
+            show_primary = str(self.config.get("level_bar_show_primary_label", "True")).lower() == 'true'
+            show_secondary = str(self.config.get("level_bar_show_secondary_label", "True")).lower() == 'true'
+            layout_p = PangoCairo.create_layout(ctx) if show_primary else None
+            layout_s = PangoCairo.create_layout(ctx) if show_secondary else None
+            
+            if layout_p:
+                layout_p.set_font_description(Pango.FontDescription.from_string(self.config.get("level_bar_primary_font")))
+                layout_p.set_text(self.primary_text or "", -1)
+            if layout_s:
+                layout_s.set_font_description(Pango.FontDescription.from_string(self.config.get("level_bar_secondary_font")))
+                layout_s.set_text(self.secondary_text or "", -1)
+            
+            self._draw_label_set(ctx, text_x, text_y, text_w, text_h, layout_p, layout_s)
 
-        if show_secondary and layout_s:
-            font_s = Pango.FontDescription.from_string(self.config.get("level_bar_secondary_font"))
-            layout_s.set_font_description(font_s)
-            layout_s.set_text(self.secondary_text or "", -1)
-            s_width = layout_s.get_pixel_extents()[1].width
-            s_height = layout_s.get_pixel_extents()[1].height
-
-        text_block_width = max(p_width, s_width) if label_orientation == "vertical" else p_width + s_width
-        text_block_height = p_height + s_height if label_orientation == "vertical" else max(p_height, s_height)
-        
-        if show_primary and show_secondary:
-            if label_orientation == "vertical": text_block_height += spacing
-            else: text_block_width += spacing
-
-        padding = 4
-        bar_x, bar_y, bar_width, bar_height = padding, padding, width - 2*padding, height - 2*padding
-
-        if text_pos == "top": bar_y += text_block_height + padding; bar_height -= text_block_height + padding
-        elif text_pos == "bottom": bar_height -= text_block_height + padding
-        elif text_pos == "left": bar_x += text_block_width + padding; bar_width -= text_block_width + padding
-        elif text_pos == "right": bar_width -= text_block_width + padding
-        
-        self.draw_bar(ctx, bar_x, bar_y, bar_width, bar_height)
-
-        if text_pos != "superimposed": self._draw_external_text(ctx, width, height, text_pos, text_block_width, text_block_height, layout_p, layout_s)
-        else: self._draw_superimposed_text(ctx, bar_x, bar_y, bar_width, bar_height, layout_p, layout_s)
-
-    def _draw_external_text(self, ctx, width, height, position, text_block_width, text_block_height, layout_p, layout_s):
-        padding = 4
-        text_area_x, text_area_y = padding, padding
-        
-        if position == "top": text_area_x = 0
-        elif position == "bottom": text_area_y = height - text_block_height - padding; text_area_x = 0
-        elif position == "left": text_area_y = (height - text_block_height) / 2
-        elif position == "right": text_area_x = width - text_block_width - padding; text_area_y = (height - text_block_height) / 2
-        
-        self._draw_label_set(ctx, text_area_x, text_area_y, text_block_width if position in ["left", "right"] else width, text_block_height, layout_p, layout_s)
 
     def _draw_superimposed_text(self, ctx, bar_x, bar_y, bar_width, bar_height, layout_p, layout_s):
         align = self.config.get("level_bar_superimposed_align", "middle_center")
@@ -279,7 +290,10 @@ class LevelBarDisplayer(DataDisplayer):
         spacing = 6
 
         if orientation == "vertical":
-            current_y = area_y
+            current_y = area_y + (area_height - ( (layout_p.get_pixel_extents()[1].height if show_primary else 0) + 
+                                                   (layout_s.get_pixel_extents()[1].height if show_secondary else 0) + 
+                                                   (spacing if show_primary and show_secondary else 0) )) / 2
+            
             if show_primary:
                 align_str = self.config.get("level_bar_primary_align", "center")
                 layout_p.set_width(area_width * Pango.SCALE); layout_p.set_alignment(align_map.get(align_str, Pango.Alignment.CENTER))
@@ -297,7 +311,9 @@ class LevelBarDisplayer(DataDisplayer):
         else: # Horizontal
             p_width, p_height = (layout_p.get_pixel_extents()[1].width, layout_p.get_pixel_extents()[1].height) if show_primary else (0,0)
             s_height = layout_s.get_pixel_extents()[1].height if show_secondary else 0
-            current_x = area_x
+            
+            total_text_width = p_width + (layout_s.get_pixel_extents()[1].width if show_secondary else 0) + (spacing if show_primary and show_secondary else 0)
+            current_x = area_x + (area_width - total_text_width) / 2
 
             if show_primary:
                 p_y = area_y + (area_height - p_height) / 2
@@ -398,7 +414,6 @@ class LevelBarDisplayer(DataDisplayer):
                 ctx.rectangle(0, seg_y, rect_width, segment_height)
             else:
                 seg_x = i * (segment_width + spacing)
-                # --- FIX: Use the calculated segment_width instead of the full rect_width ---
                 ctx.rectangle(seg_x, 0, segment_width, rect_height)
             ctx.fill()
         
@@ -406,4 +421,3 @@ class LevelBarDisplayer(DataDisplayer):
 
     def close(self):
         self._stop_animation_timer(); super().close()
-

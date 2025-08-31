@@ -55,15 +55,39 @@ class IntelManager:
 
     def _get_device_paths(self, card_path):
         """Gathers all necessary sysfs file paths for a given GPU."""
-        # This will need to be implemented based on how Intel exposes metrics in sysfs
+        device_path = os.path.join(card_path, "device")
+        hwmon_paths = glob.glob(os.path.join(device_path, "hwmon/hwmon*"))
+        hwmon_path = hwmon_paths[0] if hwmon_paths else None
+
+        gt_path = os.path.join(card_path, "gt")
+        if not os.path.isdir(gt_path):
+             # Fallback for older kernels or different structures
+             gt_path = os.path.join(device_path, "drm", os.path.basename(card_path), "gt")
+             if not os.path.isdir(gt_path):
+                 gt_path = None # No gt path found
+
+        name = f"Intel GPU {len(self.devices)}"
+        try:
+            # Prefer a more descriptive name if available
+            with open(os.path.join(card_path, "device/label"), 'r') as f:
+                name = f.read().strip()
+        except Exception:
+            pass
+
         return {
-            "name": f"Intel GPU {len(self.devices)}", 
-            "paths": {}
+            "name": name,
+            "paths": {
+                "temp": os.path.join(hwmon_path, "temp1_input") if hwmon_path else None,
+                "utilization_cur": os.path.join(gt_path, "gt_cur_freq_mhz") if gt_path else None,
+                "utilization_max": os.path.join(gt_path, "gt_max_freq_mhz") if gt_path else None,
+                "vram_used": "/sys/class/drm/card0/device/mem_info_vram_used", # Placeholder, often not available for iGPUs
+                "vram_total": "/sys/class/drm/card0/device/mem_info_vram_total",# Placeholder
+            }
         }
 
     def _read_sysfs_file(self, path):
         """Safely reads a value from a sysfs file."""
-        if not os.path.exists(path):
+        if not path or not os.path.exists(path):
             return None
         try:
             with open(path, 'r') as f:
@@ -76,20 +100,52 @@ class IntelManager:
         """Returns a dictionary of GPU indices and their names."""
         return {i: dev["name"] for i, dev in enumerate(self.devices)}
 
-    # --- Placeholder Methods ---
-    # These will need to be implemented with the correct sysfs paths for Intel GPUs
-
     def get_temperature(self, gpu_index):
-        return None
+        if not (0 <= gpu_index < self.device_count): return None
+        path = self.devices[gpu_index]["paths"].get("temp")
+        if not path: return None
+        temp_str = self._read_sysfs_file(path)
+        return int(temp_str) / 1000.0 if temp_str else None
 
     def get_utilization(self, gpu_index):
+        if not (0 <= gpu_index < self.device_count): return None
+        cur_path = self.devices[gpu_index]["paths"].get("utilization_cur")
+        max_path = self.devices[gpu_index]["paths"].get("utilization_max")
+        if not cur_path or not max_path: return None
+
+        cur_freq_str = self._read_sysfs_file(cur_path)
+        max_freq_str = self._read_sysfs_file(max_path)
+
+        if cur_freq_str and max_freq_str:
+            try:
+                cur_freq = int(cur_freq_str)
+                max_freq = int(max_freq_str)
+                if max_freq > 0:
+                    return (cur_freq / max_freq) * 100.0
+            except (ValueError, TypeError):
+                return None
         return None
 
     def get_graphics_clock(self, gpu_index):
-        return None
+        if not (0 <= gpu_index < self.device_count): return None
+        path = self.devices[gpu_index]["paths"].get("utilization_cur")
+        if not path: return None
+        clock_str = self._read_sysfs_file(path)
+        return int(clock_str) if clock_str else None
         
     def get_vram_usage(self, gpu_index):
+        # VRAM usage is difficult to determine for Intel iGPUs as they use system memory.
+        # This is a placeholder for discrete Intel GPUs like Arc.
+        return None
+
+    def get_power_usage(self, gpu_index):
+        # Placeholder for future Intel support
+        return None
+
+    def get_fan_speed(self, gpu_index):
+        # Placeholder for future Intel support (most iGPUs are passively cooled)
         return None
 
 # Global instance
 intel_manager = IntelManager()
+

@@ -11,20 +11,19 @@ from gi.repository import Gtk, GLib
 from config_manager import config_manager
 
 from data_sources.analog_clock import AnalogClockDataSource
+from update_manager import update_manager # Import the new manager
 
 class DataPanel(BasePanel):
     """
     A generic panel that is composed of a DataSource and a DataDisplayer.
     It orchestrates data fetching, display updates, and configuration management.
+    It no longer manages its own thread, instead registering with the central UpdateManager.
     """
     def __init__(self, config, data_source, data_displayer, available_sources):
         self.data_source = data_source
         self.available_sources = available_sources
         
         self.is_clock_source = isinstance(data_source, AnalogClockDataSource)
-
-        self._update_thread = None
-        self._stop_thread_event = threading.Event()
         
         super().__init__(title=config.get("title_text", "Data Panel"), config=config)
         
@@ -40,7 +39,26 @@ class DataPanel(BasePanel):
 
         self.apply_all_configurations()
         
-        self.start_update_thread()
+        # Register with the central update manager instead of starting a new thread.
+        update_manager.register_panel(self)
+
+    def process_update(self, value):
+        """
+        This method is called by the UpdateManager on the main GTK thread
+        with the data fetched from the background thread. It handles all UI-related updates.
+        """
+        # Ensure the panel hasn't been closed while the data was being fetched
+        if not self.data_source or not self.data_displayer:
+            return
+
+        if value is not None:
+            numerical_value = self.data_source.get_numerical_value(value)
+            self.check_and_update_alarm_state(numerical_value, self.data_source.alarm_config_prefix)
+        else:
+            self.exit_alarm_state()
+        
+        if self.data_displayer:
+            self.data_displayer.update_display(value)
 
     def set_displayer_widget(self):
         """Removes the old displayer widget and adds the new one."""
@@ -48,44 +66,6 @@ class DataPanel(BasePanel):
             self.content_area.remove(self.content_area.get_first_child())
         
         self.content_area.append(self.data_displayer.get_widget())
-
-    def _update_worker(self):
-        """The target function for the dedicated background thread."""
-        while not self._stop_thread_event.is_set():
-            if self.data_source is None:
-                break
-            
-            value = self.data_source.get_data()
-            
-            if self._stop_thread_event.is_set() or self.data_source is None:
-                break
-
-            if value is not None:
-                numerical_value = self.data_source.get_numerical_value(value)
-                GLib.idle_add(self.check_and_update_alarm_state, numerical_value, self.data_source.alarm_config_prefix)
-            else:
-                GLib.idle_add(self.exit_alarm_state)
-            
-            if self.data_displayer:
-                GLib.idle_add(self.data_displayer.update_display, value)
-            
-            update_interval = float(self.config.get("update_interval_seconds", "2.0"))
-            self._stop_thread_event.wait(timeout=update_interval)
-
-    def start_update_thread(self):
-        """Stops any existing thread and starts a new one."""
-        self.stop_update_thread()
-        
-        self._stop_thread_event.clear()
-        self._update_thread = threading.Thread(target=self._update_worker, daemon=True)
-        self._update_thread.start()
-
-    def stop_update_thread(self):
-        """Signals the worker thread to stop and waits for it to terminate."""
-        if self._update_thread and self._update_thread.is_alive():
-            self._stop_thread_event.set()
-            self._update_thread.join(timeout=2.0)
-        self._update_thread = None
         
     def apply_all_configurations(self):
         """Applies all configurations from the config dictionary to the panel and its components."""
@@ -109,7 +89,8 @@ class DataPanel(BasePanel):
         Handles the complete cleanup of the panel and its components,
         ensuring all references are broken to prevent memory leaks.
         """
-        self.stop_update_thread()
+        # Unregister from the central update manager to stop receiving updates.
+        update_manager.unregister_panel(self)
         
         if self.data_displayer:
             self.data_displayer.close()
@@ -233,7 +214,7 @@ class DataPanel(BasePanel):
                 main_window.grid_manager.recreate_panel(self.config['id'])
             else:
                 self.apply_all_configurations()
-            self.start_update_thread()
+            # The panel no longer manages its own thread, so start_update_thread() is removed.
 
         cancel_button = dialog.add_non_modal_button("_Cancel", style_class="destructive-action")
         cancel_button.connect("clicked", lambda w: dialog.destroy())
@@ -257,3 +238,4 @@ class DataPanel(BasePanel):
 
         dialog.connect("destroy", on_dialog_destroy)
         dialog.present()
+

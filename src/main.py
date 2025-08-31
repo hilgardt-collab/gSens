@@ -27,6 +27,7 @@ from ui_helpers import CustomDialog
 from panel_builder_dialog import PanelBuilderDialog
 from data_panel import DataPanel
 from gpu_managers import gpu_manager
+from update_manager import update_manager # Import the new manager
 
 # --- FIX: Import sensor data sources for background discovery ---
 from data_sources.cpu_source import CPUDataSource
@@ -251,6 +252,9 @@ class SystemMonitorApp(Gtk.Application):
             print(f"An unexpected error occurred while setting default icon: {e}")
 
         gpu_manager.init()
+        # Start the central update manager's worker thread
+        update_manager.start()
+        
         # --- FIX: Discover sensors in a background thread to prevent UI freezes ---
         sensor_discovery_thread = threading.Thread(target=self._discover_sensors_background, daemon=True)
         sensor_discovery_thread.start()
@@ -286,6 +290,8 @@ class SystemMonitorApp(Gtk.Application):
         print("Background sensor discovery finished.")
 
     def do_shutdown(self):
+        # Stop the central update manager's worker thread
+        update_manager.stop()
         gpu_manager.shutdown()
         Gtk.Application.do_shutdown(self)
 
@@ -303,4 +309,3 @@ class SystemMonitorApp(Gtk.Application):
 if __name__ == "__main__":
     app = SystemMonitorApp()
     sys.exit(app.run(sys.argv))
-

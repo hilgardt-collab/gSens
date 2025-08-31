@@ -90,6 +90,10 @@ class LCARSComboDisplayer(ComboBase):
                 ConfigOption(f"{prefix}_bar_bg_color", "color", "Bar BG Color:", "rgba(0,0,0,0.5)"),
                 ConfigOption(f"{prefix}_bar_fg_color", "color", "Bar FG Color:", "rgba(255,153,102,1)"),
                 ConfigOption(f"{prefix}_bar_corner_radius", "spinner", "Bar Corner Radius (px):", 8, 0, 50, 1, 0),
+                ConfigOption(f"{prefix}_bar_text_layout", "dropdown", "Text Layout:", "superimposed",
+                             options_dict={"Superimposed": "superimposed", "Text Left, Bar Right": "left", "Bar Left, Text Right": "right"}),
+                ConfigOption(f"{prefix}_bar_text_split_ratio", "scale", "Text/Bar Split Ratio:", "0.4", 0.1, 0.9, 0.05, 2,
+                             tooltip="The proportion of space given to the text when layout is not superimposed."),
             ]
         }
         
@@ -97,7 +101,9 @@ class LCARSComboDisplayer(ComboBase):
         model["Level Bar Style"] = [ConfigOption(f"{prefix}_{opt.key}", opt.type, opt.label, opt.default, opt.min_val, opt.max_val, opt.step, opt.digits, opt.options_dict, opt.tooltip, opt.file_filters) for section in lb_model.values() for opt in section if section != "Level Bar Range"]
         
         g_model = GraphDisplayer.get_config_model()
-        model["Graph Style"] = [ConfigOption(f"{prefix}_{opt.key}", opt.type, opt.label, opt.default, opt.min_val, opt.max_val, opt.step, opt.digits, opt.options_dict, opt.tooltip, opt.file_filters) for section in g_model.values() for opt in section]
+        graph_style_options = [ConfigOption(f"{prefix}_{opt.key}", opt.type, opt.label, opt.default, opt.min_val, opt.max_val, opt.step, opt.digits, opt.options_dict, opt.tooltip, opt.file_filters) for section in g_model.values() for opt in section]
+        graph_style_options.insert(0, ConfigOption(f"{prefix}_graph_lcars_bg_color", "color", "Background Color:", "rgba(0,0,0,1)"))
+        model["Graph Style"] = graph_style_options
         
         return model
 
@@ -109,20 +115,23 @@ class LCARSComboDisplayer(ComboBase):
         """
         model = {
             "Frame Style": [
-                ConfigOption("lcars_sidebar_extension", "spinner", "Sidebar Top Extension (px):", 40, 0, 500, 5, 0),
-                ConfigOption("lcars_top_bar_height", "spinner", "Top Bar Height (px):", 40, 10, 200, 2, 0),
+                ConfigOption("lcars_sidebar_extension_mode", "dropdown", "Sidebar Extension:", "top",
+                             options_dict={"Top Only": "top", "Bottom Only": "bottom", "Top and Bottom": "both"}),
+                ConfigOption("lcars_top_extension_height", "spinner", "Top Extension Height (px):", 40, 0, 500, 5, 0),
+                ConfigOption("lcars_bottom_extension_height", "spinner", "Bottom Extension Height (px):", 40, 0, 500, 5, 0),
                 ConfigOption("lcars_sidebar_width", "spinner", "Side Bar Width (px):", 150, 20, 500, 5, 0),
                 ConfigOption("lcars_corner_radius", "spinner", "Corner Radius (px):", 60, 10, 500, 5, 0),
                 ConfigOption("lcars_frame_color", "color", "Frame Color:", "rgba(255,153,102,1)"), # Peach
                 ConfigOption("lcars_content_bg_color", "color", "Content BG Color:", "rgba(0,0,0,1)"),
-                ConfigOption("lcars_content_top_padding", "spinner", "Content Top Padding (px):", 5, 0, 100, 1, 0),
+                ConfigOption("lcars_content_padding", "spinner", "Content Padding (px):", 5, 0, 100, 1, 0),
             ],
-            "Top Bar": [
+            "Header": [
                 ConfigOption("lcars_header_text", "string", "Header Text:", "U.S.S. ENTERPRISE"),
+                ConfigOption("lcars_header_align", "dropdown", "Horiz. Align:", "left",
+                             options_dict={"Left": "left", "Center": "center", "Right": "right"}),
+                ConfigOption("lcars_header_padding", "spinner", "Horiz. Padding (px):", 10, 0, 50, 1, 0),
                 ConfigOption("lcars_header_font", "font", "Header Font:", "Swiss 911 Ultra Compressed 18"),
                 ConfigOption("lcars_header_color", "color", "Header Color:", "rgba(0,0,0,1)"),
-                ConfigOption("lcars_header_bg_color", "color", "Header BG Color:", "rgba(204,153,255,1)"), # Lilac
-                ConfigOption("lcars_header_padding", "spinner", "Header Padding (px):", 10, 0, 50, 1, 0),
             ],
             "Animation": [
                 ConfigOption("lcars_animation_enabled", "bool", "Enable Bar Animation:", "True"),
@@ -162,12 +171,26 @@ class LCARSComboDisplayer(ComboBase):
             
             frame_ui_model = {
                 "Frame Style": self._get_full_config_model()["Frame Style"],
-                "Top Bar": self._get_full_config_model()["Top Bar"],
+                "Header": self._get_full_config_model()["Header"],
                 "Animation": self._get_full_config_model()["Animation"]
             }
             build_ui_from_model(frame_box, panel_config, frame_ui_model, widgets)
             dialog.dynamic_models.append(frame_ui_model)
-            
+
+            # Dynamic visibility for extension height spinners
+            ext_mode_combo = widgets.get("lcars_sidebar_extension_mode")
+            top_ext_spinner = widgets.get("lcars_top_extension_height")
+            bottom_ext_spinner = widgets.get("lcars_bottom_extension_height")
+            if ext_mode_combo and top_ext_spinner and bottom_ext_spinner:
+                top_ext_row = top_ext_spinner.get_parent()
+                bottom_ext_row = bottom_ext_spinner.get_parent()
+                def on_ext_mode_changed(combo):
+                    mode = combo.get_active_id()
+                    top_ext_row.set_visible(mode in ["top", "both"])
+                    bottom_ext_row.set_visible(mode in ["bottom", "both"])
+                ext_mode_combo.connect("changed", on_ext_mode_changed)
+                GLib.idle_add(on_ext_mode_changed, ext_mode_combo)
+
             frame_box.append(Gtk.Separator(margin_top=15, margin_bottom=5))
             frame_box.append(Gtk.Label(label="<b>Side Bar Segments</b>", use_markup=True, xalign=0))
             
@@ -288,8 +311,7 @@ class LCARSComboDisplayer(ComboBase):
                     if w and w.get_parent(): w.set_visible(is_visible)
             
             if item_height_widget_container:
-                item_height_widget_container.set_visible(active_id in ["level_bar", "graph"])
-
+                item_height_widget_container.set_visible(True)
 
         display_as_combo.connect("changed", update_visibility)
         GLib.idle_add(update_visibility, display_as_combo)
@@ -379,20 +401,39 @@ class LCARSComboDisplayer(ComboBase):
         return layout
 
     def _draw_frame_and_sidebar(self, ctx, width, height):
-        top_bar_h = float(self.config.get("lcars_top_bar_height", 40))
         sidebar_w = float(self.config.get("lcars_sidebar_width", 150))
         radius = float(self.config.get("lcars_corner_radius", 60))
         frame_color_str = self.config.get("lcars_frame_color", "rgba(255,153,102,1)")
-        
+        mode = self.config.get("lcars_sidebar_extension_mode", "top")
+        top_ext_h = float(self.config.get("lcars_top_extension_height", 40)) if mode in ["top", "both"] else 0
+        bottom_ext_h = float(self.config.get("lcars_bottom_extension_height", 40)) if mode in ["bottom", "both"] else 0
+
+        # This top_bar_h is now effectively the starting Y of the main content area
+        top_bar_h = top_ext_h
+
         ctx.new_path()
-        ctx.move_to(0, radius); ctx.arc(radius, radius, radius, math.pi, 1.5 * math.pi)
-        ctx.line_to(width, 0); ctx.line_to(width, top_bar_h)
+        # Top-left and top edge
+        ctx.move_to(0, radius)
+        ctx.arc(radius, radius, radius, math.pi, 1.5 * math.pi)
+        ctx.line_to(width, 0)
+        
+        # Top-right down to content area
+        ctx.line_to(width, top_bar_h)
+        
+        # Top edge of content area and inner corner
         ctx.line_to(sidebar_w + radius, top_bar_h)
         ctx.arc_negative(sidebar_w + radius, top_bar_h + radius, radius, 1.5 * math.pi, math.pi)
-        ctx.line_to(sidebar_w, height); ctx.line_to(0, height); ctx.close_path()
+        
+        # Left edge of content area, goes down to bottom of panel
+        ctx.line_to(sidebar_w, height)
+        
+        # Bottom edge and bottom-left corner
+        ctx.line_to(0, height)
+        ctx.close_path()
         
         frame_color = Gdk.RGBA(); frame_color.parse(frame_color_str)
-        ctx.set_source_rgba(frame_color.red, frame_color.green, frame_color.blue, frame_color.alpha); ctx.fill()
+        ctx.set_source_rgba(frame_color.red, frame_color.green, frame_color.blue, frame_color.alpha)
+        ctx.fill()
         
         self._draw_header(ctx, width, height)
         self._draw_sidebar_segments(ctx, width, height)
@@ -422,20 +463,28 @@ class LCARSComboDisplayer(ComboBase):
         if num_segments == 0: return
 
         sidebar_w = float(self.config.get("lcars_sidebar_width", 150))
-        extension_h = float(self.config.get("lcars_sidebar_extension", 40))
+        
+        mode = self.config.get("lcars_sidebar_extension_mode", "top")
+        top_ext_h = float(self.config.get("lcars_top_extension_height", 40)) if mode in ["top", "both"] else 0
+        bottom_ext_h = float(self.config.get("lcars_bottom_extension_height", 40)) if mode in ["bottom", "both"] else 0
+        
+        start_y = top_ext_h
+        available_h = height - top_ext_h - bottom_ext_h
+        
         total_weight = sum(float(self.config.get(f"segment_{i}_height_weight", 1)) for i in range(1, num_segments + 1)) or 1
-        available_h, current_y = height - extension_h, extension_h
+        current_y = start_y
 
         for i in range(1, num_segments + 1):
             weight = float(self.config.get(f"segment_{i}_height_weight", 1))
-            seg_h = (weight / total_weight) * available_h
+            seg_h = (weight / total_weight) * available_h if total_weight > 0 else 0
             color_str = self.config.get(f"segment_{i}_color", "rgba(200,100,100,1)")
             seg_color = Gdk.RGBA(); seg_color.parse(color_str)
             ctx.set_source_rgba(seg_color.red, seg_color.green, seg_color.blue, seg_color.alpha)
             ctx.rectangle(0, current_y, sidebar_w, seg_h); ctx.fill()
             
             ctx.set_source_rgba(0,0,0,1); ctx.set_line_width(2)
-            ctx.move_to(0, current_y + seg_h); ctx.line_to(sidebar_w, current_y + seg_h); ctx.stroke()
+            if i < num_segments:
+                ctx.move_to(0, current_y + seg_h); ctx.line_to(sidebar_w, current_y + seg_h); ctx.stroke()
             
             label_text = self.config.get(f"segment_{i}_label", "").upper()
             font_str, color_str = self.config.get(f"segment_{i}_font"), self.config.get(f"segment_{i}_label_color")
@@ -445,11 +494,18 @@ class LCARSComboDisplayer(ComboBase):
             current_y += seg_h
 
     def _draw_content_widgets(self, ctx, width, height):
-        top_bar_h = float(self.config.get("lcars_top_bar_height", 40))
+        mode = self.config.get("lcars_sidebar_extension_mode", "top")
+        top_ext_h = float(self.config.get("lcars_top_extension_height", 40)) if mode in ["top", "both"] else 0
+        bottom_ext_h = float(self.config.get("lcars_bottom_extension_height", 40)) if mode in ["bottom", "both"] else 0
+        
         sidebar_w = float(self.config.get("lcars_sidebar_width", 150))
-        top_padding = float(self.config.get("lcars_content_top_padding", 5))
-        content_x, content_y = sidebar_w + 5, top_bar_h + top_padding
-        content_w, content_h = width - content_x - 5, height - content_y - 5
+        padding = float(self.config.get("lcars_content_padding", 5))
+        
+        content_x = sidebar_w + padding
+        content_y = top_ext_h + padding
+        content_w = width - content_x - padding
+        content_h = height - top_ext_h - bottom_ext_h - (2 * padding)
+
         if content_w <= 0 or content_h <= 0: return
         
         ctx.save(); ctx.rectangle(content_x, content_y, content_w, content_h); ctx.clip()
@@ -461,7 +517,7 @@ class LCARSComboDisplayer(ComboBase):
         
         primary_data = self.data_bundle.get("primary_source", {})
         if primary_data:
-            primary_h = float(self.config.get("primary_item_height", 40)) if self.config.get("primary_display_as") in ["level_bar", "graph"] else 40
+            primary_h = float(self.config.get("primary_item_height", 60))
             self._draw_content_item(ctx, content_x, current_y, content_w, primary_h, "primary", primary_data)
             current_y += primary_h + 5; content_h -= primary_h + 5
             
@@ -512,12 +568,16 @@ class LCARSComboDisplayer(ComboBase):
         padding = 10
         ctx.save(); ctx.rectangle(x+padding, y, w-2*padding, h); ctx.clip(); ctx.translate(x+padding,y)
         drawer_config = {}; populate_defaults_from_model(drawer_config, GraphDisplayer.get_config_model())
+        
         for key, value in self.config.items():
             if key.startswith(f"{prefix}_"):
-                # --- FIX: Map the prefixed key to the simple key the helper expects ---
-                # Example: 'secondary1_graph_overlay_font' becomes 'overlay_font'
-                unprefixed_key = key.replace(f"{prefix}_graph_", '').replace(f"{prefix}_", '')
+                unprefixed_key = key[len(prefix) + 1:]
                 drawer_config[unprefixed_key] = value
+
+        lcars_bg_color = self.config.get(f"{prefix}_graph_lcars_bg_color")
+        if lcars_bg_color:
+            drawer_config['graph_bg_color'] = lcars_bg_color
+            drawer_config['graph_bg_type'] = 'solid'
 
         self._graph_drawer.config = drawer_config
         self._graph_drawer.history = self._history_buffers.get(f"{prefix}_graph", [])
@@ -543,7 +603,6 @@ class LCARSComboDisplayer(ComboBase):
         drawer_config['level_max_value'] = data.get('max_value', 100.0)
         
         self._level_bar_drawer.config = drawer_config
-        # --- FIX: Manually set the state of the helper drawer before drawing ---
         self._level_bar_drawer._sync_state_with_config()
         
         bar_anim_key = f"{prefix}_bar"
@@ -581,24 +640,60 @@ class LCARSComboDisplayer(ComboBase):
             PangoCairo.show_layout(ctx, value_layout)
 
     def _draw_key_value_bar(self, ctx, x, y, w, h, prefix, data, radius):
-        padding = 10
-        bar_h, bar_y = h * 0.6, y + (h - h * 0.6) / 2
-        bar_x, bar_w = x + padding, w - 2 * padding
-        bar_anim_key = f"{prefix}_bar"
-        percent = self._bar_values.get(bar_anim_key, {}).get('current', 0.0)
-        bg_color_str = self.config.get(f"{prefix}_bar_bg_color", "rgba(0,0,0,0.5)")
-        fg_color_str = self.config.get(f"{prefix}_bar_fg_color", "rgba(255,153,102,1)")
+        layout = self.config.get(f"{prefix}_bar_text_layout", "superimposed")
         
-        ctx.save()
-        bg_color = Gdk.RGBA(); bg_color.parse(bg_color_str)
-        ctx.set_source_rgba(bg_color.red, bg_color.green, bg_color.blue, bg_color.alpha)
-        self._draw_rounded_rect(ctx, bar_x, bar_y, bar_w, bar_h, radius); ctx.fill()
-        if percent > 0:
-            fg_color = Gdk.RGBA(); fg_color.parse(fg_color_str)
-            ctx.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha)
-            self._draw_rounded_rect(ctx, bar_x, bar_y, bar_w * percent, bar_h, radius); ctx.fill()
-        ctx.restore()
-        self._draw_key_value_text(ctx, x, y, w, h, prefix, data, radius)
+        if layout == "superimposed":
+            padding = 10
+            bar_h, bar_y = h * 0.6, y + (h - h * 0.6) / 2
+            bar_x, bar_w = x + padding, w - 2 * padding
+            bar_anim_key = f"{prefix}_bar"
+            percent = self._bar_values.get(bar_anim_key, {}).get('current', 0.0)
+            bg_color_str = self.config.get(f"{prefix}_bar_bg_color", "rgba(0,0,0,0.5)")
+            fg_color_str = self.config.get(f"{prefix}_bar_fg_color", "rgba(255,153,102,1)")
+            
+            ctx.save()
+            bg_color = Gdk.RGBA(); bg_color.parse(bg_color_str)
+            ctx.set_source_rgba(bg_color.red, bg_color.green, bg_color.blue, bg_color.alpha)
+            self._draw_rounded_rect(ctx, bar_x, bar_y, bar_w, bar_h, radius); ctx.fill()
+            if percent > 0:
+                fg_color = Gdk.RGBA(); fg_color.parse(fg_color_str)
+                ctx.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha)
+                self._draw_rounded_rect(ctx, bar_x, bar_y, bar_w * percent, bar_h, radius); ctx.fill()
+            ctx.restore()
+            self._draw_key_value_text(ctx, x, y, w, h, prefix, data, radius)
+        else: # Handle left/right layouts
+            ratio = float(self.config.get(f"{prefix}_bar_text_split_ratio", 0.4))
+            spacing = 5
+            
+            text_w = (w * ratio) - (spacing / 2)
+            bar_w = w * (1.0 - ratio) - (spacing / 2)
+
+            if layout == "left":
+                text_x = x
+                bar_x = x + text_w + spacing
+            else: # right
+                bar_x = x
+                text_x = x + bar_w + spacing
+
+            # Draw bar part
+            bar_anim_key = f"{prefix}_bar"
+            percent = self._bar_values.get(bar_anim_key, {}).get('current', 0.0)
+            bg_color_str = self.config.get(f"{prefix}_bar_bg_color", "rgba(0,0,0,0.5)")
+            fg_color_str = self.config.get(f"{prefix}_bar_fg_color", "rgba(255,153,102,1)")
+            
+            ctx.save()
+            bg_color = Gdk.RGBA(); bg_color.parse(bg_color_str)
+            ctx.set_source_rgba(bg_color.red, bg_color.green, bg_color.blue, bg_color.alpha)
+            self._draw_rounded_rect(ctx, bar_x, y, bar_w, h, radius); ctx.fill()
+            if percent > 0:
+                fg_color = Gdk.RGBA(); fg_color.parse(fg_color_str)
+                ctx.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha)
+                self._draw_rounded_rect(ctx, bar_x, y, bar_w * percent, h, radius); ctx.fill()
+            ctx.restore()
+
+            # Draw text part
+            self._draw_key_value_text(ctx, text_x, y, text_w, h, prefix, data, radius=0)
+
 
     def _draw_rounded_rect(self, ctx, x, y, w, h, r):
         if r <= 0 or w <= 0 or h <= 0: ctx.rectangle(x, y, w, h); return

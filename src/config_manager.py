@@ -5,9 +5,9 @@ from gi.repository import GLib
 
 config_home = GLib.get_user_config_dir()
 if config_home:
-    APP_CONFIG_DIR = os.path.join(config_home, "gtk-system-monitor")
+    APP_CONFIG_DIR = os.path.join(config_home, "gSens")
 else:
-    APP_CONFIG_DIR = os.path.expanduser("~/.config/gtk-system-monitor")
+    APP_CONFIG_DIR = os.path.expanduser("~/.config/gSens")
 
 DEFAULT_CONFIG_FILE = os.path.join(APP_CONFIG_DIR, "panel_settings.ini")
 
@@ -191,4 +191,3 @@ class ConfigManager:
 
 # Global instance of the configuration manager
 config_manager = ConfigManager()
-

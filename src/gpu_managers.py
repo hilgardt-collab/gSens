@@ -138,11 +138,10 @@ class GPUManager:
         vendor, original_index = self._get_gpu_info(gpu_index)
         if vendor == "nvidia":
             return self.nvml_manager.get_power_usage(original_index)
-        # Placeholder for future AMD/Intel support
-        # elif vendor == "amd":
-        #     return self.amd_manager.get_power_usage(original_index)
-        # elif vendor == "intel":
-        #     return self.intel_manager.get_power_usage(original_index)
+        elif vendor == "amd":
+            return self.amd_manager.get_power_usage(original_index)
+        elif vendor == "intel":
+            return self.intel_manager.get_power_usage(original_index)
         return None 
 
     def get_fan_speed(self, gpu_index):
@@ -150,11 +149,10 @@ class GPUManager:
         vendor, original_index = self._get_gpu_info(gpu_index)
         if vendor == "nvidia":
             return self.nvml_manager.get_fan_speed(original_index)
-        # Placeholder for future AMD/Intel support
-        # elif vendor == "amd":
-        #     return self.amd_manager.get_fan_speed(original_index)
-        # elif vendor == "intel":
-        #     return self.intel_manager.get_fan_speed(original_index)
+        elif vendor == "amd":
+            return self.amd_manager.get_fan_speed(original_index)
+        elif vendor == "intel":
+            return self.intel_manager.get_fan_speed(original_index)
         return None 
 
     def get_running_processes_count(self, gpu_index):
@@ -166,3 +164,4 @@ class GPUManager:
 
 # Create a single global instance of the unified manager
 gpu_manager = GPUManager()
+

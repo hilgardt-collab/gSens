@@ -168,7 +168,6 @@ class CPUDataSource(DataSource):
             return f"{value:.0f} MHz"
         return "N/A"
 
-    # --- FIX: Implement get_primary_label_string to provide useful context ---
     def get_primary_label_string(self, data):
         """Returns a descriptive label for the currently displayed metric."""
         metric = self.config.get("cpu_metric_to_display", "usage")
@@ -209,7 +208,6 @@ class CPUDataSource(DataSource):
         ]
         
         # --- Temperature Options ---
-        # --- FIX: Read discovered sensors from the global cache instead of re-discovering. ---
         temp_sensors = SENSOR_CACHE.get('cpu_temp', {"": {"display_name": "Scanning..."}})
         temp_opts = {v['display_name']: k for k, v in sorted(temp_sensors.items(), key=lambda i:i[1]['display_name'])}
         model["Temperature Settings"] = [
@@ -262,6 +260,10 @@ class CPUDataSource(DataSource):
             metric_combo = widgets.get("cpu_metric_to_display")
             if not metric_combo: return
 
+            # Find graph range widgets for dynamic updates
+            graph_min_widget = widgets.get("graph_min_value")
+            graph_max_widget = widgets.get("graph_max_value")
+
             all_children = list(content_box)
             section_widgets = {}
             section_titles = ["Usage Settings", "Temperature Settings", "Frequency Settings"]
@@ -289,6 +291,18 @@ class CPUDataSource(DataSource):
                 for w_list in section_widgets.get("Temperature Settings", []): w_list.set_visible(active_metric == "temperature")
                 for w_list in section_widgets.get("Frequency Settings", []): w_list.set_visible(active_metric == "frequency")
 
+                # BUG FIX: Use positional arguments for Gtk.Adjustment.configure()
+                if graph_min_widget and graph_max_widget:
+                    if active_metric == "usage":
+                        graph_min_widget.get_adjustment().configure(0, 0, 100, 1, 10, 0)
+                        graph_max_widget.get_adjustment().configure(100, 0, 100, 1, 10, 0)
+                    elif active_metric == "temperature":
+                        graph_min_widget.get_adjustment().configure(0, -20, 150, 1, 10, 0)
+                        graph_max_widget.get_adjustment().configure(100, -20, 150, 5, 50, 0)
+                    elif active_metric == "frequency":
+                        graph_min_widget.get_adjustment().configure(0, 0, 10000, 100, 1000, 0)
+                        graph_max_widget.get_adjustment().configure(5000, 0, 10000, 100, 1000, 0)
+            
             metric_combo.connect("changed", on_metric_changed)
             
             if is_combo_child:

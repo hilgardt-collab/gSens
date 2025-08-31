@@ -24,13 +24,16 @@ class ArcGaugeDisplayer(DataDisplayer):
         # --- Animation State ---
         self._animation_timer_id = None
         self._is_first_update = True
-        self._current_display_value = 0.0  # The value currently shown on the gauge
-        self._target_value = 0.0           # The actual value from the data source
+        self._current_display_value = 0.0
+        self._target_value = 0.0
+        
+        # --- Caching State ---
+        self._static_surface = None
+        self._last_draw_width, self._last_draw_height = -1, -1
         
         super().__init__(panel_ref, config)
         populate_defaults_from_model(self.config, self.get_config_model())
 
-        # Connect signals for starting and stopping the animation timer
         self.widget.connect("realize", self._start_animation_timer)
         self.widget.connect("unrealize", self._stop_animation_timer)
 
@@ -40,7 +43,7 @@ class ArcGaugeDisplayer(DataDisplayer):
         return self.drawing_area
 
     def update_display(self, value):
-        if not self.panel_ref: return # Guard against race condition on close
+        if not self.panel_ref: return
         new_value = self.panel_ref.data_source.get_numerical_value(value) or 0.0
         
         if self._is_first_update:
@@ -63,8 +66,6 @@ class ArcGaugeDisplayer(DataDisplayer):
             self.display_value_text = "N/A"
             self.unit_text = ""
             
-        # The animation tick will handle the drawing, no need to queue_draw here
-
     @staticmethod
     def get_config_model():
         model = DataDisplayer.get_config_model()
@@ -106,11 +107,11 @@ class ArcGaugeDisplayer(DataDisplayer):
 
     def apply_styles(self):
         super().apply_styles()
+        self._static_surface = None # Invalidate cache on style change
         self.drawing_area.queue_draw()
 
     def _start_animation_timer(self, widget=None):
         self._stop_animation_timer()
-        # Run the animation at roughly 60fps
         self._animation_timer_id = GLib.timeout_add(16, self._animation_tick)
 
     def _stop_animation_timer(self, widget=None):
@@ -126,7 +127,6 @@ class ArcGaugeDisplayer(DataDisplayer):
         animation_enabled = str(self.config.get("gauge_animation_enabled", "True")).lower() == 'true'
 
         if not animation_enabled:
-            # If animation is disabled, just snap to the target value and draw
             if self._current_display_value != self._target_value:
                 self._current_display_value = self._target_value
                 self.drawing_area.queue_draw()
@@ -134,24 +134,20 @@ class ArcGaugeDisplayer(DataDisplayer):
 
         diff = self._target_value - self._current_display_value
         
-        # If the difference is negligible, snap to the target and stop moving
         if abs(diff) < 0.01:
             if self._current_display_value != self._target_value:
                 self._current_display_value = self._target_value
-                self.drawing_area.queue_draw() # Final draw
+                self.drawing_area.queue_draw()
             return GLib.SOURCE_CONTINUE
 
-        # Calculate the step size for smooth animation
         duration_ms = float(self.config.get("gauge_animation_duration", "400"))
         min_v = float(self.config.get("gauge_min_value", 0))
         max_v = float(self.config.get("gauge_max_value", 100))
         v_range = max_v - min_v if max_v > min_v else 1
         
-        # How many steps in the total duration? (at 16ms per step)
         total_steps = duration_ms / 16.0
         step_size = v_range / total_steps if total_steps > 0 else v_range
 
-        # Move the current value towards the target
         if diff > 0:
             self._current_display_value = min(self._target_value, self._current_display_value + step_size)
         else:
@@ -163,20 +159,55 @@ class ArcGaugeDisplayer(DataDisplayer):
     def on_draw_gauge(self, area, ctx, width, height):
         if width <= 0 or height <= 0: return
 
-        # Background
-        bg_color = Gdk.RGBA(); bg_color.parse(self.config.get("gauge_bg_color", "rgba(40,40,40,1.0)"))
-        ctx.set_source_rgba(bg_color.red, bg_color.green, bg_color.blue, bg_color.alpha); ctx.paint()
+        # Regenerate static surface if needed
+        if not self._static_surface or self._last_draw_width != width or self._last_draw_height != height:
+            self._static_surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, width, height)
+            static_ctx = cairo.Context(self._static_surface)
+            
+            # Draw static background
+            bg_color = Gdk.RGBA(); bg_color.parse(self.config.get("gauge_bg_color", "rgba(40,40,40,1.0)"))
+            static_ctx.set_source_rgba(bg_color.red, bg_color.green, bg_color.blue, bg_color.alpha); static_ctx.paint()
+            
+            # Geometry for static drawing
+            cx, cy = width / 2, height / 2
+            min_dim = min(width, height)
+            inner_r = min_dim / 2 * float(self.config.get("gauge_inner_radius_factor", 0.6))
+            outer_r = min_dim / 2 * float(self.config.get("gauge_outer_radius_factor", 0.8))
+            start_angle = math.radians(float(self.config.get("gauge_start_angle", 135)))
+            end_angle = math.radians(float(self.config.get("gauge_end_angle", 45)))
+            num_lines = int(self.config.get("gauge_num_lines", 60))
+            total_angle = end_angle - start_angle
+            if total_angle <= 0: total_angle += 2 * math.pi
+            angle_step = total_angle / (num_lines - 1) if num_lines > 1 else 0
+
+            # Draw all segments in INACTIVE state
+            inactive_c = Gdk.RGBA(); inactive_c.parse(self.config.get("gauge_inactive_color"))
+            inactive_width = float(self.config.get("gauge_inactive_line_width", 1.5))
+            static_ctx.set_line_width(inactive_width)
+            static_ctx.set_source_rgba(inactive_c.red, inactive_c.green, inactive_c.blue, inactive_c.alpha)
+            
+            for i in range(num_lines):
+                angle = start_angle + i * angle_step
+                x1, y1 = cx + math.cos(angle) * inner_r, cy + math.sin(angle) * inner_r
+                x2, y2 = cx + math.cos(angle) * outer_r, cy + math.sin(angle) * outer_r
+                static_ctx.move_to(x1, y1); static_ctx.line_to(x2, y2); static_ctx.stroke()
+
+            self._last_draw_width, self._last_draw_height = width, height
+
+        # Paint the cached surface
+        ctx.set_source_surface(self._static_surface, 0, 0)
+        ctx.paint()
+
+        # --- DYNAMIC DRAWING ---
 
         # Geometry Calculations
         cx, cy = width / 2, height / 2
         min_dim = min(width, height)
         inner_r = min_dim / 2 * float(self.config.get("gauge_inner_radius_factor", 0.6))
         outer_r = min_dim / 2 * float(self.config.get("gauge_outer_radius_factor", 0.8))
-        
         start_angle = math.radians(float(self.config.get("gauge_start_angle", 135)))
         end_angle = math.radians(float(self.config.get("gauge_end_angle", 45)))
         num_lines = int(self.config.get("gauge_num_lines", 60))
-        
         total_angle = end_angle - start_angle
         if total_angle <= 0: total_angle += 2 * math.pi
         angle_step = total_angle / (num_lines - 1) if num_lines > 1 else 0
@@ -185,41 +216,28 @@ class ArcGaugeDisplayer(DataDisplayer):
         min_v = float(self.config.get("gauge_min_value", 0))
         max_v = float(self.config.get("gauge_max_value", 100))
         v_range = max_v - min_v if max_v > min_v else 1
-        
         green_end_v = float(self.config.get("gauge_green_zone_end", 60))
         yellow_end_v = float(self.config.get("gauge_yellow_zone_end", 80))
         
-        # Use the animated display value for drawing
         value_ratio = (min(max(self._current_display_value, min_v), max_v) - min_v) / v_range
         active_line_count = int(round(value_ratio * num_lines))
 
-        # Colors
+        # Colors & Line Widths
         green_c = Gdk.RGBA(); green_c.parse(self.config.get("gauge_green_color"))
         yellow_c = Gdk.RGBA(); yellow_c.parse(self.config.get("gauge_yellow_color"))
         red_c = Gdk.RGBA(); red_c.parse(self.config.get("gauge_red_color"))
-        inactive_c = Gdk.RGBA(); inactive_c.parse(self.config.get("gauge_inactive_color"))
-        
-        # Line Widths
         active_width = float(self.config.get("gauge_active_line_width", 2.5))
-        inactive_width = float(self.config.get("gauge_inactive_line_width", 1.5))
 
-        # Draw Segments
-        for i in range(num_lines):
-            is_active = (i < active_line_count)
-            
-            # Determine color and width
-            if is_active:
-                ctx.set_line_width(active_width)
-                segment_value = min_v + (i / (num_lines -1)) * v_range if num_lines > 1 else min_v
-                if segment_value <= green_end_v:
-                    ctx.set_source_rgba(green_c.red, green_c.green, green_c.blue, green_c.alpha)
-                elif segment_value <= yellow_end_v:
-                    ctx.set_source_rgba(yellow_c.red, yellow_c.green, yellow_c.blue, yellow_c.alpha)
-                else:
-                    ctx.set_source_rgba(red_c.red, red_c.green, red_c.blue, red_c.alpha)
+        # Draw ACTIVE Segments
+        ctx.set_line_width(active_width)
+        for i in range(active_line_count):
+            segment_value = min_v + (i / (num_lines -1)) * v_range if num_lines > 1 else min_v
+            if segment_value <= green_end_v:
+                ctx.set_source_rgba(green_c.red, green_c.green, green_c.blue, green_c.alpha)
+            elif segment_value <= yellow_end_v:
+                ctx.set_source_rgba(yellow_c.red, yellow_c.green, yellow_c.blue, yellow_c.alpha)
             else:
-                ctx.set_line_width(inactive_width)
-                ctx.set_source_rgba(inactive_c.red, inactive_c.green, inactive_c.blue, inactive_c.alpha)
+                ctx.set_source_rgba(red_c.red, red_c.green, red_c.blue, red_c.alpha)
             
             angle = start_angle + i * angle_step
             x1, y1 = cx + math.cos(angle) * inner_r, cy + math.sin(angle) * inner_r
