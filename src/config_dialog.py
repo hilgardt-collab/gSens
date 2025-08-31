@@ -1,7 +1,10 @@
-# config_dialog.py
+# /config_dialog.py
 import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk, Gdk, GLib
+
+# Import the clipboard singletons from the new unified module
+from ui_clipboard import font_clipboard, color_clipboard
 
 class ConfigOption:
     """
@@ -58,12 +61,57 @@ def build_ui_from_model(parent_box, config, model, widgets=None):
             elif option.type == "bool":
                 widget = Gtk.Switch(active=str(config.get(option.key, str(option.default))).lower() == 'true', halign=Gtk.Align.END)
             elif option.type == "color":
+                color_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, hexpand=True)
+                
                 rgba = Gdk.RGBA()
                 rgba.parse(str(config.get(option.key, option.default)))
                 widget = Gtk.ColorButton.new_with_rgba(rgba)
                 widget.set_use_alpha(True)
+                widget.set_hexpand(True)
+                color_box.append(widget)
+
+                copy_button = Gtk.Button(icon_name="edit-copy-symbolic", tooltip_text="Copy Color")
+                paste_button = Gtk.Button(icon_name="edit-paste-symbolic", tooltip_text="Paste Color")
+
+                copy_button.connect("clicked", lambda btn, color_btn=widget: color_clipboard.copy_color(color_btn.get_rgba().to_string()))
+                
+                def on_paste_clicked(btn, color_btn=widget):
+                    color_to_paste_str = color_clipboard.get_color()
+                    if color_to_paste_str:
+                        new_rgba = Gdk.RGBA()
+                        if new_rgba.parse(color_to_paste_str):
+                            color_btn.set_rgba(new_rgba)
+
+                paste_button.connect("clicked", on_paste_clicked)
+                
+                color_box.append(copy_button)
+                color_box.append(paste_button)
+                
+                row.append(color_box)
+
             elif option.type == "font":
+                font_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, hexpand=True)
+                
                 widget = Gtk.FontButton.new_with_font(str(config.get(option.key, option.default)))
+                widget.set_hexpand(True)
+                font_box.append(widget)
+
+                copy_button = Gtk.Button(icon_name="edit-copy-symbolic", tooltip_text="Copy Font")
+                paste_button = Gtk.Button(icon_name="edit-paste-symbolic", tooltip_text="Paste Font")
+
+                copy_button.connect("clicked", lambda btn, font_btn=widget: font_clipboard.copy_font(font_btn.get_font()))
+                
+                def on_paste_clicked(btn, font_btn=widget):
+                    font_to_paste = font_clipboard.get_font()
+                    if font_to_paste:
+                        font_btn.set_font(font_to_paste)
+                
+                paste_button.connect("clicked", on_paste_clicked)
+                
+                font_box.append(copy_button)
+                font_box.append(paste_button)
+                
+                row.append(font_box)
             elif option.type == "scale":
                 widget = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, option.min_val, option.max_val, option.step)
                 widget.set_value(float(config.get(option.key, option.default)))
@@ -154,7 +202,7 @@ def build_ui_from_model(parent_box, config, model, widgets=None):
                 if option.type == "scale":
                     container.append(widget)
                     parent_box.append(container)
-                elif option.type not in ["file", "timezone_selector"]:
+                elif option.type not in ["file", "timezone_selector", "font", "color"]:
                     row.append(widget)
 
                 if option.type != "scale":
@@ -216,3 +264,5 @@ def get_config_from_widgets(widgets, models_list):
             else:
                 new_config[key] = option_def.default
     return new_config
+
+

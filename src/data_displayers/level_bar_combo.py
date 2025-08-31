@@ -1,4 +1,4 @@
-# data_displayers/level_bar_combo.py
+# /data_displayers/level_bar_combo.py
 import gi
 import math
 import cairo
@@ -19,14 +19,25 @@ class LevelBarComboDisplayer(ComboBase):
     def __init__(self, panel_ref, config):
         self._animation_timer_id = None
         self._bar_values = {}
-        # Create a dummy LevelBarDisplayer instance to borrow its drawing logic
-        self._drawer = LevelBarDisplayer(panel_ref, config)
+        # --- FIX: Initialize helper with None as the panel_ref ---
+        self._drawer = LevelBarDisplayer(None, config)
 
         super().__init__(panel_ref, config)
         populate_defaults_from_model(self.config, self.get_config_model())
         
         self.widget.connect("realize", self._start_animation_timer)
         self.widget.connect("unrealize", self._stop_animation_timer)
+
+    # --- FIX: Override the panel_ref property to propagate it to the helper ---
+    @property
+    def panel_ref(self):
+        return self._panel_ref
+
+    @panel_ref.setter
+    def panel_ref(self, value):
+        self._panel_ref = value
+        if self._drawer:
+            self._drawer.panel_ref = value
 
     def update_display(self, value):
         super().update_display(value) # Stores data_bundle and queues draw
@@ -57,16 +68,11 @@ class LevelBarComboDisplayer(ComboBase):
 
     @staticmethod
     def get_config_model():
-        # --- BUG FIX: Return an empty model here. ---
-        # The entire UI for this complex displayer is built by the custom
-        # configure_callback to prevent duplicate widget creation by the DataPanel.
         return {}
 
     def get_configure_callback(self):
         """Builds the UI for the Display tab with per-bar styling."""
         def build_display_ui(dialog, content_box, widgets, available_sources, panel_config):
-            # --- BUG FIX: Define the model INSIDE the callback ---
-            # This ensures it's only built once, by this callback.
             model = {
                 "Overall Layout": [
                     ConfigOption("combo_bar_orientation", "dropdown", "Bar Orientation:", "vertical", 
@@ -76,26 +82,20 @@ class LevelBarComboDisplayer(ComboBase):
                 ]
             }
 
-            # 1. Build the static layout controls
             dialog.dynamic_models.append(model)
             build_ui_from_model(content_box, panel_config, model, widgets)
             
             content_box.append(Gtk.Separator(margin_top=15, margin_bottom=5))
             content_box.append(Gtk.Label(label="<b>Individual Bar Styles</b>", use_markup=True, xalign=0))
 
-            # 2. Create a notebook for per-bar styles
             style_notebook = Gtk.Notebook()
             content_box.append(style_notebook)
 
-            # 3. Helper function to create the model for a single bar's style tab
             def get_bar_style_model(i):
                 base_model = LevelBarDisplayer.get_config_model()
                 prefixed_model = {}
                 for section, options in base_model.items():
-                    # We don't need these per-bar, they are data-driven
-                    if section in ["Level Bar Range"]:
-                        continue
-                    
+                    if section in ["Level Bar Range"]: continue
                     prefixed_options = []
                     for opt in options:
                         prefixed_options.append(ConfigOption(
@@ -106,12 +106,8 @@ class LevelBarComboDisplayer(ComboBase):
                     prefixed_model[section] = prefixed_options
                 return prefixed_model
 
-            # 4. Function to dynamically create/remove style tabs
             def build_bar_style_tabs(spinner):
                 count = spinner.get_value_as_int()
-                
-                # Remove old models to prevent key conflicts
-                # dialog.dynamic_models = [m for m in dialog.dynamic_models if not any(opt.key.startswith("bar") for s in m.values() for opt in s)]
                 
                 while style_notebook.get_n_pages() > count:
                     style_notebook.remove_page(-1)
@@ -128,7 +124,6 @@ class LevelBarComboDisplayer(ComboBase):
                         build_ui_from_model(tab_box, panel_config, bar_model, widgets)
                         dialog.dynamic_models.append(bar_model)
 
-            # 5. Connect to the 'number_of_bars' spinner from the Data Source tab
             bar_count_spinner = widgets.get("number_of_bars")
             if bar_count_spinner:
                 bar_count_spinner.connect("value-changed", build_bar_style_tabs)
@@ -202,11 +197,9 @@ class LevelBarComboDisplayer(ComboBase):
             source_key = f"{bar_key}_source"
             data_packet = self.data_bundle.get(source_key, {})
             
-            # --- BUG FIX: Populate a clean config with defaults first ---
             drawer_config = {}
             populate_defaults_from_model(drawer_config, LevelBarDisplayer.get_config_model())
 
-            # Then, override with per-bar settings from the main config
             bar_prefix = f"bar{i}_"
             for key, value in self.config.items():
                 if key.startswith(bar_prefix):

@@ -1,4 +1,4 @@
-# data_displayers/level_bar.py
+# /data_displayers/level_bar.py
 import gi
 import time
 import re
@@ -80,7 +80,9 @@ class LevelBarDisplayer(DataDisplayer):
         return GLib.SOURCE_CONTINUE
 
     def update_display(self, value):
-        if not self.panel_ref: return
+        if self.panel_ref is None: return
+
+        self._sync_state_with_config()
 
         self.current_value = self.panel_ref.data_source.get_numerical_value(value) or 0.0
         
@@ -316,7 +318,6 @@ class LevelBarDisplayer(DataDisplayer):
         slant = float(self.config.get("level_bar_slant_px", 0))
         orientation = self.config.get("level_bar_orientation", "vertical")
         
-        # Adjust the drawing area to prevent cropping from the slant
         if orientation == "vertical":
             rect_width = bar_width - abs(slant)
             rect_x = bar_x + abs(slant) / 2.0
@@ -333,7 +334,6 @@ class LevelBarDisplayer(DataDisplayer):
         ctx.save()
         ctx.translate(rect_x, rect_y)
 
-        # Apply a shear transformation to the entire context
         if orientation == "vertical":
             if rect_height > 0:
                 tan_angle = slant / rect_height
@@ -345,13 +345,11 @@ class LevelBarDisplayer(DataDisplayer):
                 matrix = cairo.Matrix(1, tan_angle, 0, 1, 0, 0)
                 ctx.transform(matrix)
 
-        # Draw the background as a single rectangle
         bg_rgba = Gdk.RGBA(); bg_rgba.parse(self.config.get("level_bar_background_color"))
         ctx.set_source_rgba(bg_rgba.red, bg_rgba.green, bg_rgba.blue, bg_rgba.alpha)
         ctx.rectangle(0, 0, rect_width, rect_height)
         ctx.fill()
         
-        # Get settings for drawing segments
         num_segments = int(self.config.get("level_bar_segment_count", 30))
         spacing = float(self.config.get("level_bar_spacing", 2))
         on_color1_str = self.config.get("level_bar_on_color")
@@ -372,7 +370,6 @@ class LevelBarDisplayer(DataDisplayer):
             segment_width = (rect_width - (num_segments - 1) * spacing) / num_segments if num_segments > 0 else 0
             if segment_width <= 0: ctx.restore(); return
 
-        # Draw each segment as a simple rectangle (the transform handles the slant)
         for i in range(num_segments):
             base_color_str = on_color1_str
             if i < self.current_on_level: 
@@ -401,6 +398,7 @@ class LevelBarDisplayer(DataDisplayer):
                 ctx.rectangle(0, seg_y, rect_width, segment_height)
             else:
                 seg_x = i * (segment_width + spacing)
+                # --- FIX: Use the calculated segment_width instead of the full rect_width ---
                 ctx.rectangle(seg_x, 0, segment_width, rect_height)
             ctx.fill()
         
@@ -408,3 +406,4 @@ class LevelBarDisplayer(DataDisplayer):
 
     def close(self):
         self._stop_animation_timer(); super().close()
+

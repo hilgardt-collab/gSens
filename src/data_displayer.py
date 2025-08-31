@@ -1,4 +1,4 @@
-# data_displayer.py
+# /data_displayer.py
 import gi
 from abc import ABC, abstractmethod
 import math
@@ -9,10 +9,20 @@ from gi.repository import Gtk, Gdk
 
 class DataDisplayer(ABC):
     def __init__(self, panel_ref, config):
-        self.panel_ref = panel_ref
+        # --- FIX: Use a private variable for the panel reference ---
+        self._panel_ref = panel_ref
         self.config = config
         self.widget = self._create_widget()
         self.is_clock_source = False
+
+    # --- FIX: Implement a property setter to allow overriding ---
+    @property
+    def panel_ref(self):
+        return self._panel_ref
+
+    @panel_ref.setter
+    def panel_ref(self, value):
+        self._panel_ref = value
 
     @abstractmethod
     def _create_widget(self):
@@ -76,3 +86,4 @@ class DataDisplayer(ABC):
         context.new_path(); context.move_to(center_x, center_y); context.line_to(center_x+h_len*math.cos(h_angle), center_y+h_len*math.sin(h_angle)); context.set_line_width(1.5); context.set_line_cap(cairo.LINE_CAP_ROUND); context.stroke()
         context.new_path(); context.move_to(center_x, center_y); context.line_to(center_x+m_len*math.cos(m_angle), center_y+m_len*math.sin(m_angle)); context.set_line_width(1.5); context.set_line_cap(cairo.LINE_CAP_ROUND); context.stroke()
         context.restore()
+

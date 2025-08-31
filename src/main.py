@@ -18,7 +18,7 @@ from gi.repository import Gtk, Gio, GLib, Gdk, GdkPixbuf
 import module_registry
 module_registry.discover_and_load_modules()
 from module_registry import AVAILABLE_DATA_SOURCES, AVAILABLE_DISPLAYERS, ALL_SOURCE_CLASSES
-# -----------------------------------------
+# ----------------------------------------- 
 
 from config_manager import config_manager
 from grid_layout_manager import GridLayoutManager, CELL_SIZE

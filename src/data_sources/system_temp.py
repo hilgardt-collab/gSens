@@ -1,3 +1,4 @@
+# /data_sources/system_temp.py
 from data_source import DataSource
 from utils import safe_subprocess
 from config_dialog import ConfigOption
@@ -97,7 +98,7 @@ class SystemTempDataSource(DataSource):
 
     def get_configure_callback(self):
         """Provides a callback to dynamically update panel title based on selected sensor."""
-        def setup_auto_title_logic(dialog, content_box, widgets, available_sources, panel_config):
+        def setup_auto_title_logic(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
             try: 
                 sensor_combo = widgets["selected_sensor_key"]
                 title_entry = widgets["title_text"]
@@ -115,4 +116,3 @@ class SystemTempDataSource(DataSource):
             GLib.idle_add(on_sensor_changed, sensor_combo)
 
         return setup_auto_title_logic
-

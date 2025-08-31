@@ -103,12 +103,13 @@ class FanSpeedDataSource(DataSource):
                 key_prefix = f"{prefix}opt_" if is_combo_child else ""
                 
                 fan_combo = widgets[f"{key_prefix}selected_fan_key"]
-                title_entry = widgets[f"{key_prefix}title_text"] if not is_combo_child else widgets.get(f"{prefix}caption")
+                title_entry = widgets[f"title_text"] if not is_combo_child else widgets.get(f"{prefix}caption")
 
                 if not title_entry: # It might be a caption entry in a combo panel
                     return
 
-            except KeyError:
+            except KeyError as e:
+                print(f"FanSpeedDataSource configure_callback KeyError: {e}. Could not find a required widget.")
                 return
                 
             def on_fan_changed(combo):

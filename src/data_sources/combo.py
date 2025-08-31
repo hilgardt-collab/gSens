@@ -1,4 +1,4 @@
-# data_sources/combo.py
+# /data_sources/combo.py
 import gi
 import threading
 from functools import partial
@@ -38,6 +38,7 @@ class ComboDataSource(DataSource):
                     SourceClass = source_map.get(source_key)
                     if SourceClass:
                         child_config = {}
+                        child_config['caption_override'] = self.config.get(f"{slot_prefix}caption", "")
                         for key, value in self.config.items():
                             if key.startswith(opt_prefix):
                                 unprefixed_key = key[len(opt_prefix):]
@@ -75,12 +76,16 @@ class ComboDataSource(DataSource):
                 
                 min_val = float(source.config.get("graph_min_value", 0.0))
                 max_val = float(source.config.get("graph_max_value", 100.0))
-
+                
+                # --- FIX: Use the caption_override from the child's config ---
+                # This ensures the override from the UI is correctly passed through.
+                override = source.config.get('caption_override', '')
+                
                 data_bundle[key] = {
                     "raw_data": raw_data,
                     "numerical_value": source.get_numerical_value(raw_data),
                     "display_string": source.get_display_string(raw_data),
-                    "primary_label": source.get_primary_label_string(raw_data),
+                    "primary_label": override or source.get_primary_label_string(raw_data),
                     "min_value": min_val,
                     "max_value": max_val,
                 }
@@ -151,7 +156,10 @@ class ComboDataSource(DataSource):
             center_scroll.set_child(center_box)
             content_box.append(Gtk.Label(label="<b>Center Data Source</b>", use_markup=True, xalign=0, margin_top=10))
             content_box.append(center_scroll)
-            center_source_model = {"": [ConfigOption("center_source", "dropdown", "Source:", "none", options_dict=source_opts)]}
+            center_source_model = {"": [
+                ConfigOption("center_source", "dropdown", "Source:", "none", options_dict=source_opts),
+                ConfigOption("center_caption", "string", "Label Override:", "", tooltip="Overrides the default source name.")
+            ]}
             build_ui_from_model(center_box, panel_config, center_source_model, widgets)
             dialog.dynamic_models.append(center_source_model)
             center_sub_config_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=20)
@@ -184,7 +192,7 @@ class ComboDataSource(DataSource):
                     arc_source_model = {
                         f"Arc {i} Data Source": [
                             ConfigOption(slot_key, "dropdown", "Source:", "none", options_dict=source_opts),
-                            ConfigOption(f"{prefix}caption", "string", "Caption:", "", tooltip="Overrides the default source name.")
+                            ConfigOption(f"{prefix}caption", "string", "Label Override:", "", tooltip="Overrides the default source name.")
                         ]
                     }
                     build_ui_from_model(tab_box, panel_config, arc_source_model, widgets)
@@ -225,7 +233,6 @@ class ComboDataSource(DataSource):
         def _create_or_update_bar_tabs(spinner, notebook, dialog, widgets, available_sources, panel_config, source_opts):
             """Dynamically adds or removes configuration tabs for each bar."""
             count = spinner.get_value_as_int()
-            # --- BUG FIX: Removed overly aggressive cleanup of dialog.dynamic_models ---
             
             while notebook.get_n_pages() > count: notebook.remove_page(-1)
             
@@ -242,7 +249,7 @@ class ComboDataSource(DataSource):
                     bar_source_model = {
                         f"Bar {i} Data Source": [
                             ConfigOption(slot_key, "dropdown", "Source:", "none", options_dict=source_opts),
-                            ConfigOption(f"{prefix}caption", "string", "Caption:", "", tooltip="Overrides the default source name. Used as the Primary Label.")
+                            ConfigOption(f"{prefix}caption", "string", "Label Override:", "", tooltip="Overrides the default source name.")
                         ]
                     }
                     build_ui_from_model(tab_box, panel_config, bar_source_model, widgets)
@@ -268,7 +275,10 @@ class ComboDataSource(DataSource):
         def _build_lcars_config_ui(dialog, content_box, widgets, available_sources, panel_config, source_opts):
             """Builds the configuration UI for the LCARS Combo mode."""
             content_box.append(Gtk.Label(label="<b>Primary Data Source</b>", use_markup=True, xalign=0, margin_top=10))
-            primary_source_model = {"": [ConfigOption("primary_source", "dropdown", "Source:", "none", options_dict=source_opts)]}
+            primary_source_model = {"": [
+                ConfigOption("primary_source", "dropdown", "Source:", "none", options_dict=source_opts),
+                ConfigOption("primary_caption", "string", "Label Override:", "", tooltip="Overrides the default source name.")
+            ]}
             build_ui_from_model(content_box, panel_config, primary_source_model, widgets)
             dialog.dynamic_models.append(primary_source_model)
             primary_sub_config_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=20)
@@ -352,3 +362,4 @@ class ComboDataSource(DataSource):
                 _build_arc_config_ui(dialog, content_box, widgets, available_sources, panel_config, source_opts)
 
         return build_main_config_ui
+

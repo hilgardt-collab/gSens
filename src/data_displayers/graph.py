@@ -1,4 +1,4 @@
-# data_displayers/graph.py
+# /data_displayers/graph.py
 import gi
 import time
 import os
@@ -63,6 +63,14 @@ class GraphDisplayer(DataDisplayer):
             ConfigOption("overlay_text_color", "color", "Text Color:", "#FFFFFF"),
             ConfigOption("overlay_font", "font", "Text Font:", "Sans 10")
         ]
+        # --- FEATURE: Add grid configuration options ---
+        model["Grid Lines"] = [
+            ConfigOption("graph_grid_enabled", "bool", "Show Grid:", "False"),
+            ConfigOption("graph_grid_x_divisions", "spinner", "Vertical Divisions:", 5, 1, 50, 1, 0),
+            ConfigOption("graph_grid_y_divisions", "spinner", "Horizontal Divisions:", 4, 1, 50, 1, 0),
+            ConfigOption("graph_grid_color", "color", "Grid Color:", "rgba(128,128,128,0.3)"),
+            ConfigOption("graph_grid_width", "scale", "Grid Line Width:", 1.0, 0.5, 5.0, 0.5, 1)
+        ]
         return model
 
     def get_configure_callback(self):
@@ -98,7 +106,7 @@ class GraphDisplayer(DataDisplayer):
     def on_draw_graph(self, area, ctx, width, height):
         if width <= 0 or height <= 0: return
 
-        is_alarm = self.panel_ref.is_in_alarm_state and self.panel_ref._alarm_flash_on
+        is_alarm = self.panel_ref is not None and self.panel_ref.is_in_alarm_state and self.panel_ref._alarm_flash_on
         if is_alarm:
             bg_color_str = self.config.get(self.panel_ref.data_source.alarm_config_prefix + "alarm_color", "rgba(255,0,0,0.6)")
             bg_rgba = Gdk.RGBA(); bg_rgba.parse(bg_color_str)
@@ -133,7 +141,30 @@ class GraphDisplayer(DataDisplayer):
                 bg_rgba = Gdk.RGBA(); bg_rgba.parse(self.config.get("graph_bg_color", "rgba(34,34,34,1)"))
                 ctx.set_source_rgba(bg_rgba.red, bg_rgba.green, bg_rgba.blue, bg_rgba.alpha)
                 ctx.paint()
-        
+
+        # --- FEATURE: Draw the grid ---
+        if str(self.config.get("graph_grid_enabled", "False")).lower() == 'true':
+            grid_rgba = Gdk.RGBA(); grid_rgba.parse(self.config.get("graph_grid_color"))
+            ctx.set_source_rgba(grid_rgba.red, grid_rgba.green, grid_rgba.blue, grid_rgba.alpha)
+            ctx.set_line_width(float(self.config.get("graph_grid_width", 1.0)))
+            
+            x_divs = int(self.config.get("graph_grid_x_divisions", 5))
+            y_divs = int(self.config.get("graph_grid_y_divisions", 4))
+
+            if x_divs > 0:
+                x_step = width / x_divs
+                for i in range(1, x_divs):
+                    ctx.move_to(i * x_step, 0)
+                    ctx.line_to(i * x_step, height)
+                    ctx.stroke()
+            
+            if y_divs > 0:
+                y_step = height / y_divs
+                for i in range(1, y_divs):
+                    ctx.move_to(0, i * y_step)
+                    ctx.line_to(width, i * y_step)
+                    ctx.stroke()
+
         if len(self.history) >= 2:
             timestamps, values = zip(*self.history)
             min_y, max_y = float(self.config.get("graph_min_value", 0.0)), float(self.config.get("graph_max_value", 100.0))

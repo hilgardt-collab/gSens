@@ -100,6 +100,9 @@ class DiskUsageDataSource(DataSource):
             row.append(choose_button)
             
             title_format_key = "disk_title_format"
+            if is_combo_child:
+                 title_format_key = f"{prefix}opt_{title_format_key}"
+
             if title_format_key in widgets:
                 widgets[title_format_key].connect("changed", lambda w: self._update_caption(widgets, temp_state, prefix))
             
@@ -112,6 +115,11 @@ class DiskUsageDataSource(DataSource):
         is_combo_child = prefix is not None
         
         title_format_key = "disk_title_format" 
+        # --- FIX: Use the correct, prefixed key for combo children ---
+        if is_combo_child:
+            key_prefix = f"{prefix}opt_"
+            title_format_key = f"{key_prefix}disk_title_format"
+
         caption_key = f"{prefix}caption" if is_combo_child else "title_text"
 
         try:
@@ -178,3 +186,4 @@ class DiskUsageDataSource(DataSource):
                     self._update_caption(widgets, temp_state, prefix)
                     break
         dlg.destroy()
+
