@@ -119,19 +119,19 @@ class LCARSComboDisplayer(ComboBase):
                              options_dict={"Top Only": "top", "Bottom Only": "bottom", "Top and Bottom": "both"}),
                 ConfigOption("lcars_top_extension_height", "spinner", "Top Extension Height (px):", 40, 0, 500, 5, 0),
                 ConfigOption("lcars_bottom_extension_height", "spinner", "Bottom Extension Height (px):", 40, 0, 500, 5, 0),
+                ConfigOption("lcars_top_bar_height", "spinner", "Top Bar Height (px):", 40, 10, 200, 2, 0),
                 ConfigOption("lcars_sidebar_width", "spinner", "Side Bar Width (px):", 150, 20, 500, 5, 0),
                 ConfigOption("lcars_corner_radius", "spinner", "Corner Radius (px):", 60, 10, 500, 5, 0),
                 ConfigOption("lcars_frame_color", "color", "Frame Color:", "rgba(255,153,102,1)"), # Peach
                 ConfigOption("lcars_content_bg_color", "color", "Content BG Color:", "rgba(0,0,0,1)"),
                 ConfigOption("lcars_content_padding", "spinner", "Content Padding (px):", 5, 0, 100, 1, 0),
             ],
-            "Header": [
+            "Top Bar": [
                 ConfigOption("lcars_header_text", "string", "Header Text:", "U.S.S. ENTERPRISE"),
-                ConfigOption("lcars_header_align", "dropdown", "Horiz. Align:", "left",
-                             options_dict={"Left": "left", "Center": "center", "Right": "right"}),
-                ConfigOption("lcars_header_padding", "spinner", "Horiz. Padding (px):", 10, 0, 50, 1, 0),
                 ConfigOption("lcars_header_font", "font", "Header Font:", "Swiss 911 Ultra Compressed 18"),
                 ConfigOption("lcars_header_color", "color", "Header Color:", "rgba(0,0,0,1)"),
+                ConfigOption("lcars_header_bg_color", "color", "Header BG Color:", "rgba(204,153,255,1)"), # Lilac
+                ConfigOption("lcars_header_padding", "spinner", "Header Padding (px):", 10, 0, 50, 1, 0),
             ],
             "Animation": [
                 ConfigOption("lcars_animation_enabled", "bool", "Enable Bar Animation:", "True"),
@@ -171,7 +171,7 @@ class LCARSComboDisplayer(ComboBase):
             
             frame_ui_model = {
                 "Frame Style": self._get_full_config_model()["Frame Style"],
-                "Header": self._get_full_config_model()["Header"],
+                "Top Bar": self._get_full_config_model()["Top Bar"],
                 "Animation": self._get_full_config_model()["Animation"]
             }
             build_ui_from_model(frame_box, panel_config, frame_ui_model, widgets)
@@ -190,7 +190,7 @@ class LCARSComboDisplayer(ComboBase):
                     bottom_ext_row.set_visible(mode in ["bottom", "both"])
                 ext_mode_combo.connect("changed", on_ext_mode_changed)
                 GLib.idle_add(on_ext_mode_changed, ext_mode_combo)
-
+            
             frame_box.append(Gtk.Separator(margin_top=15, margin_bottom=5))
             frame_box.append(Gtk.Label(label="<b>Side Bar Segments</b>", use_markup=True, xalign=0))
             
@@ -406,8 +406,7 @@ class LCARSComboDisplayer(ComboBase):
         frame_color_str = self.config.get("lcars_frame_color", "rgba(255,153,102,1)")
         mode = self.config.get("lcars_sidebar_extension_mode", "top")
         top_ext_h = float(self.config.get("lcars_top_extension_height", 40)) if mode in ["top", "both"] else 0
-        bottom_ext_h = float(self.config.get("lcars_bottom_extension_height", 40)) if mode in ["bottom", "both"] else 0
-
+        
         # This top_bar_h is now effectively the starting Y of the main content area
         top_bar_h = top_ext_h
 
