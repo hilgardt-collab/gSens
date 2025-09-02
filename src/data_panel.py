@@ -1,3 +1,4 @@
+# data_panel.py
 import gi
 import threading
 import time
@@ -203,9 +204,11 @@ class DataPanel(BasePanel):
             models_to_check = [ panel_model, display_type_model, source_model, self.data_displayer.get_config_model(), *dialog.dynamic_models ]
             if hasattr(dialog, 'ui_models'): models_to_check.extend(dialog.ui_models.values())
             new_conf = get_config_from_widgets(all_widgets, models_to_check)
+            
             if hasattr(dialog, 'custom_value_getter') and callable(dialog.custom_value_getter):
                 custom_values = dialog.custom_value_getter()
                 if custom_values: new_conf.update(custom_values)
+
             final_displayer_key = new_conf.get('displayer_type', original_displayer_key_on_open)
             self.config.update(new_conf)
             self.config['displayer_type'] = final_displayer_key
@@ -214,7 +217,6 @@ class DataPanel(BasePanel):
                 main_window.grid_manager.recreate_panel(self.config['id'])
             else:
                 self.apply_all_configurations()
-            # The panel no longer manages its own thread, so start_update_thread() is removed.
 
         cancel_button = dialog.add_non_modal_button("_Cancel", style_class="destructive-action")
         cancel_button.connect("clicked", lambda w: dialog.destroy())
@@ -238,4 +240,3 @@ class DataPanel(BasePanel):
 
         dialog.connect("destroy", on_dialog_destroy)
         dialog.present()
-

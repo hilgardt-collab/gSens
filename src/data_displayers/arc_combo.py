@@ -31,7 +31,7 @@ class ArcComboDisplayer(ComboBase):
         self._last_draw_width, self._last_draw_height = -1, -1
 
         super().__init__(panel_ref, config)
-        populate_defaults_from_model(self.config, self._get_static_config_model())
+        populate_defaults_from_model(self.config, self._get_full_config_model())
 
         self.widget.connect("realize", self._start_animation_timer)
         self.widget.connect("unrealize", self._stop_animation_timer)
@@ -60,37 +60,175 @@ class ArcComboDisplayer(ComboBase):
     def get_config_model():
         return {}
     
-    @staticmethod
-    def _get_static_config_model():
-        return {
+    @classmethod
+    def _get_full_config_model(cls):
+        """
+        Creates a comprehensive static configuration model with defaults for all
+        possible options to prevent crashes from missing keys.
+        """
+        model = {
             "Overall Layout": [ ConfigOption("combo_vertical_offset", "spinner", "Vertical Offset (px):", 0, -200, 200, 1, 0), ConfigOption("combo_scale_factor", "scale", "Manual Scale:", 1.0, 0.5, 2.0, 0.05, 2) ],
             "Center Circle Text": [ ConfigOption("center_text_vertical_offset", "spinner", "V. Offset:", 0, -100, 100, 1, 0), ConfigOption("center_text_spacing", "spinner", "Text Spacing:", 2, 0, 50, 1, 0) ],
             "Center Primary Text": [ ConfigOption("center_show_primary_text", "bool", "Show Primary Text:", "True"), ConfigOption("center_primary_text_font", "font", "Primary Font:", "Sans 10"), ConfigOption("center_primary_text_color", "color", "Primary Color:", "rgba(200,200,200,1)") ],
             "Center Secondary Text": [ ConfigOption("center_show_secondary_text", "bool", "Show Secondary Text:", "True"), ConfigOption("center_secondary_text_font", "font", "Secondary Font:", "Sans Bold 18"), ConfigOption("center_secondary_text_color", "color", "Secondary Color:", "rgba(255,255,255,1)") ],
-            "Center Caption": [ ConfigOption("center_caption_text", "string", "Caption Text:", ""), ConfigOption("center_caption_position", "dropdown", "Position:", "top", options_dict={"None": "none", "Top": "top", "Bottom": "bottom", "Left": "left", "Right": "right"}), ConfigOption("center_caption_font", "font", "Font:", "Sans 9"), ConfigOption("center_caption_color", "color", "Color:", "rgba(220,220,220,1)") ],
+            "Center Caption": [ ConfigOption("center_caption_text", "string", "Caption Text:", ""), ConfigOption("center_caption_position", "dropdown", "Position:", "top", options_dict={"None": "none", "Top": "top", "Bottom": "bottom", "Left": "left", "Right": "right"}), ConfigOption("center_caption_font", "font", "Font:", "Sans 9"), ConfigOption("center_caption_color", "color", "Color:", "rgba(220,220,220,1)"), ConfigOption("center_caption_inverted", "bool", "Invert Text (Upside Down):", "False") ],
             "Animation": [ ConfigOption("combo_animation_enabled", "bool", "Enable Arc Animation:", "True") ]
         }
+        
+        # Programmatically add style options for all possible arcs
+        for i in range(1, 17):
+            model[f"Arc {i} Style"] = [
+                ConfigOption(f"arc{i}_start_angle", "spinner", "Start Angle (deg):", -225, -360, 360, 5, 0),
+                ConfigOption(f"arc{i}_end_angle", "spinner", "End Angle (deg):", 45, -360, 360, 5, 0),
+                ConfigOption(f"arc{i}_line_cap_style", "dropdown", "Line Cap Style:", "round", options_dict={"Round": "round", "Square": "square", "Flat": "butt"}),
+                ConfigOption(f"arc{i}_fill_direction", "dropdown", "Fill Direction:", "start", options_dict={"From Start": "start", "From End": "end"}),
+                ConfigOption(f"arc{i}_bg_color", "color", "Background Color:", "rgba(40,40,40,0.5)"),
+                ConfigOption(f"arc{i}_fg_color", "color", "Foreground Color:", f"rgba({min(255, 50*i)}, {max(0, 255-i*20)}, 255, 1.0)"),
+                ConfigOption(f"arc{i}_width_factor", "scale", "Width (% of radius):", "0.1", 0.02, 0.2, 0.01, 2),
+                ConfigOption(f"arc{i}_label_position", "dropdown", "Label Position:", "start", options_dict={"None": "none", "Start": "start", "Middle": "middle", "End": "end"}),
+                ConfigOption(f"arc{i}_label_content", "dropdown", "Label Content:", "caption", options_dict={"Caption Only": "caption", "Value Only": "value", "Caption and Value": "both"}),
+                ConfigOption(f"arc{i}_label_font", "font", "Font:", "Sans 8"),
+                ConfigOption(f"arc{i}_label_color", "color", "Label Color:", "rgba(200,200,200,1)"),
+                ConfigOption(f"arc{i}_label_inverted", "bool", "Invert Label (Upside Down):", "False")
+            ]
+        return model
 
     def get_configure_callback(self):
         def build_style_tabs(dialog, content_box, widgets, available_sources, panel_config):
-            full_model = self._get_static_config_model(); dialog.dynamic_models.append(full_model)
-            display_notebook = Gtk.Notebook(margin_top=10); content_box.append(Gtk.Label(label="<b>Display Appearance</b>", use_markup=True, xalign=0, margin_top=5)); content_box.append(display_notebook)
-            layout_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True); layout_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10); layout_scroll.set_child(layout_box); display_notebook.append_page(layout_scroll, Gtk.Label(label="Layout"))
+            full_model = self._get_full_config_model()
+            dialog.dynamic_models.append(full_model)
+            display_notebook = Gtk.Notebook(margin_top=10)
+            content_box.append(Gtk.Label(label="<b>Display Appearance</b>", use_markup=True, xalign=0, margin_top=5))
+            content_box.append(display_notebook)
+            layout_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
+            layout_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
+            layout_scroll.set_child(layout_box)
+            display_notebook.append_page(layout_scroll, Gtk.Label(label="Layout"))
             build_ui_from_model(layout_box, panel_config, {"Overall Layout": full_model["Overall Layout"], "Animation": full_model["Animation"]}, widgets)
-            center_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True); center_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10); center_scroll.set_child(center_box); display_notebook.append_page(center_scroll, Gtk.Label(label="Center"))
-            build_background_config_ui(center_box, panel_config, widgets, dialog, prefix="center_", title="Center Circle Background"); center_model = {k: v for k, v in full_model.items() if k.startswith("Center")}; build_ui_from_model(center_box, panel_config, center_model, widgets)
-            arcs_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True); arcs_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10); arcs_scroll.set_child(arcs_box); display_notebook.append_page(arcs_scroll, Gtk.Label(label="Arcs"))
-            style_notebook = Gtk.Notebook(); arcs_box.append(style_notebook)
-            def get_arc_style_model(i): return { f"Arc {i} Style": [ ConfigOption(f"arc{i}_start_angle", "spinner", "Start Angle (deg):", -225, -360, 360, 5, 0), ConfigOption(f"arc{i}_end_angle", "spinner", "End Angle (deg):", 45, -360, 360, 5, 0), ConfigOption(f"arc{i}_fill_direction", "dropdown", "Fill Direction:", "start", options_dict={"From Start": "start", "From End": "end"}), ConfigOption(f"arc{i}_bg_color", "color", "Background Color:", "rgba(40,40,40,0.5)"), ConfigOption(f"arc{i}_fg_color", "color", "Foreground Color:", f"rgba({min(255, 50*i)}, {max(0, 255-i*20)}, 255, 1.0)"), ConfigOption(f"arc{i}_width_factor", "scale", "Width (% of radius):", "0.1", 0.02, 0.2, 0.01, 2), ConfigOption(f"arc{i}_label_position", "dropdown", "Label Position:", "start", options_dict={"None": "none", "Start": "start", "Middle": "middle", "End": "end"}), ConfigOption(f"arc{i}_label_content", "dropdown", "Label Content:", "caption", options_dict={"Caption Only": "caption", "Value Only": "value", "Caption and Value": "both"}), ConfigOption(f"arc{i}_label_font", "font", "Font:", "Sans 8"), ConfigOption(f"arc{i}_label_color", "color", "Label Color:", "rgba(200,200,200,1)") ] }
-            def build_arc_tabs(spinner):
-                arc_count = spinner.get_value_as_int(); 
-                while style_notebook.get_n_pages() > arc_count: style_notebook.remove_page(-1)
+            center_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
+            center_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
+            center_scroll.set_child(center_box)
+            display_notebook.append_page(center_scroll, Gtk.Label(label="Center"))
+            build_background_config_ui(center_box, panel_config, widgets, dialog, prefix="center_", title="Center Circle Background")
+            center_model = {k: v for k, v in full_model.items() if k.startswith("Center")}
+            build_ui_from_model(center_box, panel_config, center_model, widgets)
+            arcs_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
+            arcs_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
+            arcs_scroll.set_child(arcs_box)
+            display_notebook.append_page(arcs_scroll, Gtk.Label(label="Arcs"))
+            style_notebook = Gtk.Notebook()
+            style_notebook.set_scrollable(True)
+            arcs_box.append(style_notebook)
+            
+            effects_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
+            effects_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin_top=15, margin_bottom=15, margin_start=15, margin_end=15)
+            effects_scroll.set_child(effects_box)
+            display_notebook.append_page(effects_scroll, Gtk.Label(label="Effects"))
+            
+            effects_box.append(Gtk.Label(label="<b>Copy Arc Style</b>", xalign=0, use_markup=True))
+            copy_grid = Gtk.Grid(column_spacing=10, row_spacing=10)
+            effects_box.append(copy_grid)
+            source_arc_combo = Gtk.ComboBoxText()
+            copy_grid.attach(Gtk.Label(label="Source Arc:", xalign=1), 0, 0, 1, 1)
+            copy_grid.attach(source_arc_combo, 1, 0, 1, 1)
+            copy_checkboxes = { "Angles": Gtk.CheckButton(label="Angles (Start/End)"), "Colors": Gtk.CheckButton(label="Colors (FG/BG)"), "Line Style": Gtk.CheckButton(label="Line Style (Cap/Width/Fill)"), "Label Style": Gtk.CheckButton(label="Label Style (Font/Color/Invert)"), "Label Content": Gtk.CheckButton(label="Label Content & Position") }
+            for i, (key, chk) in enumerate(copy_checkboxes.items()):
+                chk.set_active(True); copy_grid.attach(chk, 0, i + 1, 2, 1)
+            apply_style_button = Gtk.Button(label="Apply Selected Style to All Other Arcs")
+            copy_grid.attach(apply_style_button, 0, len(copy_checkboxes) + 2, 2, 1)
+            
+            effects_box.append(Gtk.Separator(margin_top=15, margin_bottom=10))
+            effects_box.append(Gtk.Label(label="<b>Apply Color Gradient</b>", xalign=0, use_markup=True))
+            grad_grid = Gtk.Grid(column_spacing=10, row_spacing=10)
+            effects_box.append(grad_grid)
+
+            grad_start_arc_combo = Gtk.ComboBoxText()
+            grad_end_arc_combo = Gtk.ComboBoxText()
+            grad_start_color = Gtk.ColorButton()
+            grad_end_color = Gtk.ColorButton()
+            grad_target_fg = Gtk.CheckButton(label="Foreground Color"); grad_target_fg.set_active(True)
+            grad_target_bg = Gtk.CheckButton(label="Background Color")
+            apply_gradient_button = Gtk.Button(label="Apply Gradient to Arc Range")
+
+            grad_grid.attach(Gtk.Label(label="Start Arc:", xalign=1), 0, 0, 1, 1); grad_grid.attach(grad_start_arc_combo, 1, 0, 1, 1)
+            grad_grid.attach(Gtk.Label(label="End Arc:", xalign=1), 0, 1, 1, 1); grad_grid.attach(grad_end_arc_combo, 1, 1, 1, 1)
+            grad_grid.attach(Gtk.Label(label="Start Color:", xalign=1), 0, 2, 1, 1); grad_grid.attach(grad_start_color, 1, 2, 1, 1)
+            grad_grid.attach(Gtk.Label(label="End Color:", xalign=1), 0, 3, 1, 1); grad_grid.attach(grad_end_color, 1, 3, 1, 1)
+            grad_grid.attach(grad_target_fg, 0, 4, 2, 1); grad_grid.attach(grad_target_bg, 0, 5, 2, 1)
+            grad_grid.attach(apply_gradient_button, 0, 6, 2, 1)
+
+            def _interpolate_rgba(factor, c1, c2):
+                inter = Gdk.RGBA(); inter.red=c1.red+factor*(c2.red-c1.red); inter.green=c1.green+factor*(c2.green-c1.green); inter.blue=c1.blue+factor*(c2.blue-c1.blue); inter.alpha=c1.alpha+factor*(c2.alpha-c1.alpha); return inter
+
+            def on_apply_gradient_clicked(button):
+                start_id_str, end_id_str = grad_start_arc_combo.get_active_id(), grad_end_arc_combo.get_active_id()
+                if not start_id_str or not end_id_str: return
+                start_index, end_index = int(start_id_str), int(end_id_str)
+                if start_index > end_index: start_index, end_index = end_index, start_index
+                start_rgba, end_rgba = grad_start_color.get_rgba(), grad_end_color.get_rgba()
+                steps = end_index - start_index
+                for i in range(start_index, end_index + 1):
+                    factor = (i - start_index) / steps if steps > 0 else 0.0
+                    inter_color = _interpolate_rgba(factor, start_rgba, end_rgba)
+                    if grad_target_fg.get_active():
+                        w = widgets.get(f"arc{i}_fg_color")
+                        if w: w.set_rgba(inter_color)
+                    if grad_target_bg.get_active():
+                        w = widgets.get(f"arc{i}_bg_color")
+                        if w: w.set_rgba(inter_color)
+            apply_gradient_button.connect("clicked", on_apply_gradient_clicked)
+
+            property_map = { "Angles": ["start_angle", "end_angle"], "Colors": ["bg_color", "fg_color"], "Line Style": ["line_cap_style", "fill_direction", "width_factor"], "Label Style": ["label_font", "label_color", "label_inverted"], "Label Content": ["label_position", "label_content"] }
+
+            def on_apply_same_style_clicked(button):
+                arc_count = widgets["combo_arc_count"].get_value_as_int()
+                source_arc_id_str = source_arc_combo.get_active_id()
+                if not source_arc_id_str: return
+                source_index = int(source_arc_id_str)
+                keys_to_copy = []
+                for key, chk in copy_checkboxes.items():
+                    if chk.get_active(): keys_to_copy.extend(property_map.get(key, []))
                 for i in range(1, arc_count + 1):
-                    if i > style_notebook.get_n_pages():
-                        tab_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True); tab_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10); tab_scroll.set_child(tab_box); style_notebook.append_page(tab_scroll, Gtk.Label(label=f"Style {i}"))
-                        arc_model = get_arc_style_model(i); populate_defaults_from_model(panel_config, arc_model); build_ui_from_model(tab_box, panel_config, arc_model, widgets); dialog.dynamic_models.append(arc_model)
+                    if i == source_index: continue 
+                    for key_suffix in keys_to_copy:
+                        source_key, dest_key = f"arc{source_index}_{key_suffix}", f"arc{i}_{key_suffix}"
+                        source_widget, dest_widget = widgets.get(source_key), widgets.get(dest_key)
+                        if source_widget and dest_widget:
+                            if isinstance(source_widget, (Gtk.SpinButton, Gtk.Scale)): dest_widget.set_value(source_widget.get_value())
+                            elif isinstance(source_widget, Gtk.ColorButton): dest_widget.set_rgba(source_widget.get_rgba())
+                            elif isinstance(source_widget, Gtk.FontButton): dest_widget.set_font(source_widget.get_font())
+                            elif isinstance(source_widget, Gtk.ComboBoxText): dest_widget.set_active_id(source_widget.get_active_id())
+                            elif isinstance(source_widget, Gtk.Switch): dest_widget.set_active(source_widget.get_active())
+            apply_style_button.connect("clicked", on_apply_same_style_clicked)
+
+            arc_tabs_content = []
+            for i in range(1, 17): 
+                tab_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
+                tab_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
+                tab_scroll.set_child(tab_box)
+                style_notebook.append_page(tab_scroll, Gtk.Label(label=f"Style {i}"))
+                arc_tabs_content.append(tab_scroll)
+                arc_model = {f"Arc {i} Style": full_model[f"Arc {i} Style"]}
+                build_ui_from_model(tab_box, panel_config, arc_model, widgets)
+
+            def on_arc_count_changed(spinner):
+                count = spinner.get_value_as_int()
+                source_arc_combo.remove_all(); grad_start_arc_combo.remove_all(); grad_end_arc_combo.remove_all()
+                for i in range(1, count + 1):
+                    source_arc_combo.append(id=str(i), text=f"Arc {i}")
+                    grad_start_arc_combo.append(id=str(i), text=f"Arc {i}")
+                    grad_end_arc_combo.append(id=str(i), text=f"Arc {i}")
+                source_arc_combo.set_active(0); grad_start_arc_combo.set_active(0)
+                if count > 0: grad_end_arc_combo.set_active(count-1)
+                
+                for i, content_widget in enumerate(arc_tabs_content):
+                    content_widget.set_visible(i < count)
+
             arc_count_spinner = widgets.get("combo_arc_count")
-            if arc_count_spinner: arc_count_spinner.connect("value-changed", build_arc_tabs); GLib.idle_add(build_arc_tabs, arc_count_spinner)
+            if arc_count_spinner: 
+                arc_count_spinner.connect("value-changed", on_arc_count_changed)
+                GLib.idle_add(on_arc_count_changed, arc_count_spinner)
+
         return build_style_tabs
 
     def apply_styles(self):
@@ -189,7 +327,6 @@ class ArcComboDisplayer(ComboBase):
                 self._draw_arc(ctx, cx, cy, draw_radius, arc_width, percent, i, "", dynamic_only=True)
             current_radius += max_arc_width_in_ring + (max_radius * 0.02)
 
-        # --- BUG FIX: Draw all text labels last, on top of everything else ---
         current_radius = max_radius * 0.45
         for ring in rings:
             max_width_factor_in_ring = max(float(self.config.get(f"arc{arc_info['index']}_width_factor", 0.1)) for arc_info in ring) if ring else 0
@@ -266,23 +403,45 @@ class ArcComboDisplayer(ComboBase):
         if not text or pos == "none": return
         rgba = Gdk.RGBA(); rgba.parse(self.config.get("center_caption_color")); ctx.set_source_rgba(rgba.red, rgba.green, rgba.blue, rgba.alpha)
         layout = PangoCairo.create_layout(ctx); layout.set_font_description(Pango.FontDescription.from_string(self.config.get("center_caption_font")))
+        
+        is_inverted = str(self.config.get("center_caption_inverted", "False")).lower() == 'true'
+        if is_inverted:
+            text = text[::-1]
+
         char_widths = [layout.set_text(char, -1) or layout.get_pixel_extents()[1].width for char in text]
         total_text_angular_width = sum(char_widths) / (radius * 0.85) if radius > 0 else 0
-        text_angle = {"top": -math.pi/2, "bottom": math.pi/2, "left": math.pi, "right": 0}.get(pos, -math.pi/2) - (total_text_angular_width / 2.0)
+        
+        if is_inverted:
+            text_angle = {"top": math.pi/2, "bottom": -math.pi/2, "left": 0, "right": math.pi}.get(pos, math.pi/2) + (total_text_angular_width / 2.0)
+            char_angle_step = -1
+        else:
+            text_angle = {"top": -math.pi/2, "bottom": math.pi/2, "left": math.pi, "right": 0}.get(pos, -math.pi/2) - (total_text_angular_width / 2.0)
+            char_angle_step = 1
+
         ctx.save(); ctx.translate(cx, cy)
         for i, char in enumerate(text):
             layout.set_text(char, -1); _, log = layout.get_pixel_extents()
             char_angle = char_widths[i] / (radius * 0.85) if radius > 0 else 0
-            rotation_angle = text_angle + (char_angle / 2.0)
-            ctx.save(); ctx.rotate(rotation_angle); ctx.translate(radius * 0.85, 0); ctx.rotate(math.pi / 2)
+            rotation_angle = text_angle + (char_angle / 2.0) * char_angle_step
+            ctx.save(); ctx.rotate(rotation_angle); ctx.translate(radius * 0.85, 0)
+            if is_inverted:
+                ctx.rotate(-math.pi / 2)
+            else:
+                ctx.rotate(math.pi / 2)
             ctx.move_to(-log.width / 2.0, -log.height / 2.0); PangoCairo.show_layout(ctx, layout); ctx.restore()
-            text_angle += char_angle
+            text_angle += char_angle * char_angle_step
         ctx.restore()
 
     def _draw_arc(self, ctx, cx, cy, radius, width, percent, index, label_text, static_only=False, dynamic_only=False, text_only=False):
-        start_angle, end_angle = math.radians(float(self.config.get(f"arc{index}_start_angle"))), math.radians(float(self.config.get(f"arc{index}_end_angle")))
+        start_angle_deg = float(self.config.get(f"arc{index}_start_angle", -225))
+        end_angle_deg = float(self.config.get(f"arc{index}_end_angle", 45))
+        start_angle, end_angle = math.radians(start_angle_deg), math.radians(end_angle_deg)
         total_angle = end_angle - start_angle
         if total_angle <= 0: total_angle += 2 * math.pi
+        
+        line_cap_map = {"square": cairo.LINE_CAP_SQUARE, "butt": cairo.LINE_CAP_BUTT, "round": cairo.LINE_CAP_ROUND}
+        line_cap_style = self.config.get(f"arc{index}_line_cap_style", "round")
+        cairo_line_cap = line_cap_map.get(line_cap_style, cairo.LINE_CAP_ROUND)
         
         if text_only:
             if self.config.get(f"arc{index}_label_position", "start") != "none" and label_text:
@@ -291,10 +450,10 @@ class ArcComboDisplayer(ComboBase):
 
         if not dynamic_only:
             ctx.new_path(); bg_color = Gdk.RGBA(); bg_color.parse(self.config.get(f"arc{index}_bg_color")); ctx.set_source_rgba(bg_color.red, bg_color.green, bg_color.blue, bg_color.alpha)
-            ctx.set_line_width(width); ctx.set_line_cap(cairo.LINE_CAP_ROUND); ctx.arc(cx, cy, radius, start_angle, end_angle); ctx.stroke()
+            ctx.set_line_width(width); ctx.set_line_cap(cairo_line_cap); ctx.arc(cx, cy, radius, start_angle, end_angle); ctx.stroke()
         
         if not static_only and percent > 0:
-            ctx.new_path(); fg_color = Gdk.RGBA(); fg_color.parse(self.config.get(f"arc{index}_fg_color")); ctx.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha); ctx.set_line_width(width); ctx.set_line_cap(cairo.LINE_CAP_ROUND)
+            ctx.new_path(); fg_color = Gdk.RGBA(); fg_color.parse(self.config.get(f"arc{index}_fg_color")); ctx.set_source_rgba(fg_color.red, fg_color.green, fg_color.blue, fg_color.alpha); ctx.set_line_width(width); ctx.set_line_cap(cairo_line_cap)
             fill_direction = self.config.get(f"arc{index}_fill_direction", "start")
             if fill_direction == "end": ctx.arc_negative(cx, cy, radius, end_angle, end_angle - total_angle * min(1.0, percent))
             else: ctx.arc(cx, cy, radius, start_angle, start_angle + total_angle * min(1.0, percent))
@@ -303,20 +462,44 @@ class ArcComboDisplayer(ComboBase):
     def _draw_text_on_arc(self, ctx, cx, cy, radius, arc_width, text, index, start_angle, total_angle):
         rgba = Gdk.RGBA(); rgba.parse(self.config.get(f"arc{index}_label_color")); ctx.set_source_rgba(rgba.red, rgba.green, rgba.blue, rgba.alpha)
         layout = PangoCairo.create_layout(ctx); layout.set_font_description(Pango.FontDescription.from_string(self.config.get(f"arc{index}_label_font")))
+        
+        is_inverted = str(self.config.get(f"arc{index}_label_inverted", "False")).lower() == 'true'
+        if is_inverted:
+            text = text[::-1]
+
         char_widths = [layout.set_text(char, -1) or layout.get_pixel_extents()[1].width for char in text]
         total_text_angular_width = sum(char_widths) / radius if radius > 0 else 0
         pos = self.config.get(f"arc{index}_label_position")
-        if pos == 'middle': text_angle = start_angle + (total_angle - total_text_angular_width) / 2.0
-        elif pos == 'end': text_angle = start_angle + total_angle - total_text_angular_width
-        else: text_angle = start_angle
+
+        if is_inverted:
+            if pos == 'middle': text_angle = start_angle + total_angle - (total_angle - total_text_angular_width) / 2.0
+            elif pos == 'start': # 'start' of the arc is the end for inverted text
+                text_angle = start_angle + total_angle
+            else: # 'end' of the arc is the start for inverted text
+                text_angle = start_angle + total_text_angular_width
+            char_angle_step = -1
+        else:
+            if pos == 'middle': text_angle = start_angle + (total_angle - total_text_angular_width) / 2.0
+            elif pos == 'end': text_angle = start_angle + total_angle - total_text_angular_width
+            else: # 'start'
+                text_angle = start_angle
+            char_angle_step = 1
+        
         ctx.save(); ctx.translate(cx, cy)
         for i, char in enumerate(text):
             layout.set_text(char, -1); _, log = layout.get_pixel_extents()
             char_angle = char_widths[i] / radius if radius > 0 else 0
-            rotation_angle = text_angle + (char_angle / 2.0)
-            ctx.save(); ctx.rotate(rotation_angle); ctx.translate(radius, 0); ctx.rotate(math.pi / 2)
+            
+            rotation_angle = text_angle + (char_angle / 2.0) * char_angle_step
+
+            ctx.save(); ctx.rotate(rotation_angle); ctx.translate(radius, 0)
+            if is_inverted:
+                ctx.rotate(-math.pi / 2)
+            else:
+                ctx.rotate(math.pi / 2)
+
             ctx.move_to(-log.width / 2.0, -log.height / 2.0); PangoCairo.show_layout(ctx, layout); ctx.restore()
-            text_angle += char_angle
+            text_angle += char_angle * char_angle_step
         ctx.restore()
 
     def close(self):

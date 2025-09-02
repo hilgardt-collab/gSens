@@ -64,17 +64,19 @@ class DiskUsageDataSource(DataSource):
 
     def get_configure_callback(self):
         """Callback to add the 'Choose Mount Point' button and auto-title logic."""
-        # --- FIX: Add 'prefix=None' to make the argument optional ---
         def add_disk_chooser(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
             is_combo_child = prefix is not None
             
+            opt_prefix = f"{prefix}opt_" if is_combo_child else ""
+            mount_path_key = f"{opt_prefix}mount_path"
+            
             # For combo children, state is managed temporarily. For standalone, it's in the main panel_config.
-            temp_state = {"mount_path": panel_config.get("mount_path", "/")}
+            initial_path = panel_config.get(mount_path_key, "/")
+            temp_state = {"mount_path": initial_path}
             
             if is_combo_child:
                 def custom_getter():
-                    opt_prefix = f"{prefix}opt_"
-                    return { f"{opt_prefix}mount_path": temp_state["mount_path"] }
+                    return { mount_path_key: temp_state["mount_path"] }
                 
                 if not hasattr(dialog, 'custom_value_getters'):
                     dialog.custom_value_getters = []
@@ -115,7 +117,6 @@ class DiskUsageDataSource(DataSource):
         is_combo_child = prefix is not None
         
         title_format_key = "disk_title_format" 
-        # --- FIX: Use the correct, prefixed key for combo children ---
         if is_combo_child:
             key_prefix = f"{prefix}opt_"
             title_format_key = f"{key_prefix}disk_title_format"
@@ -186,4 +187,3 @@ class DiskUsageDataSource(DataSource):
                     self._update_caption(widgets, temp_state, prefix)
                     break
         dlg.destroy()
-

@@ -226,7 +226,7 @@ class CPUDataSource(DataSource):
         
         model["Graph Range"] = [
             ConfigOption("graph_min_value", "spinner", "Graph Min Value:", "0.0", 0.0, 10000.0, 1.0, 0),
-            ConfigOption("graph_max_value", "spinner", "Graph Max Value:", "100.0", 0.0, 10000.0, 1.0, 0)
+            ConfigOption("graph_max_value", "spinner", "Graph Max Value:", "5000.0", 0.0, 10000.0, 1.0, 0)
         ]
         model["Alarm"][1] = ConfigOption("data_alarm_high_value", "scale", "Alarm High Value:", "90.0", 0.0, 10000.0, 1.0, 1)
         
@@ -260,10 +260,6 @@ class CPUDataSource(DataSource):
             metric_combo = widgets.get("cpu_metric_to_display")
             if not metric_combo: return
 
-            # Find graph range widgets for dynamic updates
-            graph_min_widget = widgets.get("graph_min_value")
-            graph_max_widget = widgets.get("graph_max_value")
-
             all_children = list(content_box)
             section_widgets = {}
             section_titles = ["Usage Settings", "Temperature Settings", "Frequency Settings"]
@@ -290,18 +286,6 @@ class CPUDataSource(DataSource):
                 for w_list in section_widgets.get("Usage Settings", []): w_list.set_visible(active_metric == "usage")
                 for w_list in section_widgets.get("Temperature Settings", []): w_list.set_visible(active_metric == "temperature")
                 for w_list in section_widgets.get("Frequency Settings", []): w_list.set_visible(active_metric == "frequency")
-
-                # BUG FIX: Use positional arguments for Gtk.Adjustment.configure()
-                if graph_min_widget and graph_max_widget:
-                    if active_metric == "usage":
-                        graph_min_widget.get_adjustment().configure(0, 0, 100, 1, 10, 0)
-                        graph_max_widget.get_adjustment().configure(100, 0, 100, 1, 10, 0)
-                    elif active_metric == "temperature":
-                        graph_min_widget.get_adjustment().configure(0, -20, 150, 1, 10, 0)
-                        graph_max_widget.get_adjustment().configure(100, -20, 150, 5, 50, 0)
-                    elif active_metric == "frequency":
-                        graph_min_widget.get_adjustment().configure(0, 0, 10000, 100, 1000, 0)
-                        graph_max_widget.get_adjustment().configure(5000, 0, 10000, 100, 1000, 0)
             
             metric_combo.connect("changed", on_metric_changed)
             

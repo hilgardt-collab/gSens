@@ -1,6 +1,8 @@
+#data_sources/fan_speed.py
 from data_source import DataSource
 from config_dialog import ConfigOption
 import psutil
+import threading
 import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import GLib
@@ -94,27 +96,51 @@ class FanSpeedDataSource(DataSource):
     def get_alarm_unit(): return "RPM"
 
     def get_configure_callback(self):
-        # --- FIX: Add 'prefix=None' to make the argument optional ---
-        def setup_auto_title_logic(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
+        
+        def _repopulate_sensor_dropdown(widgets, panel_config, prefix):
+            """Helper to fill the sensor dropdown once data is available."""
+            key_prefix = f"{prefix}opt_" if prefix else ""
             try:
-                # When called from a combo panel, the widget key is prefixed.
-                # When called from a standalone panel, it is not.
-                is_combo_child = prefix is not None
-                key_prefix = f"{prefix}opt_" if is_combo_child else ""
+                sensor_combo = widgets.get(f"{key_prefix}selected_fan_key")
+                spinner = widgets.get(f"{key_prefix}fan_spinner")
+                if not sensor_combo: return
+
+                if spinner: spinner.get_parent().set_visible(False)
+
+                model = sensor_combo.get_model()
+                model.clear()
                 
+                fans = SENSOR_CACHE.get('fan_speed', {})
+                if not fans or all(k == "" for k in fans):
+                    model.append(id="", text="No fans found")
+                else:
+                    sorted_fans = sorted(fans.items(), key=lambda i: i[1]['display_name'])
+                    for key, data in sorted_fans:
+                        model.append(id=key, text=data['display_name'])
+
+                current_selection = panel_config.get(f"{key_prefix}selected_fan_key")
+                if current_selection and sensor_combo.set_active_id(current_selection):
+                    pass
+                else:
+                    sensor_combo.set_active(0)
+
+            except KeyError as e:
+                print(f"FanSpeedDataSource _repopulate_sensor_dropdown KeyError: {e}")
+
+        def setup_auto_title_logic(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
+            is_combo_child = prefix is not None
+            key_prefix = f"{prefix}opt_" if is_combo_child else ""
+            
+            try: 
                 fan_combo = widgets[f"{key_prefix}selected_fan_key"]
                 title_entry = widgets[f"title_text"] if not is_combo_child else widgets.get(f"{prefix}caption")
-
-                if not title_entry: # It might be a caption entry in a combo panel
-                    return
-
+                if not title_entry: return
             except KeyError as e:
                 print(f"FanSpeedDataSource configure_callback KeyError: {e}. Could not find a required widget.")
                 return
                 
             def on_fan_changed(combo):
                 display_name = combo.get_active_text()
-                # Only auto-update the title if it's empty or hasn't been manually set
                 if not title_entry.get_text() or title_entry.get_text() == "Fan Speed":
                     if display_name and "No fans" not in display_name and "not supported" not in display_name:
                         simple_name = display_name.split('/')[-1].strip()
@@ -124,5 +150,25 @@ class FanSpeedDataSource(DataSource):
             
             fan_combo.connect("changed", on_fan_changed)
             GLib.idle_add(on_fan_changed, fan_combo)
-        return setup_auto_title_logic
 
+            # --- NEW SENSOR POPULATION LOGIC ---
+            try:
+                row, spinner = fan_combo.get_parent(), Gtk.Spinner(spinning=True)
+                widgets[f"{key_prefix}fan_spinner"] = spinner
+                row.append(spinner)
+                parent_window = dialog.get_ancestor(Gtk.Window)
+                if parent_window and hasattr(parent_window, 'sensors_ready_event'):
+                    ready_event = parent_window.sensors_ready_event
+                    if ready_event.is_set():
+                        _repopulate_sensor_dropdown(widgets, panel_config, prefix)
+                    else:
+                        def wait_and_repopulate():
+                            ready_event.wait()
+                            GLib.idle_add(_repopulate_sensor_dropdown, widgets, panel_config, prefix)
+                        threading.Thread(target=wait_and_repopulate, daemon=True).start()
+                else:
+                    spinner.get_parent().set_visible(False)
+            except Exception as e:
+                print(f"FanSpeedDataSource configure_callback sensor logic error: {e}")
+
+        return setup_auto_title_logic

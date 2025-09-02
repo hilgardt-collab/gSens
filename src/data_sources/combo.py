@@ -77,8 +77,6 @@ class ComboDataSource(DataSource):
                 min_val = float(source.config.get("graph_min_value", 0.0))
                 max_val = float(source.config.get("graph_max_value", 100.0))
                 
-                # --- FIX: Use the caption_override from the child's config ---
-                # This ensures the override from the UI is correctly passed through.
                 override = source.config.get('caption_override', '')
                 
                 data_bundle[key] = {
@@ -106,6 +104,12 @@ class ComboDataSource(DataSource):
         """
 
         def _rebuild_slot_config_ui(source_key, parent_box, prefix, dialog, widgets, available_sources, panel_config):
+            # Refresh the panel_config with live data from widgets
+            all_models = [ *dialog.dynamic_models ]
+            if hasattr(dialog, 'ui_models'): all_models.extend(dialog.ui_models.values())
+            latest_config_values = get_config_from_widgets(widgets, all_models)
+            panel_config.update(latest_config_values)
+            
             sub_opt_prefix = f"{prefix}opt_"
             
             keys_to_remove = [k for k in widgets if k.startswith(sub_opt_prefix)]
@@ -118,13 +122,18 @@ class ComboDataSource(DataSource):
             if source_key and source_key != "none":
                 SourceClass = next((s['class'] for s in available_sources.values() if s['key'] == source_key), None)
                 if SourceClass:
-                    child_config = {}
-                    for key, value in panel_config.items():
-                        if key.startswith(sub_opt_prefix):
-                            unprefixed_key = key[len(sub_opt_prefix):]
-                            child_config[unprefixed_key] = value
-                    
                     model = SourceClass.get_config_model()
+                    valid_keys = set()
+                    for section in model.values():
+                        for option in section:
+                            valid_keys.add(option.key)
+                    
+                    child_config = {}
+                    for key in valid_keys:
+                        prefixed_key = f"{sub_opt_prefix}{key}"
+                        if prefixed_key in panel_config:
+                            child_config[key] = panel_config[prefixed_key]
+                    
                     populate_defaults_from_model(child_config, model)
                     
                     unprefixed_widgets = {}
@@ -145,7 +154,7 @@ class ComboDataSource(DataSource):
                         custom_cb(dialog, parent_box, unprefixed_widgets, available_sources, child_config, prefix)
 
         def _build_arc_config_ui(dialog, content_box, widgets, available_sources, panel_config, source_opts):
-            arc_count_model = {"": [ConfigOption("combo_arc_count", "spinner", "Number of Arcs:", 5, 0, 12, 1, 0)]}
+            arc_count_model = {"": [ConfigOption("combo_arc_count", "spinner", "Number of Arcs:", 5, 0, 16, 1, 0)]}
             build_ui_from_model(content_box, panel_config, arc_count_model, widgets)
             dialog.dynamic_models.append(arc_count_model)
             

@@ -19,7 +19,6 @@ class LevelBarComboDisplayer(ComboBase):
     def __init__(self, panel_ref, config):
         self._animation_timer_id = None
         self._bar_values = {}
-        # --- FIX: Initialize helper with None as the panel_ref ---
         self._drawer = LevelBarDisplayer(None, config)
 
         super().__init__(panel_ref, config)
@@ -28,7 +27,6 @@ class LevelBarComboDisplayer(ComboBase):
         self.widget.connect("realize", self._start_animation_timer)
         self.widget.connect("unrealize", self._stop_animation_timer)
 
-    # --- FIX: Override the panel_ref property to propagate it to the helper ---
     @property
     def panel_ref(self):
         return self._panel_ref
@@ -73,6 +71,11 @@ class LevelBarComboDisplayer(ComboBase):
     def get_configure_callback(self):
         """Builds the UI for the Display tab with per-bar styling."""
         def build_display_ui(dialog, content_box, widgets, available_sources, panel_config):
+            display_notebook = Gtk.Notebook()
+            content_box.append(display_notebook)
+
+            # --- Layout Tab ---
+            layout_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
             model = {
                 "Overall Layout": [
                     ConfigOption("combo_bar_orientation", "dropdown", "Bar Orientation:", "vertical", 
@@ -81,53 +84,136 @@ class LevelBarComboDisplayer(ComboBase):
                     ConfigOption("combo_animation_enabled", "bool", "Enable Bar Animation:", "True")
                 ]
             }
-
             dialog.dynamic_models.append(model)
-            build_ui_from_model(content_box, panel_config, model, widgets)
-            
-            content_box.append(Gtk.Separator(margin_top=15, margin_bottom=5))
-            content_box.append(Gtk.Label(label="<b>Individual Bar Styles</b>", use_markup=True, xalign=0))
+            build_ui_from_model(layout_box, panel_config, model, widgets)
+            display_notebook.append_page(layout_box, Gtk.Label(label="Layout"))
 
+            # --- Styles Tab ---
+            styles_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
             style_notebook = Gtk.Notebook()
-            content_box.append(style_notebook)
+            style_notebook.set_scrollable(True)
+            styles_box.append(style_notebook)
+            display_notebook.append_page(styles_box, Gtk.Label(label="Styles"))
 
-            def get_bar_style_model(i):
-                base_model = LevelBarDisplayer.get_config_model()
+            # --- Effects Tab ---
+            effects_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin_top=15, margin_bottom=15, margin_start=15, margin_end=15)
+            display_notebook.append_page(effects_box, Gtk.Label(label="Effects"))
+            
+            # Effect 1: Copy Style
+            effects_box.append(Gtk.Label(label="<b>Copy Bar Style</b>", xalign=0, use_markup=True))
+            copy_grid = Gtk.Grid(column_spacing=10, row_spacing=10)
+            effects_box.append(copy_grid)
+            source_bar_combo = Gtk.ComboBoxText()
+            copy_grid.attach(Gtk.Label(label="Source Bar:", xalign=1), 0, 0, 1, 1); copy_grid.attach(source_bar_combo, 1, 0, 1, 1)
+            copy_checkboxes = { "Bar Style": Gtk.CheckButton(label="Bar Style (Colors, Geometry)"), "Effects": Gtk.CheckButton(label="Effects (Animation, Fades)"), "Layout": Gtk.CheckButton(label="Text Layout"), "Primary Label": Gtk.CheckButton(label="Primary Label Style"), "Secondary Label": Gtk.CheckButton(label="Secondary Label Style") }
+            for i, (key, chk) in enumerate(copy_checkboxes.items()):
+                chk.set_active(True); copy_grid.attach(chk, 0, i + 1, 2, 1)
+            apply_style_button = Gtk.Button(label="Apply Selected Style to All Other Bars")
+            copy_grid.attach(apply_style_button, 0, len(copy_checkboxes) + 2, 2, 1)
+            
+            # Effect 2: Gradient Color
+            effects_box.append(Gtk.Separator(margin_top=15, margin_bottom=10))
+            effects_box.append(Gtk.Label(label="<b>Apply Color Gradient</b>", xalign=0, use_markup=True))
+            grad_grid = Gtk.Grid(column_spacing=10, row_spacing=10)
+            effects_box.append(grad_grid)
+            grad_start_bar_combo = Gtk.ComboBoxText(); grad_end_bar_combo = Gtk.ComboBoxText()
+            grad_start_color = Gtk.ColorButton(); grad_end_color = Gtk.ColorButton()
+            grad_target_on = Gtk.CheckButton(label="'On' Color"); grad_target_on.set_active(True)
+            grad_target_off = Gtk.CheckButton(label="'Off' Color")
+            grad_target_bg = Gtk.CheckButton(label="Background Color")
+            apply_gradient_button = Gtk.Button(label="Apply Gradient to Bar Range")
+            grad_grid.attach(Gtk.Label(label="Start Bar:", xalign=1), 0, 0, 1, 1); grad_grid.attach(grad_start_bar_combo, 1, 0, 1, 1)
+            grad_grid.attach(Gtk.Label(label="End Bar:", xalign=1), 0, 1, 1, 1); grad_grid.attach(grad_end_bar_combo, 1, 1, 1, 1)
+            grad_grid.attach(Gtk.Label(label="Start Color:", xalign=1), 0, 2, 1, 1); grad_grid.attach(grad_start_color, 1, 2, 1, 1)
+            grad_grid.attach(Gtk.Label(label="End Color:", xalign=1), 0, 3, 1, 1); grad_grid.attach(grad_end_color, 1, 3, 1, 1)
+            grad_grid.attach(grad_target_on, 0, 4, 2, 1); grad_grid.attach(grad_target_off, 0, 5, 2, 1); grad_grid.attach(grad_target_bg, 0, 6, 2, 1)
+            grad_grid.attach(apply_gradient_button, 0, 7, 2, 1)
+
+            def _interpolate_rgba(factor, c1, c2):
+                inter = Gdk.RGBA(); inter.red=c1.red+factor*(c2.red-c1.red); inter.green=c1.green+factor*(c2.green-c1.green); inter.blue=c1.blue+factor*(c2.blue-c1.blue); inter.alpha=c1.alpha+factor*(c2.alpha-c1.alpha); return inter
+
+            def on_apply_gradient_clicked(button):
+                start_id_str, end_id_str = grad_start_bar_combo.get_active_id(), grad_end_bar_combo.get_active_id()
+                if not start_id_str or not end_id_str: return
+                start_index, end_index = int(start_id_str), int(end_id_str)
+                if start_index > end_index: start_index, end_index = end_index, start_index
+                start_rgba, end_rgba = grad_start_color.get_rgba(), grad_end_color.get_rgba()
+                steps = end_index - start_index
+                for i in range(start_index, end_index + 1):
+                    factor = (i - start_index) / steps if steps > 0 else 0.0
+                    inter_color = _interpolate_rgba(factor, start_rgba, end_rgba)
+                    if grad_target_on.get_active():
+                        w = widgets.get(f"bar{i}_level_bar_on_color"); w.set_rgba(inter_color)
+                        w2 = widgets.get(f"bar{i}_level_bar_on_color2"); w2.set_rgba(inter_color)
+                    if grad_target_off.get_active(): widgets.get(f"bar{i}_level_bar_off_color").set_rgba(inter_color)
+                    if grad_target_bg.get_active(): widgets.get(f"bar{i}_level_bar_background_color").set_rgba(inter_color)
+            apply_gradient_button.connect("clicked", on_apply_gradient_clicked)
+
+            base_model = LevelBarDisplayer.get_config_model()
+            property_map = {
+                "Bar Style": [opt.key for opt in base_model.get("Level Bar Style", [])],
+                "Effects": [opt.key for opt in base_model.get("Level Bar Effects", [])],
+                "Layout": [opt.key for opt in base_model.get("Labels & Layout", []) if "label" not in opt.key],
+                "Primary Label": [opt.key for opt in base_model.get("Labels & Layout", []) if "primary" in opt.key],
+                "Secondary Label": [opt.key for opt in base_model.get("Labels & Layout", []) if "secondary" in opt.key],
+            }
+
+            def on_apply_same_style_clicked(button):
+                bar_count = widgets["number_of_bars"].get_value_as_int()
+                source_id_str = source_bar_combo.get_active_id()
+                if not source_id_str: return
+                source_index = int(source_id_str)
+                keys_to_copy = []
+                for key, chk in copy_checkboxes.items():
+                    if chk.get_active(): keys_to_copy.extend(property_map.get(key, []))
+                for i in range(1, bar_count + 1):
+                    if i == source_index: continue
+                    for key_suffix in keys_to_copy:
+                        source_widget = widgets.get(f"bar{source_index}_{key_suffix}")
+                        dest_widget = widgets.get(f"bar{i}_{key_suffix}")
+                        if source_widget and dest_widget:
+                            if isinstance(source_widget, (Gtk.SpinButton, Gtk.Scale)): dest_widget.set_value(source_widget.get_value())
+                            elif isinstance(source_widget, Gtk.ColorButton): dest_widget.set_rgba(source_widget.get_rgba())
+                            elif isinstance(source_widget, Gtk.FontButton): dest_widget.set_font(source_widget.get_font())
+                            elif isinstance(source_widget, Gtk.ComboBoxText): dest_widget.set_active_id(source_widget.get_active_id())
+                            elif isinstance(source_widget, Gtk.Switch): dest_widget.set_active(source_widget.get_active())
+            apply_style_button.connect("clicked", on_apply_same_style_clicked)
+
+            bar_tabs_content = []
+            for i in range(1, 13):
+                scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
+                tab_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
+                scroll.set_child(tab_box)
+                style_notebook.append_page(scroll, Gtk.Label(label=f"Style {i}"))
+                bar_tabs_content.append(scroll)
+                
                 prefixed_model = {}
                 for section, options in base_model.items():
                     if section in ["Level Bar Range"]: continue
-                    prefixed_options = []
-                    for opt in options:
-                        prefixed_options.append(ConfigOption(
-                            f"bar{i}_{opt.key}", opt.type, opt.label, opt.default, 
-                            opt.min_val, opt.max_val, opt.step, opt.digits, 
-                            opt.options_dict, opt.tooltip, opt.file_filters
-                        ))
+                    prefixed_options = [ConfigOption(f"bar{i}_{opt.key}", opt.type, opt.label, opt.default, opt.min_val, opt.max_val, opt.step, opt.digits, opt.options_dict, opt.tooltip, opt.file_filters) for opt in options]
                     prefixed_model[section] = prefixed_options
-                return prefixed_model
+                
+                populate_defaults_from_model(panel_config, prefixed_model)
+                build_ui_from_model(tab_box, panel_config, prefixed_model, widgets)
+                dialog.dynamic_models.append(prefixed_model)
 
-            def build_bar_style_tabs(spinner):
+            def on_bar_count_changed(spinner):
                 count = spinner.get_value_as_int()
-                
-                while style_notebook.get_n_pages() > count:
-                    style_notebook.remove_page(-1)
-                
+                source_bar_combo.remove_all(); grad_start_bar_combo.remove_all(); grad_end_bar_combo.remove_all()
                 for i in range(1, count + 1):
-                    if i > style_notebook.get_n_pages():
-                        scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
-                        tab_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
-                        scroll.set_child(tab_box)
-                        style_notebook.append_page(scroll, Gtk.Label(label=f"Style {i}"))
-                        
-                        bar_model = get_bar_style_model(i)
-                        populate_defaults_from_model(panel_config, bar_model)
-                        build_ui_from_model(tab_box, panel_config, bar_model, widgets)
-                        dialog.dynamic_models.append(bar_model)
+                    source_bar_combo.append(id=str(i), text=f"Bar {i}")
+                    grad_start_bar_combo.append(id=str(i), text=f"Bar {i}")
+                    grad_end_bar_combo.append(id=str(i), text=f"Bar {i}")
+                source_bar_combo.set_active(0); grad_start_bar_combo.set_active(0)
+                if count > 0: grad_end_bar_combo.set_active(count-1)
+                
+                for i, content_widget in enumerate(bar_tabs_content):
+                    content_widget.set_visible(i < count)
 
             bar_count_spinner = widgets.get("number_of_bars")
             if bar_count_spinner:
-                bar_count_spinner.connect("value-changed", build_bar_style_tabs)
-                GLib.idle_add(build_bar_style_tabs, bar_count_spinner)
+                bar_count_spinner.connect("value-changed", on_bar_count_changed)
+                GLib.idle_add(on_bar_count_changed, bar_count_spinner)
 
         return build_display_ui
 
@@ -185,9 +271,9 @@ class LevelBarComboDisplayer(ComboBase):
         
         if orientation == "vertical":
             bar_width = width
-            bar_height = (height - total_spacing) / num_bars
+            bar_height = (height - total_spacing) / num_bars if num_bars > 0 else 0
         else: # horizontal
-            bar_width = (width - total_spacing) / num_bars
+            bar_width = (width - total_spacing) / num_bars if num_bars > 0 else 0
             bar_height = height
 
         if bar_width <= 0 or bar_height <= 0: return

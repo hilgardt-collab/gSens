@@ -1,3 +1,4 @@
+# data_displayers/analog_clock.py
 import gi
 import time
 import datetime
@@ -272,8 +273,6 @@ class AnalogClockDisplayer(DataDisplayer):
                 if self._sound_player: self._sound_player.set_state(Gst.State.NULL)
                 self.drawing_area.queue_draw()
             else:
-                # This now handles both the "running" and "not running" cases.
-                # The dialog itself will show the correct UI based on the timer's state.
                 self._show_timer_management_dialog()
             
     def _disable_ringing_alarm(self):
@@ -484,7 +483,12 @@ class AnalogClockDisplayer(DataDisplayer):
         if self._cached_image_path != image_path:
             self._cached_image_path = image_path
             self._cached_face_pixbuf = GdkPixbuf.Pixbuf.new_from_file(image_path) if image_path and os.path.exists(image_path) else None
-        self._static_surface = None; self.drawing_area.queue_draw()
+        
+        # Invalidate cache and restart timer to apply new settings (e.g. show/hide second hand)
+        self._static_surface = None
+        if self.widget.get_realized():
+            self._start_visual_update_timer()
+        self.drawing_area.queue_draw()
     
     def update_display(self, data):
         if not self.panel_ref: return

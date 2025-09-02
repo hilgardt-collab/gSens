@@ -45,10 +45,12 @@ DEFAULT_PANEL_LAYOUT = [
 ]
 
 class MainWindow(Gtk.ApplicationWindow):
-    def __init__(self, app):
+    def __init__(self, app, sensors_ready_event=None):
         super().__init__(title="GTK System Monitor", application=app)
         self.app = app
-        
+        # Store the event object passed from the application
+        self.sensors_ready_event = sensors_ready_event
+
         # Use the centrally loaded module data
         self.AVAILABLE_DATA_SOURCES = AVAILABLE_DATA_SOURCES
         self.AVAILABLE_DISPLAYERS = AVAILABLE_DISPLAYERS
@@ -230,10 +232,13 @@ class SystemMonitorApp(Gtk.Application):
         super().__init__(application_id="com.example.gtk-system-monitor", 
                          flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE, **kwargs)
         self.window = None
+        # Create an event to signal when sensor discovery is complete
+        self.sensors_ready_event = threading.Event()
 
     def do_activate(self):
         if not self.window or not self.window.is_visible():
-            self.window = MainWindow(self)
+            # Pass the event to the main window when it's created
+            self.window = MainWindow(self, sensors_ready_event=self.sensors_ready_event)
         self.window.present()
 
     def do_command_line(self, command_line):
@@ -256,7 +261,10 @@ class SystemMonitorApp(Gtk.Application):
         update_manager.start()
         
         # --- FIX: Discover sensors in a background thread to prevent UI freezes ---
-        sensor_discovery_thread = threading.Thread(target=self._discover_sensors_background, daemon=True)
+        # Pass the event to the discovery thread
+        sensor_discovery_thread = threading.Thread(target=self._discover_sensors_background, 
+                                                   args=(self.sensors_ready_event,), 
+                                                   daemon=True)
         sensor_discovery_thread.start()
         
         for sig in [signal.SIGINT, signal.SIGTERM]:
@@ -267,7 +275,7 @@ class SystemMonitorApp(Gtk.Application):
         self.add_action(action)
         self.set_accels_for_action("app.quit", ["<Control>q"])
 
-    def _discover_sensors_background(self):
+    def _discover_sensors_background(self, ready_event):
         """
         Worker function to discover all hardware sensors in the background.
         This is run in a separate thread at startup to avoid blocking the UI.
@@ -286,8 +294,10 @@ class SystemMonitorApp(Gtk.Application):
 
         except Exception as e:
             print(f"Error during background sensor discovery: {e}")
-        
-        print("Background sensor discovery finished.")
+        finally:
+            print("Background sensor discovery finished.")
+            # Signal that the discovery process is complete
+            ready_event.set()
 
     def do_shutdown(self):
         # Stop the central update manager's worker thread

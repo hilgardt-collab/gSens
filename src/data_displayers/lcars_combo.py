@@ -201,28 +201,30 @@ class LCARSComboDisplayer(ComboBase):
             segment_scrolled = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
             segment_scrolled.set_min_content_height(300)
             segment_notebook = Gtk.Notebook()
+            segment_notebook.set_scrollable(True)
             segment_scrolled.set_child(segment_notebook)
             frame_box.append(segment_scrolled)
-
-            def build_segment_tabs(spinner):
-                count = spinner.get_value_as_int()
-                dialog.dynamic_models = [m for m in dialog.dynamic_models if not any(opt.key.startswith("segment_") for s in m.values() for opt in s)]
-                while segment_notebook.get_n_pages() > count: segment_notebook.remove_page(-1)
+            
+            segment_tabs_content = []
+            for i in range(1, 13):
+                tab_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
+                tab_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
+                tab_scroll.set_child(tab_box)
+                segment_notebook.append_page(tab_scroll, Gtk.Label(label=f"Seg {i}"))
+                segment_tabs_content.append(tab_scroll)
                 
-                for i in range(1, count + 1):
-                    if i > segment_notebook.get_n_pages():
-                        tab_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
-                        tab_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
-                        tab_scroll.set_child(tab_box)
-                        segment_notebook.append_page(tab_scroll, Gtk.Label(label=f"Seg {i}"))
-                        
-                        seg_model = self._get_segment_model(i)
-                        build_ui_from_model(tab_box, panel_config, seg_model, widgets)
-                        dialog.dynamic_models.append(seg_model)
+                seg_model = self._get_segment_model(i)
+                build_ui_from_model(tab_box, panel_config, seg_model, widgets)
+                dialog.dynamic_models.append(seg_model)
+
+            def on_segment_count_changed(spinner):
+                count = spinner.get_value_as_int()
+                for i, content_widget in enumerate(segment_tabs_content):
+                    content_widget.set_visible(i < count)
 
             seg_count_spinner = widgets["lcars_segment_count"]
-            seg_count_spinner.connect("value-changed", build_segment_tabs)
-            GLib.idle_add(build_segment_tabs, seg_count_spinner)
+            seg_count_spinner.connect("value-changed", on_segment_count_changed)
+            GLib.idle_add(on_segment_count_changed, seg_count_spinner)
 
             # --- Tab 2: Content ---
             content_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
@@ -247,27 +249,30 @@ class LCARSComboDisplayer(ComboBase):
             dialog.dynamic_models.append(primary_model)
 
             # --- Secondary Items Sub-Tabs ---
-            def build_secondary_tabs(spinner):
+            secondary_tabs_content = []
+            for i in range(1, 13):
+                prefix = f"secondary{i}"
+                tab_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
+                tab_scroll.set_min_content_height(300)
+                tab_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
+                tab_scroll.set_child(tab_box)
+                content_notebook.append_page(tab_scroll, Gtk.Label(label=f"Item {i}"))
+                secondary_tabs_content.append(tab_scroll)
+                
+                sec_model = self._get_content_item_model(prefix)
+                build_ui_from_model(tab_box, panel_config, sec_model, widgets)
+                self._setup_dynamic_content_ui(dialog, tab_box, widgets, panel_config, prefix)
+                dialog.dynamic_models.append(sec_model)
+
+            def on_secondary_count_changed(spinner):
                 count = spinner.get_value_as_int()
-                while content_notebook.get_n_pages() > count + 1: content_notebook.remove_page(-1)
-                for i in range(1, count + 1):
-                    if i + 1 > content_notebook.get_n_pages():
-                        prefix = f"secondary{i}"
-                        tab_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
-                        tab_scroll.set_min_content_height(300)
-                        tab_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
-                        tab_scroll.set_child(tab_box)
-                        content_notebook.append_page(tab_scroll, Gtk.Label(label=f"Item {i}"))
-                        
-                        sec_model = self._get_content_item_model(prefix)
-                        build_ui_from_model(tab_box, panel_config, sec_model, widgets)
-                        self._setup_dynamic_content_ui(dialog, tab_box, widgets, panel_config, prefix)
-                        dialog.dynamic_models.append(sec_model)
+                for i, content_widget in enumerate(secondary_tabs_content):
+                    content_widget.set_visible(i < count)
 
             sec_count_spinner = widgets.get("number_of_secondary_sources")
             if sec_count_spinner:
-                sec_count_spinner.connect("value-changed", build_secondary_tabs)
-                GLib.idle_add(build_secondary_tabs, sec_count_spinner)
+                sec_count_spinner.connect("value-changed", on_secondary_count_changed)
+                GLib.idle_add(on_secondary_count_changed, sec_count_spinner)
 
         return build_display_ui
         
@@ -707,4 +712,3 @@ class LCARSComboDisplayer(ComboBase):
         if self._level_bar_drawer: self._level_bar_drawer.close(); self._level_bar_drawer = None
         if self._graph_drawer: self._graph_drawer.close(); self._graph_drawer = None
         super().close()
-

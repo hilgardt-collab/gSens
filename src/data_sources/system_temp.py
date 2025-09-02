@@ -3,6 +3,7 @@ from data_source import DataSource
 from utils import safe_subprocess
 from config_dialog import ConfigOption
 import json
+import threading
 import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import GLib
@@ -86,7 +87,7 @@ class SystemTempDataSource(DataSource):
         sensor_options = {v['display_name']: k for k, v in sorted(discovered_sensors.items(), key=lambda item: item[1]['display_name'])}
         
         model = DataSource.get_config_model()
-        model["Data Source & Update"] = [ConfigOption("update_interval_seconds", "scale", "Update Interval (sec):", 3, 1, 60, 1, 0),
+        model["Data Source & Update"] = [ConfigOption("update_interval_seconds", "scale", "Update Interval (sec):", "3.0", 0.1, 60, 0.1, 1),
                                          ConfigOption("display_unit", "dropdown", "Display Unit:", "C", options_dict={"Celsius (°C)": "C", "Fahrenheit (°F)": "F", "Kelvin (K)": "K"})]
         model["Sensor Selection"] = [ConfigOption("selected_sensor_key", "dropdown", "Monitored Sensor:", "", options_dict=sensor_options)]
         model["Alarm"][1] = ConfigOption(f"sys_temp_alarm_high_value", "scale", f"Alarm High Value (°C):", "85.0", 0.0, 150.0, 1.0, 1)
@@ -97,7 +98,37 @@ class SystemTempDataSource(DataSource):
         return model
 
     def get_configure_callback(self):
-        """Provides a callback to dynamically update panel title based on selected sensor."""
+        """Provides a callback to dynamically update panel title and populate sensors."""
+
+        def _repopulate_sensor_dropdown(widgets, panel_config):
+            """Helper to fill the sensor dropdown once data is available."""
+            try:
+                sensor_combo = widgets.get("selected_sensor_key")
+                spinner = widgets.get("system_temp_spinner")
+                if not sensor_combo: return
+
+                if spinner: spinner.get_parent().set_visible(False)
+
+                model = sensor_combo.get_model()
+                model.clear()
+                
+                sensors = SENSOR_CACHE.get('system_temp', {})
+                if not sensors or all(k == "" for k in sensors):
+                    model.append(id="", text="No sensors found")
+                else:
+                    sorted_sensors = sorted(sensors.items(), key=lambda i: i[1]['display_name'])
+                    for key, data in sorted_sensors:
+                        model.append(id=key, text=data['display_name'])
+
+                current_selection = panel_config.get("selected_sensor_key")
+                if current_selection and sensor_combo.set_active_id(current_selection):
+                    pass
+                else:
+                    sensor_combo.set_active(0)
+
+            except KeyError as e:
+                print(f"SystemTempDataSource _repopulate_sensor_dropdown KeyError: {e}")
+
         def setup_auto_title_logic(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
             try: 
                 sensor_combo = widgets["selected_sensor_key"]
@@ -107,12 +138,34 @@ class SystemTempDataSource(DataSource):
 
             def on_sensor_changed(combo):
                 display_name = combo.get_active_text()
-                if display_name and "No sensors" not in display_name:
-                    title_entry.set_text(display_name)
-                else:
-                    title_entry.set_text("System Temperature")
-
+                if not title_entry.get_text() or title_entry.get_text() == "System Temperature":
+                    if display_name and "No sensors" not in display_name:
+                        title_entry.set_text(display_name)
+                    else:
+                        title_entry.set_text("System Temperature")
+            
             sensor_combo.connect("changed", on_sensor_changed)
             GLib.idle_add(on_sensor_changed, sensor_combo)
 
+            # --- NEW SENSOR POPULATION LOGIC ---
+            try:
+                row, spinner = sensor_combo.get_parent(), Gtk.Spinner(spinning=True)
+                widgets["system_temp_spinner"] = spinner
+                row.append(spinner)
+                parent_window = dialog.get_ancestor(Gtk.Window)
+                if parent_window and hasattr(parent_window, 'sensors_ready_event'):
+                    ready_event = parent_window.sensors_ready_event
+                    if ready_event.is_set():
+                        _repopulate_sensor_dropdown(widgets, panel_config)
+                    else:
+                        def wait_and_repopulate():
+                            ready_event.wait()
+                            GLib.idle_add(_repopulate_sensor_dropdown, widgets, panel_config)
+                        threading.Thread(target=wait_and_repopulate, daemon=True).start()
+                else:
+                    spinner.get_parent().set_visible(False)
+            except Exception as e:
+                print(f"SystemTempDataSource configure_callback sensor logic error: {e}")
+
         return setup_auto_title_logic
+
