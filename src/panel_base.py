@@ -53,9 +53,6 @@ class BasePanel(Gtk.Frame, BasePanelABC, metaclass=BasePanelMeta):
         self._alarm_flash_timer_id = None
         self._current_alarm_flash_color = None
         
-        # --- REFACTOR: Remove old, unprefixed background defaults ---
-        # These are now handled by the unified build_background_config_ui helper.
-
         self.config["id"] = self.config.get("id", "panel_" + title.lower().replace(" ", "_") + "_" + str(id(self))[:5])
         self.config["name"] = self.config.get("name", self.config["id"]) 
         self.config["width"] = int(self.config.get("width", "2"))
@@ -188,7 +185,6 @@ class BasePanel(Gtk.Frame, BasePanelABC, metaclass=BasePanelMeta):
         if is_in_alarm:
             css_parts.append(f"background: {self._current_alarm_flash_color};")
         else:
-            # --- REFACTOR: Use the new, prefixed config keys ---
             bg_type = self.config.get("panel_bg_type", "solid")
             if bg_type == "image":
                 image_path = self.config.get("panel_background_image_path")
@@ -204,7 +200,7 @@ class BasePanel(Gtk.Frame, BasePanelABC, metaclass=BasePanelMeta):
                         css_parts.extend(["background-size: auto, auto;", "background-repeat: repeat, no-repeat;"])
                     elif image_style == "stretch":
                         css_parts.extend(["background-size: 100% 100%, 100% 100%;", "background-repeat: no-repeat, no-repeat;"])
-                    else: # zoom (cover)
+                    else: 
                         css_parts.extend(["background-size: cover, cover;", "background-repeat: no-repeat, no-repeat;"])
                 else:
                     css_parts.append(f"background-color: {self.config.get('panel_bg_color', '#222222')};")
@@ -215,7 +211,7 @@ class BasePanel(Gtk.Frame, BasePanelABC, metaclass=BasePanelMeta):
             elif bg_type == "gradient_radial":
                 color1, color2 = self.config.get("panel_gradient_radial_color1"), self.config.get("panel_gradient_radial_color2")
                 css_parts.append(f"background-image: radial-gradient(circle, {color1}, {color2});")
-            else: # solid
+            else: 
                 css_parts.append(f"background-color: {self.config.get('panel_bg_color', '#222222')};")
         
         grid_layout_config = config_manager.config["GridLayout"]
@@ -270,13 +266,29 @@ class BasePanel(Gtk.Frame, BasePanelABC, metaclass=BasePanelMeta):
         context_gesture.connect("pressed", self.on_gesture_pressed); self.add_controller(context_gesture)
 
         self.popover = Gtk.Popover()
-        menu_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        menu_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         for m_prop in ["top", "bottom", "start", "end"]: getattr(menu_box, f"set_margin_{m_prop}")(6)
         self.popover.set_child(menu_box)
-        config_btn = Gtk.Button(label="Configure"); config_btn.connect("clicked", self.on_configure_clicked)
+        
+        config_btn = Gtk.Button(label="Configure..."); config_btn.connect("clicked", self.on_configure_clicked)
         menu_box.append(config_btn)
-        close_btn = Gtk.Button(label="Close"); close_btn.connect("clicked", self.on_close_clicked)
+        
+        menu_box.append(Gtk.Separator(margin_top=6, margin_bottom=6))
+        
+        load_defaults_btn = Gtk.Button(label="Load Default Style")
+        load_defaults_btn.connect("clicked", self.on_load_defaults_clicked)
+        menu_box.append(load_defaults_btn)
+
+        save_defaults_btn = Gtk.Button(label="Save Style as Default")
+        save_defaults_btn.connect("clicked", self.on_save_defaults_clicked)
+        menu_box.append(save_defaults_btn)
+        
+        menu_box.append(Gtk.Separator(margin_top=6, margin_bottom=6))
+        
+        close_btn = Gtk.Button(label="Delete"); close_btn.add_css_class("destructive-action")
+        close_btn.connect("clicked", self.on_close_clicked)
         menu_box.append(close_btn)
+        
         self.popover.set_parent(self) 
 
     def on_gesture_pressed(self, gesture, n_press, x, y):
@@ -294,34 +306,45 @@ class BasePanel(Gtk.Frame, BasePanelABC, metaclass=BasePanelMeta):
         is_shift = bool(event.get_modifier_state() & Gdk.ModifierType.SHIFT_MASK)
         button = gesture.get_current_button()
         
-        # Highest priority: Copy config on Ctrl+Shift+PrimaryClick
         if button == Gdk.BUTTON_PRIMARY and is_ctrl and is_shift:
-            print(f"DEBUG: Ctrl+Shift+Click detected on panel {self.config.get('id')}")
             if hasattr(parent_grid, 'handle_copy_config_request'):
                 parent_grid.handle_copy_config_request(self.config.get("id"))
-            return # Stop further processing for this gesture
+            return 
         
-        # Second priority: Context menu on Right-Click
         if button == Gdk.BUTTON_SECONDARY and not is_multi_selecting_or_dragging:
+             # --- FIX: Create a rectangle at the click position to anchor the popover ---
+             rect = Gdk.Rectangle()
+             rect.x = x
+             rect.y = y
+             rect.width = 1
+             rect.height = 1
+             self.popover.set_pointing_to(rect)
              self.popover.popup()
              return
 
-        # Third priority: Selection on Primary Click (if not dragging)
         if button == Gdk.BUTTON_PRIMARY and not is_multi_selecting_or_dragging:
             if hasattr(parent_grid, 'selected_panel_ids') and hasattr(parent_grid, '_update_selected_panels_visuals'):
                 panel_id = self.config.get("id")
-                if is_ctrl: # Toggle selection
+                if is_ctrl:
                     if panel_id in parent_grid.selected_panel_ids:
                         parent_grid.selected_panel_ids.remove(panel_id)
                     else:
                         parent_grid.selected_panel_ids.add(panel_id)
-                else: # Simple select
+                else: 
                     parent_grid.selected_panel_ids.clear()
                     parent_grid.selected_panel_ids.add(panel_id)
                 parent_grid._update_selected_panels_visuals()
 
     def on_configure_clicked(self, button):
         self.popover.popdown(); self.configure()
+
+    def on_load_defaults_clicked(self, button):
+        self.popover.popdown()
+        print(f"DEBUG: BasePanel on_load_defaults_clicked for {self.config.get('id')}")
+
+    def on_save_defaults_clicked(self, button):
+        self.popover.popdown()
+        print(f"DEBUG: BasePanel on_save_defaults_clicked for {self.config.get('id')}")
 
     def on_close_clicked(self, button):
         self.popover.popdown()
@@ -333,9 +356,6 @@ class BasePanel(Gtk.Frame, BasePanelABC, metaclass=BasePanelMeta):
             print(f"Error: Could not request removal for panel {panel_id}. Parent or method not found.")
 
     def close_panel(self, widget=None):
-        """
-        Thoroughly cleans up the panel to prevent memory and thread leaks.
-        """
         if self._config_dialog:
             self._config_dialog.destroy()
             self._config_dialog = None
@@ -385,3 +405,4 @@ class BasePanel(Gtk.Frame, BasePanelABC, metaclass=BasePanelMeta):
 
     def configure(self, *args):
         pass
+

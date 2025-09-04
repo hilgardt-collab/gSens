@@ -22,6 +22,19 @@ class CPUDataSource(DataSource):
         # Initial call to setup for psutil.cpu_percent
         psutil.cpu_percent(interval=None, percpu=True)
 
+        # --- FIX: Pre-select the first available sensor on initialization ---
+        # This prevents the warning when opening the config dialog for the first time
+        # if a sensor key hasn't been explicitly saved yet.
+        selected_key = self.config.get("cpu_temp_sensor_key")
+        if not selected_key or '::' not in selected_key:
+            cached_sensors = SENSOR_CACHE.get('cpu_temp', {})
+            if cached_sensors:
+                # Find the first key that is not empty
+                first_valid_key = next((k for k in cached_sensors if k), None)
+                if first_valid_key:
+                    # Update the config dictionary directly
+                    self.config["cpu_temp_sensor_key"] = first_valid_key
+
     @staticmethod
     def _discover_cpu_temp_sensors_statically():
         """
@@ -78,6 +91,7 @@ class CPUDataSource(DataSource):
         
         selected_key = self.config.get("cpu_temp_sensor_key", "")
         
+        # This check is now mostly redundant due to the __init__ fix, but remains as a safeguard
         if not selected_key or '::' not in selected_key:
             cached_sensors = SENSOR_CACHE.get('cpu_temp', {})
             if cached_sensors:
@@ -260,23 +274,27 @@ class CPUDataSource(DataSource):
             metric_combo = widgets.get("cpu_metric_to_display")
             if not metric_combo: return
 
-            all_children = list(content_box)
+            full_model = self.get_config_model()
             section_widgets = {}
-            section_titles = ["Usage Settings", "Temperature Settings", "Frequency Settings"]
-            
-            for title in section_titles:
-                try:
-                    header_label = next(c for c in all_children if isinstance(c, Gtk.Label) and c.get_label() == f"<b>{title}</b>")
-                    header_index = all_children.index(header_label)
-                    separator = all_children[header_index - 1]
-                    
-                    section_content = [separator, header_label]
-                    for child in all_children[header_index + 1:]:
-                        if isinstance(child, Gtk.Separator): break
-                        section_content.append(child)
-                    section_widgets[title] = section_content
-                except (StopIteration, IndexError):
-                    pass
+            for section_title, options in full_model.items():
+                if section_title.endswith(" Settings"):
+                    section_widgets[section_title] = []
+                    for opt in options:
+                        widget = widgets.get(opt.key)
+                        if widget and widget.get_parent():
+                            section_widgets[section_title].append(widget.get_parent())
+
+            all_children = list(content_box)
+            for section_title, s_widgets in section_widgets.items():
+                if s_widgets:
+                    first_row = s_widgets[0]
+                    try:
+                        idx = all_children.index(first_row)
+                        if idx > 1 and isinstance(all_children[idx-1], Gtk.Label) and isinstance(all_children[idx-2], Gtk.Separator):
+                            s_widgets.insert(0, all_children[idx-1])
+                            s_widgets.insert(0, all_children[idx-2])
+                    except ValueError:
+                        pass
 
             def on_metric_changed(combo):
                 active_metric = combo.get_active_id()

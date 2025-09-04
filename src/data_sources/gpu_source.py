@@ -128,30 +128,41 @@ class GPUDataSource(DataSource):
             metric_combo = widgets.get("gpu_metric_to_display")
             if not metric_combo: return
 
-            all_children = list(content_box)
-            section_widgets = {}
-            section_titles = ["Temperature Settings", "Frequency Settings", "VRAM Settings"]
+            # --- BUG FIX: Robustly find section widgets by their keys instead of fragile text search ---
+            # 1. Get the full config model for this data source.
+            full_model = self.get_config_model()
             
-            for title in section_titles:
-                try:
-                    # Find the Gtk.Label widget that serves as the section header
-                    header_label = next(c for c in all_children if isinstance(c, Gtk.Label) and c.get_label() == f"<b>{title}</b>")
-                    header_index = all_children.index(header_label)
-                    # The Gtk.Separator is right before the header
-                    separator = all_children[header_index - 1]
+            # 2. Map section titles to the widgets they contain.
+            section_widgets = {}
+            for section_title, options in full_model.items():
+                if section_title.endswith(" Settings"): # Target only the dynamic sections
+                    section_widgets[section_title] = []
                     
-                    section_content = [separator, header_label]
-                    # Collect all widgets following the header until the next separator
-                    for child in all_children[header_index + 1:]:
-                        if isinstance(child, Gtk.Separator): break
-                        section_content.append(child)
-                    section_widgets[title] = section_content
-                except (StopIteration, IndexError):
-                    print(f"Warning: Could not find UI section for '{title}'")
+                    # Find the actual UI widgets associated with this section
+                    for opt in options:
+                        widget = widgets.get(opt.key)
+                        if widget and widget.get_parent(): # Parent is the Gtk.Box row
+                            section_widgets[section_title].append(widget.get_parent())
+            
+            # 3. Find the headers and separators associated with each section.
+            all_children = list(content_box)
+            for section_title, s_widgets in section_widgets.items():
+                if s_widgets:
+                    first_row_of_section = s_widgets[0]
+                    try:
+                        idx = all_children.index(first_row_of_section)
+                        # The header and separator should be right before the first row
+                        if idx > 1 and isinstance(all_children[idx-1], Gtk.Label) and isinstance(all_children[idx-2], Gtk.Separator):
+                            s_widgets.insert(0, all_children[idx-1]) # Header
+                            s_widgets.insert(0, all_children[idx-2]) # Separator
+                    except ValueError:
+                         print(f"Warning: Could not find row for section '{section_title}' to get header.")
+
 
             def on_metric_changed(combo):
                 active_metric = combo.get_active_id()
                 
+                # 4. Show/hide the entire group of widgets for each section.
                 for w in section_widgets.get("Temperature Settings", []): w.set_visible(active_metric == "temperature")
                 for w in section_widgets.get("Frequency Settings", []): w.set_visible(active_metric == "frequency")
                 for w in section_widgets.get("VRAM Settings", []): w.set_visible(active_metric == "vram")
@@ -160,3 +171,4 @@ class GPUDataSource(DataSource):
             GLib.idle_add(on_metric_changed, metric_combo)
 
         return setup_dynamic_options
+

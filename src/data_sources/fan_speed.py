@@ -7,8 +7,6 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import GLib
 
-# --- BUG FIX ---
-# Import the global sensor cache directly to avoid a circular dependency with main.py.
 from sensor_cache import SENSOR_CACHE
 
 class FanSpeedDataSource(DataSource):
@@ -16,6 +14,15 @@ class FanSpeedDataSource(DataSource):
     def __init__(self, config):
         super().__init__(config)
         self._available_fans_cache = None
+
+        # --- FIX: Pre-select the first available sensor on initialization ---
+        selected_key = self.config.get("selected_fan_key")
+        if not selected_key:
+            cached_sensors = SENSOR_CACHE.get('fan_speed', {})
+            if cached_sensors:
+                first_valid_key = next((k for k in cached_sensors if k), None)
+                if first_valid_key:
+                    self.config["selected_fan_key"] = first_valid_key
 
     @staticmethod
     def _discover_fans_statically():
@@ -79,7 +86,6 @@ class FanSpeedDataSource(DataSource):
     
     @staticmethod
     def get_config_model():
-        # --- FIX: Read discovered sensors from the global cache instead of re-discovering. ---
         discovered_fans = SENSOR_CACHE.get('fan_speed', {"": {"display_name": "Scanning..."}})
         opts = {v['display_name']: k for k, v in sorted(discovered_fans.items(), key=lambda i:i[1]['display_name'])}
         
@@ -151,7 +157,6 @@ class FanSpeedDataSource(DataSource):
             fan_combo.connect("changed", on_fan_changed)
             GLib.idle_add(on_fan_changed, fan_combo)
 
-            # --- NEW SENSOR POPULATION LOGIC ---
             try:
                 row, spinner = fan_combo.get_parent(), Gtk.Spinner(spinning=True)
                 widgets[f"{key_prefix}fan_spinner"] = spinner

@@ -10,6 +10,8 @@ else:
     APP_CONFIG_DIR = os.path.expanduser("~/.config/gSens")
 
 DEFAULT_CONFIG_FILE = os.path.join(APP_CONFIG_DIR, "panel_settings.ini")
+# --- NEW: Add a separate file for theme/default settings ---
+THEME_CONFIG_FILE = os.path.join(APP_CONFIG_DIR, "theme.ini")
 
 
 class ConfigManager:
@@ -17,16 +19,17 @@ class ConfigManager:
         os.makedirs(os.path.dirname(DEFAULT_CONFIG_FILE), exist_ok=True)
         self.config = configparser.ConfigParser(interpolation=None)
         self.config.optionxform = str # Preserve case for option names
+        
+        # --- NEW: Initialize a separate parser for the theme ---
+        self.theme_config = configparser.ConfigParser(interpolation=None)
+        self.theme_config.optionxform = str
+
         self.load() # Load default config on startup
+        self.load_theme() # Load theme on startup
 
     def load(self, filepath=None):
         """
-        Loads configuration from the specified INI file, or the default if None.
-        Args:
-            filepath (str, optional): The path to the INI file to load. 
-                                      Defaults to the application's standard config file.
-        Returns:
-            bool: True if loading was successful, False otherwise.
+        Loads layout configuration from the specified INI file, or the default if None.
         """
         load_path = filepath if filepath else DEFAULT_CONFIG_FILE
         current_config_backup = self.config # Keep a backup in case loading new file fails
@@ -40,28 +43,22 @@ class ConfigManager:
                 return True
             except configparser.Error as e:
                 print(f"Error reading config file {load_path}: {e}. Restoring previous config (if any).")
-                self.config = current_config_backup # Restore backup on error
-                if filepath: # If error was for a specific file, notify user
+                self.config = current_config_backup 
+                if filepath:
                      self._show_error_dialog(f"Could not parse layout file: {os.path.basename(load_path)}\n\n{e}")
                 return False
         else:
             print(f"Config file {load_path} not found.")
-            if filepath: # If a specific file was requested and not found
+            if filepath:
                 self._show_error_dialog(f"Layout file not found: {os.path.basename(load_path)}")
-                self.config = current_config_backup # Restore backup
+                self.config = current_config_backup 
                 return False
-            # If default config not found, it's fine, it will be created on save.
             print("A new default configuration will be created on save.")
-            return True # Technically not a failure if default is missing for the first time
+            return True
 
     def save(self, filepath=None):
         """
-        Saves the current configuration to the specified INI file, or the default if None.
-        Args:
-            filepath (str, optional): The path to the INI file to save.
-                                      Defaults to the application's standard config file.
-        Returns:
-            bool: True if saving was successful, False otherwise.
+        Saves the current layout configuration to the specified INI file, or the default if None.
         """
         save_path = filepath if filepath else DEFAULT_CONFIG_FILE
         try:
@@ -78,10 +75,81 @@ class ConfigManager:
                 self._show_error_dialog(f"Could not save layout to file: {os.path.basename(save_path)}\n\n{e}")
             return False
 
+    # --- NEW: Method to load the theme file ---
+    def load_theme(self):
+        """Loads theme/defaults from the theme.ini file."""
+        if os.path.exists(THEME_CONFIG_FILE):
+            try:
+                self.theme_config.read(THEME_CONFIG_FILE, encoding='utf-8')
+                print(f"Theme loaded from {THEME_CONFIG_FILE}")
+                return True
+            except configparser.Error as e:
+                print(f"Error reading theme file {THEME_CONFIG_FILE}: {e}")
+                return False
+        return True # Not an error if it doesn't exist yet
+
+    # --- NEW: Method to save the theme file ---
+    def save_theme(self):
+        """Saves the current theme/defaults to the theme.ini file."""
+        try:
+            with open(THEME_CONFIG_FILE, "w", encoding='utf-8') as f:
+                self.theme_config.write(f)
+            print(f"Theme saved to {THEME_CONFIG_FILE}")
+            return True
+        except IOError as e:
+            print(f"Error writing theme file {THEME_CONFIG_FILE}: {e}")
+            return False
+
+    # --- NEW: Method to get the default style for a displayer ---
+    def get_displayer_defaults(self, displayer_key):
+        """
+        Retrieves the saved default configuration for a specific displayer type.
+        """
+        section_name = f"defaults_{displayer_key}"
+        if self.theme_config.has_section(section_name):
+            return dict(self.theme_config.items(section_name))
+        return {}
+
+    # --- NEW: Method to save the default style for a displayer ---
+    def save_displayer_defaults(self, displayer_key, panel_config, displayer_class):
+        """
+        Saves the style-related options from a panel's config as the new default
+        for its displayer type.
+        """
+        section_name = f"defaults_{displayer_key}"
+        if not self.theme_config.has_section(section_name):
+            self.theme_config.add_section(section_name)
+
+        # 1. Get all style keys from the displayer's own model
+        style_keys = set()
+        if displayer_class and hasattr(displayer_class, 'get_config_model'):
+            # Create a temporary instance to call the static method
+            displayer_model = displayer_class.get_config_model()
+            for section in displayer_model.values():
+                for option in section:
+                    style_keys.add(option.key)
+        
+        # 2. Add general panel style keys
+        panel_style_keys = [
+            "panel_bg_type", "panel_bg_color", "panel_gradient_linear_color1", 
+            "panel_gradient_linear_color2", "panel_gradient_linear_angle_deg",
+            "panel_gradient_radial_color1", "panel_gradient_radial_color2",
+            "panel_background_image_path", "panel_background_image_style", 
+            "panel_background_image_alpha", "show_title", "title_font", "title_color"
+        ]
+        style_keys.update(panel_style_keys)
+        
+        # 3. Save the current value for each style key to the theme config
+        for key in style_keys:
+            if key in panel_config:
+                self.theme_config.set(section_name, key, str(panel_config[key]))
+
+        return self.save_theme()
+
+
     def is_valid_layout_file(self, filepath):
         """
         Checks if a given file is a valid INI layout file for this application.
-        Basic check: parsable and contains a [window] section.
         """
         if not filepath or not os.path.exists(filepath):
             return False
@@ -93,7 +161,6 @@ class ConfigManager:
             if not temp_parser.has_section("window"):
                 print(f"Validation Error: File {filepath} is missing [window] section.")
                 return False
-            # Could add more checks, e.g., at least one panel_* section, specific keys in [window]
             print(f"File {filepath} appears to be a valid layout file.")
             return True
         except configparser.Error as e:
@@ -104,9 +171,6 @@ class ConfigManager:
             return False
 
     def _show_error_dialog(self, message, parent_window=None):
-        """Helper to show a simple error dialog. (Currently just prints to console)"""
-        # This ideally should be called from the UI thread or use GLib.idle_add
-        # For now, just printing, but a real app would use a Gtk.MessageDialog
         print(f"ERROR DIALOG (simulated): {message}")
 
     def get_all_panel_configs(self):
@@ -116,30 +180,24 @@ class ConfigManager:
             if section_name.startswith("panel_"): 
                 panel_type = self.config.get(section_name, "type", fallback="unknown")
                 config_dict = dict(self.config.items(section_name))
-                config_dict["id"] = section_name # Ensure 'id' is in the dictionary as a key
+                config_dict["id"] = section_name
                 panels.append((panel_type, config_dict))
         return panels
 
     def add_panel_config(self, panel_type, panel_config_dict):
         """
         Adds a new panel configuration to self.config.
-        Args:
-            panel_type (str): The type of the panel.
-            panel_config_dict (dict): Settings for the panel. 'id' will be generated if not present or invalid.
-        Returns:
-            str: The ID of the added panel.
         """
         panel_id = panel_config_dict.get("id")
         if not panel_id or not panel_id.startswith("panel_"):
-            panel_id = f"panel_{uuid.uuid4().hex[:12]}" # Generate a unique ID if not provided or invalid
+            panel_id = f"panel_{uuid.uuid4().hex[:12]}"
         
         panel_config_dict["id"] = panel_id 
-        panel_config_dict["type"] = panel_type # Ensure the type is stored in the config
+        panel_config_dict["type"] = panel_type
 
         if not self.config.has_section(panel_id):
             self.config.add_section(panel_id)
         
-        # Store all key-value pairs as strings
         for key, value in panel_config_dict.items():
             self.config.set(panel_id, str(key), str(value)) 
         return panel_id
@@ -156,7 +214,6 @@ class ConfigManager:
                 return
             self.config.add_section(panel_id)
 
-        # Update all key-value pairs
         for key, value in panel_config_dict.items():
             self.config.set(panel_id, str(key), str(value))
         
@@ -174,12 +231,11 @@ class ConfigManager:
             self.config.remove_section(section_name)
         print("All panel configurations removed from memory (current config object).")
 
-
     def get_window_config(self):
         """Gets general window configuration from self.config."""
         if self.config.has_section("window"):
             return dict(self.config.items("window"))
-        return {} # Return empty dict if no window section
+        return {}
 
     def save_window_config(self, window_config_dict):
         """Saves general window configuration to self.config."""
@@ -188,6 +244,4 @@ class ConfigManager:
         for key, value in window_config_dict.items():
             self.config.set("window", str(key), str(value))
 
-
-# Global instance of the configuration manager
 config_manager = ConfigManager()

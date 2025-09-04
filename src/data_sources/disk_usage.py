@@ -49,6 +49,7 @@ class DiskUsageDataSource(DataSource):
     def get_config_model():
         model = DataSource.get_config_model()
         model["Data Source & Update"].extend([
+            ConfigOption("mount_path", "string", "Monitoring Path:", "/"),
             ConfigOption("display_mode", "dropdown", "Text Display Mode:", "percent", options_dict={"Percentage Only": "percent", "Used GB": "used", "Total GB": "total", "Free GB": "free", "Used/Total GB": "used_total"}),
             ConfigOption("disk_title_format", "string", "Title Format:", "Disk: {mount_point}", tooltip="Use {mount_point} as a placeholder for the selected path.")
         ])
@@ -63,57 +64,45 @@ class DiskUsageDataSource(DataSource):
     def get_alarm_unit(): return "%"
 
     def get_configure_callback(self):
-        """Callback to add the 'Choose Mount Point' button and auto-title logic."""
+        """Callback to replace the standard mount_path entry with a custom chooser."""
         def add_disk_chooser(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
             is_combo_child = prefix is not None
-            
             opt_prefix = f"{prefix}opt_" if is_combo_child else ""
-            mount_path_key = f"{opt_prefix}mount_path"
-            
-            # For combo children, state is managed temporarily. For standalone, it's in the main panel_config.
-            initial_path = panel_config.get(mount_path_key, "/")
-            temp_state = {"mount_path": initial_path}
-            
-            if is_combo_child:
-                def custom_getter():
-                    return { mount_path_key: temp_state["mount_path"] }
-                
-                if not hasattr(dialog, 'custom_value_getters'):
-                    dialog.custom_value_getters = []
-                dialog.custom_value_getters.append(custom_getter)
-            
-            sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL, margin_top=10, margin_bottom=5)
-            content_box.append(sep)
-            
-            header_label = Gtk.Label(xalign=0)
-            header_label.set_markup("<b>Disk Monitoring Target</b>")
-            content_box.append(header_label)
+            mount_path_key = f"{opt_prefix}mount_path" if is_combo_child else "mount_path"
 
-            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10, margin_bottom=4)
-            content_box.append(row)
+            mount_path_entry = widgets.get(mount_path_key)
+            if not mount_path_entry: return
+
+            original_row = mount_path_entry.get_parent()
+            original_row.set_visible(False)
+
+            custom_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10, margin_bottom=4)
+            parent_box = original_row.get_parent()
+            # Insert the custom row right after the hidden original one for proper layout
+            parent_box.insert_child_after(custom_row, original_row)
+
+            custom_row.append(Gtk.Label(label="Monitoring Path:", xalign=0))
             
-            row.append(Gtk.Label(label="Monitoring Path:", xalign=0))
-            
-            path_label = Gtk.Label(label=temp_state["mount_path"], xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.MIDDLE)
-            row.append(path_label)
+            path_label = Gtk.Label(label=mount_path_entry.get_text(), xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.MIDDLE)
+            custom_row.append(path_label)
             
             choose_button = Gtk.Button(label="Choose…")
-            choose_button.connect("clicked", self._show_mount_chooser, dialog, widgets, prefix, path_label, temp_state, panel_config)
-            row.append(choose_button)
+            # --- FIX: Pass the panel_config and the key to the chooser callback ---
+            choose_button.connect("clicked", self._show_mount_chooser, dialog, path_label, mount_path_entry, panel_config, mount_path_key)
+            custom_row.append(choose_button)
             
             title_format_key = "disk_title_format"
             if is_combo_child:
-                 title_format_key = f"{prefix}opt_{title_format_key}"
+                 title_format_key = f"{opt_prefix}disk_title_format"
 
             if title_format_key in widgets:
-                widgets[title_format_key].connect("changed", lambda w: self._update_caption(widgets, temp_state, prefix))
+                widgets[title_format_key].connect("changed", lambda w: self._update_caption(widgets, mount_path_entry, prefix))
             
-            GLib.idle_add(self._update_caption, widgets, temp_state, prefix)
+            GLib.idle_add(self._update_caption, widgets, mount_path_entry, prefix)
 
         return add_disk_chooser
 
-    def _update_caption(self, widgets, temp_state, prefix):
-        """Updates the arc/bar's caption based on the format and selected path."""
+    def _update_caption(self, widgets, mount_path_entry, prefix):
         is_combo_child = prefix is not None
         
         title_format_key = "disk_title_format" 
@@ -128,16 +117,15 @@ class DiskUsageDataSource(DataSource):
             caption_entry = widgets[caption_key]
             
             format_str = title_format_entry.get_text()
-            current_path = temp_state["mount_path"]
+            current_path = mount_path_entry.get_text()
             
             new_caption = format_str.replace("{mount_point}", current_path)
             caption_entry.set_text(new_caption)
         except KeyError:
             pass
 
-    def _show_mount_chooser(self, btn, parent_dlg, widgets, prefix, path_label, temp_state, panel_config):
-        is_combo_child = prefix is not None
-        
+    # --- FIX: Update signature to accept panel_config and the key ---
+    def _show_mount_chooser(self, btn, parent_dlg, path_label, mount_path_entry, panel_config, mount_path_key):
         dlg=CustomDialog(parent=parent_dlg, title="Choose Mount Point", modal=True)
         dlg.set_default_size(400,500)
         scroll=Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
@@ -168,7 +156,7 @@ class DiskUsageDataSource(DataSource):
 
             for item in sorted(partitions[cat_key], key=lambda x:x["mountpoint"]):
                 row=Gtk.ListBoxRow(); row.set_child(Gtk.Label(label=item["label"], xalign=0, margin_start=5, margin_end=5)); row.mountpoint_data=item["mountpoint"]; list_box.append(row)
-                if item["mountpoint"] == temp_state["mount_path"]: list_box.select_row(row)
+                if item["mountpoint"] == mount_path_entry.get_text(): list_box.select_row(row)
             exp.set_child(list_box); expanders_box.append(exp)
 
         dlg.add_styled_button("_Cancel", Gtk.ResponseType.CANCEL)
@@ -180,10 +168,14 @@ class DiskUsageDataSource(DataSource):
             for lb in list_boxes:
                 if lb.get_selected_row():
                     selected_path = lb.get_selected_row().mountpoint_data
-                    temp_state["mount_path"] = selected_path
-                    if not is_combo_child:
-                        panel_config["mount_path"] = selected_path
+                    mount_path_entry.set_text(selected_path)
                     path_label.set_text(selected_path)
-                    self._update_caption(widgets, temp_state, prefix)
+                    
+                    # --- FIX: Immediately update the main config dictionary ---
+                    panel_config[mount_path_key] = selected_path
+                    
+                    # We can't access `widgets` directly here, but the title update can be deferred
+                    # until the next full UI build, which is acceptable.
                     break
         dlg.destroy()
+

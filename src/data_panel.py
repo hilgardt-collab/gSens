@@ -2,29 +2,31 @@
 import gi
 import threading
 import time
+import datetime
 
 from panel_base import BasePanel
 from config_dialog import ConfigOption, build_ui_from_model, get_config_from_widgets
 from ui_helpers import build_background_config_ui, CustomDialog
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gtk, GLib
+# --- FIX: Add missing Gdk import ---
+from gi.repository import Gtk, Gdk, GLib
 from config_manager import config_manager
 
 from data_sources.analog_clock import AnalogClockDataSource
-from update_manager import update_manager # Import the new manager
+from update_manager import update_manager
 
 class DataPanel(BasePanel):
     """
     A generic panel that is composed of a DataSource and a DataDisplayer.
     It orchestrates data fetching, display updates, and configuration management.
-    It no longer manages its own thread, instead registering with the central UpdateManager.
     """
     def __init__(self, config, data_source, data_displayer, available_sources):
         self.data_source = data_source
         self.available_sources = available_sources
         
         self.is_clock_source = isinstance(data_source, AnalogClockDataSource)
+        self._clock_timer_id = None
         
         super().__init__(title=config.get("title_text", "Data Panel"), config=config)
         
@@ -40,15 +42,27 @@ class DataPanel(BasePanel):
 
         self.apply_all_configurations()
         
-        # Register with the central update manager instead of starting a new thread.
-        update_manager.register_panel(self)
+        if self.is_clock_source:
+            self._clock_timer_id = GLib.idle_add(self._clock_tick)
+        else:
+            update_manager.register_panel(self)
+
+    def _clock_tick(self):
+        if not self.data_source or not self.get_ancestor(Gtk.Window):
+            self._clock_timer_id = None
+            return GLib.SOURCE_REMOVE
+
+        value = self.data_source.get_data()
+        self.process_update(value)
+        
+        now = datetime.datetime.now()
+        delay = 1000 - (now.microsecond // 1000)
+        
+        self._clock_timer_id = GLib.timeout_add(max(50, delay), self._clock_tick)
+        
+        return GLib.SOURCE_REMOVE
 
     def process_update(self, value):
-        """
-        This method is called by the UpdateManager on the main GTK thread
-        with the data fetched from the background thread. It handles all UI-related updates.
-        """
-        # Ensure the panel hasn't been closed while the data was being fetched
         if not self.data_source or not self.data_displayer:
             return
 
@@ -62,14 +76,12 @@ class DataPanel(BasePanel):
             self.data_displayer.update_display(value)
 
     def set_displayer_widget(self):
-        """Removes the old displayer widget and adds the new one."""
         if self.content_area.get_first_child():
             self.content_area.remove(self.content_area.get_first_child())
         
         self.content_area.append(self.data_displayer.get_widget())
         
     def apply_all_configurations(self):
-        """Applies all configurations from the config dictionary to the panel and its components."""
         self.data_source.config = self.config
         
         if hasattr(self.data_source, 'setup_child_sources'):
@@ -86,11 +98,10 @@ class DataPanel(BasePanel):
         self.data_displayer.apply_styles()
         
     def close_panel(self, widget=None):
-        """
-        Handles the complete cleanup of the panel and its components,
-        ensuring all references are broken to prevent memory leaks.
-        """
-        # Unregister from the central update manager to stop receiving updates.
+        if self._clock_timer_id:
+            GLib.source_remove(self._clock_timer_id)
+            self._clock_timer_id = None
+            
         update_manager.unregister_panel(self)
         
         if self.data_displayer:
@@ -104,8 +115,60 @@ class DataPanel(BasePanel):
             
         super().close_panel(widget)
 
+    def on_load_defaults_clicked(self, button):
+        """Loads defaults and forces the config dialog to refresh."""
+        self.popover.popdown()
+        displayer_key = self.config.get('displayer_type')
+        if not displayer_key: return
+        
+        defaults = config_manager.get_displayer_defaults(displayer_key)
+        if not defaults: return
+            
+        if self._config_dialog and self._config_dialog.get_visible():
+            self._update_widgets_from_config(self._config_dialog.all_widgets, defaults)
+            self._config_dialog.apply_button.emit("clicked")
+        else:
+            self.config.update(defaults)
+            self.apply_all_configurations()
+            config_manager.update_panel_config(self.config["id"], self.config)
+
+    def _update_widgets_from_config(self, widgets, new_config):
+        """Directly updates the values of widgets in an open dialog."""
+        for key, value in new_config.items():
+            widget = widgets.get(key)
+            if not widget: continue
+            
+            if isinstance(widget, Gtk.Switch):
+                widget.set_active(str(value).lower() == 'true')
+            elif isinstance(widget, Gtk.Entry):
+                widget.set_text(str(value))
+            elif isinstance(widget, (Gtk.SpinButton, Gtk.Scale)):
+                widget.set_value(float(value))
+            elif isinstance(widget, Gtk.ColorButton):
+                rgba = Gdk.RGBA()
+                if rgba.parse(str(value)):
+                    widget.set_rgba(rgba)
+            elif isinstance(widget, Gtk.FontButton):
+                widget.set_font(str(value))
+            elif isinstance(widget, Gtk.ComboBoxText):
+                widget.set_active_id(str(value))
+
+
+    def on_save_defaults_clicked(self, button):
+        """Saves the current panel's style as the new default for its displayer type."""
+        self.popover.popdown()
+        displayer_key = self.config.get('displayer_type')
+        if not displayer_key:
+            print("Warning: Cannot save defaults, no displayer type found.")
+            return
+
+        if self.data_displayer:
+            if config_manager.save_displayer_defaults(displayer_key, self.config, self.data_displayer.__class__):
+                print(f"Saved current style as the default for '{displayer_key}'.")
+            else:
+                print(f"Error: Could not save default style for '{displayer_key}'.")
+
     def configure(self, *args):
-        """Opens a comprehensive configuration dialog for the panel."""
         if self._config_dialog and self._config_dialog.get_visible():
             self._config_dialog.present()
             return
@@ -130,6 +193,7 @@ class DataPanel(BasePanel):
         AVAILABLE_DISPLAYERS = getattr(main_window, 'AVAILABLE_DISPLAYERS', {})
         
         all_widgets = {}
+        dialog.all_widgets = all_widgets
         original_displayer_key_on_open = self.config.get('displayer_type')
 
         source_type = self.config.get('type')
@@ -166,7 +230,6 @@ class DataPanel(BasePanel):
             print("INFO: Panel display type changed. Please re-open configuration for the new panel.")
             return
 
-        # 1. Build Tab 1: General Panel Settings
         panel_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vscrollbar_policy=Gtk.PolicyType.AUTOMATIC)
         panel_tab_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
         panel_scroll.set_child(panel_tab_box)
@@ -176,21 +239,18 @@ class DataPanel(BasePanel):
         build_ui_from_model(panel_tab_box, self.config, panel_model, all_widgets)
         build_background_config_ui(panel_tab_box, self.config, all_widgets, dialog, prefix="panel_", title="Panel Background")
 
-        # 2. Build Tab 2: Data Source Settings
         source_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vscrollbar_policy=Gtk.PolicyType.AUTOMATIC, vexpand=True)
         source_tab_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
         source_scroll.set_child(source_tab_box)
         notebook.append_page(source_scroll, Gtk.Label(label="Data Source"))
         build_ui_from_model(source_tab_box, self.config, source_model, all_widgets)
 
-        # 3. Build Tab 3: Display Settings (Static Part)
         display_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vscrollbar_policy=Gtk.PolicyType.AUTOMATIC, vexpand=True)
         display_tab_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
         display_scroll.set_child(display_tab_box)
         notebook.append_page(display_scroll, Gtk.Label(label="Display"))
         build_ui_from_model(display_tab_box, self.config, display_model, all_widgets)
 
-        # 4. AFTER all static widgets are created, call the custom callbacks to add dynamic behavior
         source_custom_builder = getattr(self.data_source, 'get_configure_callback', lambda: None)()
         if source_custom_builder:
             source_custom_builder(dialog, source_tab_box, all_widgets, AVAILABLE_DATA_SOURCES, self.config)
@@ -218,9 +278,19 @@ class DataPanel(BasePanel):
             else:
                 self.apply_all_configurations()
 
+        theme_box = Gtk.Box(spacing=6, halign=Gtk.Align.START, hexpand=True)
+        load_btn = Gtk.Button(label="Load Default Style")
+        load_btn.connect("clicked", self.on_load_defaults_clicked)
+        theme_box.append(load_btn)
+        save_btn = Gtk.Button(label="Save Style as Default")
+        save_btn.connect("clicked", self.on_save_defaults_clicked)
+        theme_box.append(save_btn)
+        dialog.action_area.prepend(theme_box)
+
         cancel_button = dialog.add_non_modal_button("_Cancel", style_class="destructive-action")
         cancel_button.connect("clicked", lambda w: dialog.destroy())
         apply_button = dialog.add_non_modal_button("_Apply")
+        dialog.apply_button = apply_button
         apply_button.connect("clicked", apply_changes)
         accept_button = dialog.add_non_modal_button("_Accept", style_class="suggested-action", is_default=True)
         def on_accept(widget):
@@ -240,3 +310,4 @@ class DataPanel(BasePanel):
 
         dialog.connect("destroy", on_dialog_destroy)
         dialog.present()
+

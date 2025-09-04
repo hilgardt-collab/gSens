@@ -8,8 +8,6 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import GLib
 
-# --- BUG FIX ---
-# Import the global sensor cache directly to avoid a circular dependency with main.py.
 from sensor_cache import SENSOR_CACHE
 
 class SystemTempDataSource(DataSource):
@@ -18,6 +16,14 @@ class SystemTempDataSource(DataSource):
         self.alarm_config_prefix = "sys_temp_"
         super().__init__(config)
         self._available_sensors_cache = None
+
+        # Auto-select first sensor if none is selected
+        if not self.config.get("selected_sensor_key"):
+            cached_sensors = SENSOR_CACHE.get('system_temp', {})
+            first_valid_key = next((k for k, v in cached_sensors.items() if k), None)
+            if first_valid_key:
+                self.config["selected_sensor_key"] = first_valid_key
+
 
     @staticmethod
     def _discover_temp_sensors_statically():
@@ -77,12 +83,23 @@ class SystemTempDataSource(DataSource):
         """Returns the raw temperature value for graphing and alarms."""
         return data
 
+    # --- FIX: Implement get_primary_label_string to provide the sensor name ---
+    def get_primary_label_string(self, data):
+        """Returns the display name of the currently monitored sensor."""
+        sensor_key = self.config.get("selected_sensor_key", "")
+        if not self._available_sensors_cache:
+            # Ensure cache is populated if it hasn't been already
+            self._discover_temp_sensors()
+        
+        if sensor_key and self._available_sensors_cache and sensor_key in self._available_sensors_cache:
+            return self._available_sensors_cache[sensor_key].get("display_name", "Temperature")
+        return "Temperature" # Fallback
+
     @staticmethod
     def get_alarm_unit(): return "°C"
 
     @staticmethod
     def get_config_model():
-        # --- FIX: Read discovered sensors from the global cache instead of re-discovering. ---
         discovered_sensors = SENSOR_CACHE.get('system_temp', {"": {"display_name": "Scanning..."}})
         sensor_options = {v['display_name']: k for k, v in sorted(discovered_sensors.items(), key=lambda item: item[1]['display_name'])}
         
@@ -147,7 +164,6 @@ class SystemTempDataSource(DataSource):
             sensor_combo.connect("changed", on_sensor_changed)
             GLib.idle_add(on_sensor_changed, sensor_combo)
 
-            # --- NEW SENSOR POPULATION LOGIC ---
             try:
                 row, spinner = sensor_combo.get_parent(), Gtk.Spinner(spinning=True)
                 widgets["system_temp_spinner"] = spinner

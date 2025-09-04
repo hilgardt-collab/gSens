@@ -6,6 +6,7 @@ from data_source import DataSource
 from config_dialog import ConfigOption, build_ui_from_model, get_config_from_widgets
 from utils import populate_defaults_from_model
 
+# --- FIX: Correct the GTK version from "40" to "4.0" ---
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk, GLib
 
@@ -104,16 +105,22 @@ class ComboDataSource(DataSource):
         """
 
         def _rebuild_slot_config_ui(source_key, parent_box, prefix, dialog, widgets, available_sources, panel_config):
-            # Refresh the panel_config with live data from widgets
             all_models = [ *dialog.dynamic_models ]
             if hasattr(dialog, 'ui_models'): all_models.extend(dialog.ui_models.values())
             latest_config_values = get_config_from_widgets(widgets, all_models)
             panel_config.update(latest_config_values)
+
+            if hasattr(dialog, 'custom_value_getters') and dialog.custom_value_getters:
+                for getter in dialog.custom_value_getters:
+                    custom_values = getter()
+                    if custom_values:
+                        panel_config.update(custom_values)
             
             sub_opt_prefix = f"{prefix}opt_"
             
             keys_to_remove = [k for k in widgets if k.startswith(sub_opt_prefix)]
             for k in keys_to_remove: widgets.pop(k, None)
+            
             dialog.dynamic_models = [m for m in dialog.dynamic_models if not any(opt.key.startswith(sub_opt_prefix) for section in m.values() for opt in section)]
             
             child = parent_box.get_first_child()
@@ -139,6 +146,8 @@ class ComboDataSource(DataSource):
                     unprefixed_widgets = {}
                     build_ui_from_model(parent_box, child_config, model, unprefixed_widgets)
                     
+                    dialog.all_widgets.update(unprefixed_widgets)
+                    
                     for key, widget in unprefixed_widgets.items():
                         widgets[f"{sub_opt_prefix}{key}"] = widget
 
@@ -151,7 +160,7 @@ class ComboDataSource(DataSource):
                     temp_instance = SourceClass(config=child_config)
                     custom_cb = temp_instance.get_configure_callback()
                     if custom_cb:
-                        custom_cb(dialog, parent_box, unprefixed_widgets, available_sources, child_config, prefix)
+                        custom_cb(dialog, parent_box, dialog.all_widgets, available_sources, child_config, prefix)
 
         def _build_arc_config_ui(dialog, content_box, widgets, available_sources, panel_config, source_opts):
             arc_count_model = {"": [ConfigOption("combo_arc_count", "spinner", "Number of Arcs:", 5, 0, 16, 1, 0)]}
@@ -174,6 +183,7 @@ class ComboDataSource(DataSource):
             center_sub_config_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=20)
             center_box.append(center_sub_config_box)
             arc_notebook = Gtk.Notebook()
+            arc_notebook.set_scrollable(True)
             content_box.append(Gtk.Separator(margin_top=15, margin_bottom=5))
             content_box.append(Gtk.Label(label="<b>Arc Data Sources</b>", use_markup=True, xalign=0))
             content_box.append(arc_notebook)
@@ -231,6 +241,7 @@ class ComboDataSource(DataSource):
             dialog.dynamic_models.append(bar_count_model)
             
             bar_notebook = Gtk.Notebook()
+            bar_notebook.set_scrollable(True)
             content_box.append(Gtk.Separator(margin_top=15, margin_bottom=5))
             content_box.append(Gtk.Label(label="<b>Bar Data Sources</b>", use_markup=True, xalign=0))
             content_box.append(bar_notebook)
@@ -302,6 +313,7 @@ class ComboDataSource(DataSource):
             dialog.dynamic_models.append(sec_count_model)
 
             sec_notebook = Gtk.Notebook()
+            sec_notebook.set_scrollable(True)
             content_box.append(Gtk.Separator(margin_top=15, margin_bottom=5))
             content_box.append(Gtk.Label(label="<b>Secondary Data Sources</b>", use_markup=True, xalign=0))
             content_box.append(sec_notebook)

@@ -226,22 +226,44 @@ class AnalogClockDisplayer(DataDisplayer):
         self.widget.connect("unrealize", self._stop_visual_update_timer)
 
     def _start_visual_update_timer(self, widget=None):
-        if self._visual_update_timer_id: GLib.source_remove(self._visual_update_timer_id) 
-        ms_to_next_sec = 1000 - (datetime.datetime.now().microsecond // 1000)
-        self._visual_update_timer_id = GLib.timeout_add(ms_to_next_sec, self._on_visual_update_tick_aligned)
+        self._stop_visual_update_timer() # Ensure no old timer is running
+        # Start the self-perpetuating timer loop
+        self._reschedule_update()
 
     def _stop_visual_update_timer(self, widget=None):
-        if self._visual_update_timer_id: GLib.source_remove(self._visual_update_timer_id); self._visual_update_timer_id = None
+        if self._visual_update_timer_id:
+            GLib.source_remove(self._visual_update_timer_id)
+            self._visual_update_timer_id = None
 
-    def _on_visual_update_tick_aligned(self):
-        self.drawing_area.queue_draw()
-        self._visual_update_timer_id = GLib.timeout_add(1000, self._on_visual_update_tick)
-        return GLib.SOURCE_REMOVE 
+    def _reschedule_update(self):
+        """
+        Self-perpetuating timer that redraws the clock and schedules its
+        next update precisely at the start of the next second or minute,
+        preventing timer drift and ensuring a consistent tick.
+        """
+        if not self.widget.get_realized():
+            self._visual_update_timer_id = None
+            return GLib.SOURCE_REMOVE # Stop the loop if widget is gone
 
-    def _on_visual_update_tick(self):
-        if not self.drawing_area.get_realized(): self._visual_update_timer_id = None; return GLib.SOURCE_REMOVE
-        if str(self.config.get("show_second_hand"))=='True' or datetime.datetime.now().second==0: self.drawing_area.queue_draw()
-        return GLib.SOURCE_CONTINUE 
+        # 1. Redraw the UI immediately.
+        self.widget.queue_draw()
+
+        # 2. Determine the delay until the next required update.
+        now = datetime.datetime.now()
+        show_seconds = str(self.config.get("show_second_hand", "True")).lower() == 'true'
+
+        if show_seconds:
+            # Align to the start of the next second.
+            delay = 1000 - (now.microsecond // 1000)
+        else:
+            # Align to the start of the next minute.
+            delay = (60 - now.second) * 1000 - (now.microsecond // 1000)
+
+        # 3. Schedule the next call. This timer is a one-shot.
+        self._visual_update_timer_id = GLib.timeout_add(delay, self._reschedule_update)
+        
+        # 4. Tell GLib not to repeat this specific timer event.
+        return GLib.SOURCE_REMOVE
 
     def _create_widget(self):
         self.drawing_area = Gtk.DrawingArea(name="analog-clock-drawing-area", hexpand=True, vexpand=True)
@@ -701,9 +723,11 @@ class AnalogClockDisplayer(DataDisplayer):
         vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin_top=15, margin_bottom=15, margin_start=15, margin_end=15)
         content_area.append(vbox)
 
-        if data_source._timer_is_running or data_source._timer_is_ringing:
+        # FIX 1: Read from the safe, cached data instead of the live data_source.
+        if self._current_time_data.get("is_timer_running") or self._current_time_data.get("is_timer_ringing"):
             vbox.append(Gtk.Label(label="A timer is currently active."))
-            stop_btn = dialog.add_styled_button("_Stop Timer", Gtk.ResponseType.STOP, "destructive-action")
+            # FIX 2: Use a valid Gtk.ResponseType member, like REJECT.
+            stop_btn = dialog.add_styled_button("_Stop Timer", Gtk.ResponseType.REJECT, "destructive-action")
         else:
             grid = Gtk.Grid(column_spacing=10, row_spacing=5)
             vbox.append(grid)
@@ -741,10 +765,12 @@ class AnalogClockDisplayer(DataDisplayer):
             s = s_spin.get_value_as_int()
             total_seconds = h * 3600 + m * 60 + s
             data_source.start_timer(total_seconds)
-        elif response == Gtk.ResponseType.STOP:
+        # FIX 3: Check for the corrected ResponseType here as well.
+        elif response == Gtk.ResponseType.REJECT:
             data_source.cancel_timer()
             self.panel_ref.exit_alarm_state()
             if self._sound_player: self._sound_player.set_state(Gst.State.NULL)
         
         dialog.destroy()
         self.drawing_area.queue_draw()
+

@@ -4,6 +4,8 @@ import uuid
 from config_dialog import ConfigOption, build_ui_from_model, get_config_from_widgets
 from ui_helpers import CustomDialog, build_background_config_ui
 from utils import populate_defaults_from_model
+# --- NEW: Import config manager to get defaults ---
+from config_manager import config_manager
 
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk, GLib
@@ -37,7 +39,6 @@ class PanelBuilderDialog:
     def _create_scrolled_tab_box(self):
         """
         Helper to create a standard scrolled window and the box inside it for a notebook tab.
-        Returns a tuple: (Gtk.ScrolledWindow, Gtk.Box)
         """
         scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vscrollbar_policy=Gtk.PolicyType.AUTOMATIC, vexpand=True)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
@@ -51,24 +52,19 @@ class PanelBuilderDialog:
         notebook = Gtk.Notebook(margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
         content_area.append(notebook)
 
-        # --- Tab 1: Main Type Selection ---
         main_tab_scroll, main_tab_box = self._create_scrolled_tab_box()
         self._build_main_tab(main_tab_box)
         notebook.append_page(main_tab_scroll, Gtk.Label(label="Type"))
 
-        # --- Tab 2: Data Source Config ---
         source_scroll, self.source_config_box = self._create_scrolled_tab_box()
         notebook.append_page(source_scroll, Gtk.Label(label="Data Source"))
 
-        # --- Tab 3: Displayer Config ---
         displayer_scroll, self.displayer_config_box = self._create_scrolled_tab_box()
         notebook.append_page(displayer_scroll, Gtk.Label(label="Display"))
         
-        # --- Tab 4: General Panel Config ---
         general_scroll, self.general_config_box = self._create_scrolled_tab_box()
         notebook.append_page(general_scroll, Gtk.Label(label="General"))
         
-        # --- Dialog Actions ---
         self.dialog.add_non_modal_button("_Cancel", style_class="destructive-action").connect("clicked", lambda w: self.dialog.destroy())
         self.create_button = self.dialog.add_non_modal_button("_Create Panel", style_class="suggested-action", is_default=True)
         self.create_button.connect("clicked", self._on_create_panel)
@@ -76,10 +72,8 @@ class PanelBuilderDialog:
 
     def _build_main_tab(self, main_box):
         """Builds the first tab with Data Source and Displayer selectors."""
-        # Data Source Dropdown
         source_model = Gtk.ListStore(str, str)
         source_model.append(["Select a Data Source...", ""])
-        # Use the sorted list of metadata to populate the dropdown
         for info in self.AVAILABLE_DATA_SOURCES:
             source_model.append([info['name'], info['key']])
         
@@ -93,7 +87,6 @@ class PanelBuilderDialog:
         main_box.append(Gtk.Label(label="<b>1. Choose a Data Source</b>", use_markup=True, xalign=0, margin_bottom=5))
         main_box.append(source_combo)
 
-        # Displayer Dropdown
         self.displayer_model = Gtk.ListStore(str, str)
         self.displayer_combo = Gtk.ComboBox.new_with_model(self.displayer_model)
         renderer_text_disp = Gtk.CellRendererText()
@@ -165,7 +158,10 @@ class PanelBuilderDialog:
             child = box.get_first_child()
 
     def _rebuild_config_tabs(self):
-        """Clears and rebuilds all configuration tabs based on current selections."""
+        """
+        Clears and rebuilds all configuration tabs and the underlying config dictionary.
+        This ensures a clean state on every selection change.
+        """
         self.widgets.clear()
         self.current_config.clear()
         self.dialog.dynamic_models.clear()
@@ -177,22 +173,32 @@ class PanelBuilderDialog:
         if not self.source_class or not self.displayer_class:
             return
 
+        # --- FIX: Rebuild the config dictionary in the correct order ---
+        # 1. Establish a baseline config by populating with hardcoded model defaults.
         source_info = next((s for s in self.AVAILABLE_DATA_SOURCES if s['key'] == self.selected_source_key), None)
-
-        # --- Build Source Config Tab ---
+        
         source_model = self.source_class.get_config_model()
         populate_defaults_from_model(self.current_config, source_model)
-        build_ui_from_model(self.source_config_box, self.current_config, source_model, self.widgets)
-
-        # --- Synchronize Displayer Range with Source Range ---
-        source_min_val, source_max_val = None, None
-        for section in source_model.values():
-            for option in section:
-                if option.key == 'graph_min_value':
-                    source_min_val = option.default
-                if option.key == 'graph_max_value':
-                    source_max_val = option.default
         
+        displayer_model = self.displayer_class.get_config_model()
+        populate_defaults_from_model(self.current_config, displayer_model)
+
+        def_w, def_h = source_info.get("default_size", (2, 2))
+        general_model = { "General Panel Settings": [
+            ConfigOption("title_text", "string", "Panel Title:", source_info["name"]),
+            ConfigOption("width", "spinner", "Width (grid units):", def_w, 1, 128, 1),
+            ConfigOption("height", "spinner", "Height (grid units):", def_h, 1, 128, 1)
+        ]}
+        populate_defaults_from_model(self.current_config, general_model)
+
+        # 2. Load saved theme defaults and use them to OVERWRITE the baseline.
+        defaults = config_manager.get_displayer_defaults(self.selected_displayer_key)
+        if defaults:
+            self.current_config.update(defaults)
+
+        # 3. Synchronize value ranges between source and displayer.
+        source_min_val = self.current_config.get('graph_min_value')
+        source_max_val = self.current_config.get('graph_max_value')
         if source_min_val is not None and source_max_val is not None:
             if self.selected_displayer_key == 'arc_gauge':
                 self.current_config['gauge_min_value'] = source_min_val
@@ -204,23 +210,10 @@ class PanelBuilderDialog:
                 self.current_config['level_min_value'] = source_min_val
                 self.current_config['level_max_value'] = source_max_val
 
-        # --- Build Displayer Config Tab ---
-        displayer_model = self.displayer_class.get_config_model()
-        populate_defaults_from_model(self.current_config, displayer_model)
+        # 4. Now build the UI from the correctly assembled config.
+        build_ui_from_model(self.source_config_box, self.current_config, source_model, self.widgets)
         build_ui_from_model(self.displayer_config_box, self.current_config, displayer_model, self.widgets)
-
-        # --- Build General Config Tab ---
-        def_w, def_h = source_info.get("default_size", (2, 2))
-        
-        general_model = { "General Panel Settings": [
-            ConfigOption("title_text", "string", "Panel Title:", source_info["name"]),
-            ConfigOption("width", "spinner", "Width (grid units):", def_w, 1, 128, 1),
-            ConfigOption("height", "spinner", "Height (grid units):", def_h, 1, 128, 1)
-        ]}
-        populate_defaults_from_model(self.current_config, general_model)
         build_ui_from_model(self.general_config_box, self.current_config, general_model, self.widgets)
-        
-        # --- REFACTOR: Use the unified background UI builder ---
         build_background_config_ui(self.general_config_box, self.current_config, self.widgets, self.dialog, prefix="panel_", title="Panel Background")
 
     def _on_create_panel(self, button):
@@ -239,7 +232,6 @@ class PanelBuilderDialog:
             ConfigOption("height", "spinner", "Height (grid units):", def_h, 1, 128, 1)
         ]}
         
-        # --- REFACTOR: Retrieve the background model using the correct key ---
         background_model = self.dialog.ui_models.get('background_panel_', {})
         
         all_models = [source_model, displayer_model, general_model, background_model, *self.dialog.dynamic_models]
@@ -249,16 +241,15 @@ class PanelBuilderDialog:
         final_config['type'] = self.selected_source_key
         final_config['displayer_type'] = self.selected_displayer_key
 
-        # For the unified combo source, add a mode hint to the config
-        # so it knows which UI and child sources to build.
         if self.selected_source_key == 'combo':
             if self.selected_displayer_key == 'level_bar_combo':
                 final_config['combo_mode'] = 'level_bar'
             elif self.selected_displayer_key == 'lcars_combo':
                 final_config['combo_mode'] = 'lcars'
-            else: # Default to arc combo
+            else:
                 final_config['combo_mode'] = 'arc'
         
         self.grid_manager.create_and_add_panel_from_config(final_config)
         
         self.dialog.destroy()
+
