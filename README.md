@@ -50,6 +50,8 @@ pip3 install psutil pynvml pytz
 
 **For NVIDIA GPU Monitoring:** You need the pynvml library, which is installed via pip above, and the NVIDIA drivers must be installed on your system.
 
+**For Sensor monitoring** You need to have lm-sensors installed and run the sensors-detect script as root
+
 #### **2\. Clone the Repository**
 
 git clone \<your-repository-url\>  
