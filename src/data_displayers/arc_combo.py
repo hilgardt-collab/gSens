@@ -59,6 +59,11 @@ class ArcComboDisplayer(ComboBase):
     @staticmethod
     def get_config_model():
         return {}
+
+    @staticmethod
+    def get_config_key_prefixes():
+        """Returns the unique prefix used for the center circle background."""
+        return ["center_"]
     
     @classmethod
     def _get_full_config_model(cls):
@@ -75,7 +80,6 @@ class ArcComboDisplayer(ComboBase):
             "Animation": [ ConfigOption("combo_animation_enabled", "bool", "Enable Arc Animation:", "True") ]
         }
         
-        # Programmatically add style options for all possible arcs
         for i in range(1, 17):
             model[f"Arc {i} Style"] = [
                 ConfigOption(f"arc{i}_start_angle", "spinner", "Start Angle (deg):", -225, -360, 360, 5, 0),

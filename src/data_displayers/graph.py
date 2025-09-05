@@ -63,7 +63,6 @@ class GraphDisplayer(DataDisplayer):
             ConfigOption("overlay_text_color", "color", "Text Color:", "#FFFFFF"),
             ConfigOption("overlay_font", "font", "Text Font:", "Sans 10")
         ]
-        # --- FEATURE: Add grid configuration options ---
         model["Grid Lines"] = [
             ConfigOption("graph_grid_enabled", "bool", "Show Grid:", "False"),
             ConfigOption("graph_grid_x_divisions", "spinner", "Vertical Divisions:", 5, 1, 50, 1, 0),
@@ -72,6 +71,11 @@ class GraphDisplayer(DataDisplayer):
             ConfigOption("graph_grid_width", "scale", "Grid Line Width:", 1.0, 0.5, 5.0, 0.5, 1)
         ]
         return model
+
+    @staticmethod
+    def get_config_key_prefixes():
+        """Returns the unique prefix used for the graph background settings."""
+        return ["graph_"]
 
     def get_configure_callback(self):
         """A custom callback to dynamically show/hide line-specific options."""

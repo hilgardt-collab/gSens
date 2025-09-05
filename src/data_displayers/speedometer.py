@@ -24,9 +24,9 @@ class SpeedometerDisplayer(DataDisplayer):
         
         # Animation state
         self._animation_timer_id = None
-        self._is_first_update = True
-        self._current_display_value = 0.0
-        self._target_value = 0.0
+        # --- FIX: Initialize current_display_value from config ---
+        self._current_display_value = float(config.get("speedo_min_value", 0.0))
+        self._target_value = self._current_display_value
         
         # Caching state
         self._static_surface = None
@@ -47,10 +47,8 @@ class SpeedometerDisplayer(DataDisplayer):
         if not self.panel_ref: return
         new_value = self.panel_ref.data_source.get_numerical_value(value) or 0.0
         
-        if self._is_first_update:
-            self._current_display_value = new_value
-            self._is_first_update = False
-
+        # --- FIX: Remove the special-casing for the first update ---
+        # Always set the target and let the animation handle it.
         self._target_value = new_value
         
         display_string = self.panel_ref.data_source.get_display_string(value)
@@ -145,12 +143,10 @@ class SpeedometerDisplayer(DataDisplayer):
     def on_draw_speedometer(self, area, ctx, width, height):
         if width <= 0 or height <= 0: return
 
-        # Regenerate static surface if needed
         if not self._static_surface or self._last_draw_width != width or self._last_draw_height != height:
             self._static_surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, width, height)
             static_ctx = cairo.Context(self._static_surface)
             
-            # Make static surface transparent
             static_ctx.set_source_rgba(0, 0, 0, 0); static_ctx.set_operator(cairo.OPERATOR_SOURCE); static_ctx.paint()
             static_ctx.set_operator(cairo.OPERATOR_OVER)
 
@@ -170,7 +166,6 @@ class SpeedometerDisplayer(DataDisplayer):
             
             radius = available_radius - padding
             if radius > 0:
-                # Draw Dial Face
                 static_ctx.save(); static_ctx.arc(cx, cy, radius, 0, 2 * math.pi); static_ctx.clip()
                 bg_type = self.config.get("speedo_bg_type", "solid")
                 if bg_type == "gradient_linear":
@@ -190,7 +185,6 @@ class SpeedometerDisplayer(DataDisplayer):
                     static_ctx.set_source_rgba(bg_color.red, bg_color.green, bg_color.blue, bg_color.alpha); static_ctx.paint()
                 static_ctx.restore()
 
-                # Draw Ticks and Numbers
                 start_angle = math.radians(float(self.config.get("speedo_start_angle", 135))); end_angle = math.radians(float(self.config.get("speedo_end_angle", 45)))
                 total_angle = end_angle - start_angle; 
                 if total_angle <= 0: total_angle += 2 * math.pi
@@ -218,10 +212,8 @@ class SpeedometerDisplayer(DataDisplayer):
 
             self._last_draw_width, self._last_draw_height = width, height
 
-        # Paint the cached surface
         ctx.set_source_surface(self._static_surface, 0, 0); ctx.paint()
 
-        # --- DYNAMIC DRAWING ---
         cx, cy = width / 2, height / 2
         padding = float(self.config.get("speedo_padding", 10))
         if self.config.get("speedo_number_position", "inside") == "outside" and str(self.config.get("speedo_show_numbers", "True")).lower() == 'true':
@@ -232,7 +224,6 @@ class SpeedometerDisplayer(DataDisplayer):
         radius = (min(width, height) / 2) - padding
         if radius <= 0: return
 
-        # Draw Digital Text
         v_offset = float(self.config.get("speedo_text_vertical_offset", 0))
         layout_v = PangoCairo.create_layout(ctx); layout_v.set_font_description(Pango.FontDescription.from_string(self.config.get("speedo_value_font"))); layout_v.set_text(self.display_value_text, -1); _, log_v = layout_v.get_pixel_extents()
         layout_u = PangoCairo.create_layout(ctx); layout_u.set_font_description(Pango.FontDescription.from_string(self.config.get("speedo_unit_font"))); layout_u.set_text(self.unit_text, -1); _, log_u = layout_u.get_pixel_extents()
@@ -248,7 +239,6 @@ class SpeedometerDisplayer(DataDisplayer):
             unit_color = Gdk.RGBA(); unit_color.parse(self.config.get("speedo_unit_color")); ctx.set_source_rgba(unit_color.red, unit_color.green, unit_color.blue, unit_color.alpha)
             ctx.move_to(cx - log_u.width/2, start_y); PangoCairo.show_layout(ctx, layout_u)
 
-        # Draw Needle
         min_v = float(self.config.get("speedo_min_value", 0)); max_v = float(self.config.get("speedo_max_value", 240)); v_range = max_v - min_v if max_v > min_v else 1
         start_angle = math.radians(float(self.config.get("speedo_start_angle", 135))); end_angle = math.radians(float(self.config.get("speedo_end_angle", 45)))
         total_angle = end_angle - start_angle;

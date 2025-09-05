@@ -6,7 +6,7 @@ import json
 import threading
 import gi
 gi.require_version("Gtk", "4.0")
-from gi.repository import GLib
+from gi.repository import Gtk, GLib
 
 from sensor_cache import SENSOR_CACHE
 
@@ -16,14 +16,6 @@ class SystemTempDataSource(DataSource):
         self.alarm_config_prefix = "sys_temp_"
         super().__init__(config)
         self._available_sensors_cache = None
-
-        # Auto-select first sensor if none is selected
-        if not self.config.get("selected_sensor_key"):
-            cached_sensors = SENSOR_CACHE.get('system_temp', {})
-            first_valid_key = next((k for k, v in cached_sensors.items() if k), None)
-            if first_valid_key:
-                self.config["selected_sensor_key"] = first_valid_key
-
 
     @staticmethod
     def _discover_temp_sensors_statically():
@@ -46,6 +38,7 @@ class SystemTempDataSource(DataSource):
         except (json.JSONDecodeError, Exception) as e:
             print(f"SystemTempDataSource: Static error discovering sensors: {e}")
         return sensors_data if sensors_data else {"": {"display_name": "No sensors found"}}
+
 
     def _discover_temp_sensors(self):
         if self._available_sensors_cache is not None: return self._available_sensors_cache
@@ -83,25 +76,22 @@ class SystemTempDataSource(DataSource):
         """Returns the raw temperature value for graphing and alarms."""
         return data
 
-    # --- FIX: Implement get_primary_label_string to provide the sensor name ---
     def get_primary_label_string(self, data):
         """Returns the display name of the currently monitored sensor."""
         sensor_key = self.config.get("selected_sensor_key", "")
         if not self._available_sensors_cache:
-            # Ensure cache is populated if it hasn't been already
             self._discover_temp_sensors()
         
         if sensor_key and self._available_sensors_cache and sensor_key in self._available_sensors_cache:
             return self._available_sensors_cache[sensor_key].get("display_name", "Temperature")
-        return "Temperature" # Fallback
+        return "Temperature"
 
     @staticmethod
     def get_alarm_unit(): return "°C"
 
     @staticmethod
     def get_config_model():
-        discovered_sensors = SENSOR_CACHE.get('system_temp', {"": {"display_name": "Scanning..."}})
-        sensor_options = {v['display_name']: k for k, v in sorted(discovered_sensors.items(), key=lambda item: item[1]['display_name'])}
+        sensor_options = {"Scanning...": ""}
         
         model = DataSource.get_config_model()
         model["Data Source & Update"] = [ConfigOption("update_interval_seconds", "scale", "Update Interval (sec):", "3.0", 0.1, 60, 0.1, 1),
@@ -117,71 +107,73 @@ class SystemTempDataSource(DataSource):
     def get_configure_callback(self):
         """Provides a callback to dynamically update panel title and populate sensors."""
 
-        def _repopulate_sensor_dropdown(widgets, panel_config):
+        def _repopulate_sensor_dropdown(widgets, panel_config, prefix):
             """Helper to fill the sensor dropdown once data is available."""
+            key_prefix = f"{prefix}opt_" if prefix else ""
             try:
-                sensor_combo = widgets.get("selected_sensor_key")
-                spinner = widgets.get("system_temp_spinner")
+                sensor_combo_key = f"{key_prefix}selected_sensor_key"
+                sensor_combo = widgets.get(sensor_combo_key)
+                spinner = widgets.get(f"{key_prefix}system_temp_spinner")
                 if not sensor_combo: return
 
-                if spinner: spinner.get_parent().set_visible(False)
+                # --- BUG FIX: Hide the spinner ONLY, not its parent. ---
+                if spinner: spinner.set_visible(False)
 
-                model = sensor_combo.get_model()
-                model.clear()
+                sensor_combo.remove_all()
                 
                 sensors = SENSOR_CACHE.get('system_temp', {})
                 if not sensors or all(k == "" for k in sensors):
-                    model.append(id="", text="No sensors found")
+                    sensor_combo.append(id="", text="No sensors found")
                 else:
                     sorted_sensors = sorted(sensors.items(), key=lambda i: i[1]['display_name'])
                     for key, data in sorted_sensors:
-                        model.append(id=key, text=data['display_name'])
+                        sensor_combo.append(id=key, text=data['display_name'])
 
-                current_selection = panel_config.get("selected_sensor_key")
-                if current_selection and sensor_combo.set_active_id(current_selection):
-                    pass
-                else:
+                current_selection = panel_config.get(sensor_combo_key)
+                if not current_selection or not sensor_combo.set_active_id(current_selection):
                     sensor_combo.set_active(0)
+                    new_active_id = sensor_combo.get_active_id()
+                    if new_active_id:
+                        panel_config[sensor_combo_key] = new_active_id
 
             except KeyError as e:
                 print(f"SystemTempDataSource _repopulate_sensor_dropdown KeyError: {e}")
 
         def setup_auto_title_logic(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
-            try: 
-                sensor_combo = widgets["selected_sensor_key"]
-                title_entry = widgets["title_text"]
-            except KeyError: 
-                return
-
-            def on_sensor_changed(combo):
-                display_name = combo.get_active_text()
-                if not title_entry.get_text() or title_entry.get_text() == "System Temperature":
-                    if display_name and "No sensors" not in display_name:
-                        title_entry.set_text(display_name)
-                    else:
-                        title_entry.set_text("System Temperature")
+            is_combo_child = prefix is not None
+            key_prefix = f"{prefix}opt_" if is_combo_child else ""
             
-            sensor_combo.connect("changed", on_sensor_changed)
-            GLib.idle_add(on_sensor_changed, sensor_combo)
+            sensor_combo = widgets.get(f"{key_prefix}selected_sensor_key")
+            if not sensor_combo: return
 
-            try:
-                row, spinner = sensor_combo.get_parent(), Gtk.Spinner(spinning=True)
-                widgets["system_temp_spinner"] = spinner
-                row.append(spinner)
-                parent_window = dialog.get_ancestor(Gtk.Window)
-                if parent_window and hasattr(parent_window, 'sensors_ready_event'):
-                    ready_event = parent_window.sensors_ready_event
-                    if ready_event.is_set():
-                        _repopulate_sensor_dropdown(widgets, panel_config)
-                    else:
-                        def wait_and_repopulate():
-                            ready_event.wait()
-                            GLib.idle_add(_repopulate_sensor_dropdown, widgets, panel_config)
-                        threading.Thread(target=wait_and_repopulate, daemon=True).start()
-                else:
-                    spinner.get_parent().set_visible(False)
-            except Exception as e:
-                print(f"SystemTempDataSource configure_callback sensor logic error: {e}")
+            title_entry = widgets.get("title_text") if not is_combo_child else widgets.get(f"{prefix}caption")
+            if title_entry:
+                def on_sensor_changed(combo):
+                    display_name = combo.get_active_text()
+                    if not title_entry.get_text() or title_entry.get_text() == "System Temperature":
+                        if display_name and "No sensors" not in display_name:
+                            title_entry.set_text(display_name)
+                        else:
+                            title_entry.set_text("System Temperature")
+                
+                sensor_combo.connect("changed", on_sensor_changed)
+                GLib.idle_add(on_sensor_changed, sensor_combo)
+
+            row, spinner = sensor_combo.get_parent(), Gtk.Spinner(spinning=True)
+            widgets[f"{key_prefix}system_temp_spinner"] = spinner
+            row.append(spinner)
+
+            def check_cache_and_populate():
+                sensors = SENSOR_CACHE.get('system_temp')
+                if sensors:
+                    _repopulate_sensor_dropdown(widgets, panel_config, prefix)
+                    return GLib.SOURCE_REMOVE
+                return GLib.SOURCE_CONTINUE
+
+            if not SENSOR_CACHE.get('system_temp'):
+                GLib.timeout_add(200, check_cache_and_populate)
+            else:
+                check_cache_and_populate()
 
         return setup_auto_title_logic
 

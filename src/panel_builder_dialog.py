@@ -4,8 +4,9 @@ import uuid
 from config_dialog import ConfigOption, build_ui_from_model, get_config_from_widgets
 from ui_helpers import CustomDialog, build_background_config_ui
 from utils import populate_defaults_from_model
-# --- NEW: Import config manager to get defaults ---
 from config_manager import config_manager
+# --- NEW: Import SENSOR_CACHE to perform pre-creation validation ---
+from sensor_cache import SENSOR_CACHE
 
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk, GLib
@@ -158,10 +159,7 @@ class PanelBuilderDialog:
             child = box.get_first_child()
 
     def _rebuild_config_tabs(self):
-        """
-        Clears and rebuilds all configuration tabs and the underlying config dictionary.
-        This ensures a clean state on every selection change.
-        """
+        """Clears and rebuilds all configuration tabs based on current selections."""
         self.widgets.clear()
         self.current_config.clear()
         self.dialog.dynamic_models.clear()
@@ -173,32 +171,29 @@ class PanelBuilderDialog:
         if not self.source_class or not self.displayer_class:
             return
 
-        # --- FIX: Rebuild the config dictionary in the correct order ---
-        # 1. Establish a baseline config by populating with hardcoded model defaults.
         source_info = next((s for s in self.AVAILABLE_DATA_SOURCES if s['key'] == self.selected_source_key), None)
-        
-        source_model = self.source_class.get_config_model()
-        populate_defaults_from_model(self.current_config, source_model)
-        
-        displayer_model = self.displayer_class.get_config_model()
-        populate_defaults_from_model(self.current_config, displayer_model)
 
+        source_model = self.source_class.get_config_model()
+        displayer_model = self.displayer_class.get_config_model()
         def_w, def_h = source_info.get("default_size", (2, 2))
         general_model = { "General Panel Settings": [
             ConfigOption("title_text", "string", "Panel Title:", source_info["name"]),
             ConfigOption("width", "spinner", "Width (grid units):", def_w, 1, 128, 1),
             ConfigOption("height", "spinner", "Height (grid units):", def_h, 1, 128, 1)
         ]}
+        
+        populate_defaults_from_model(self.current_config, source_model)
+        populate_defaults_from_model(self.current_config, displayer_model)
         populate_defaults_from_model(self.current_config, general_model)
+        
+        if self.selected_displayer_key:
+            defaults = config_manager.get_displayer_defaults(self.selected_displayer_key)
+            if defaults:
+                self.current_config.update(defaults)
 
-        # 2. Load saved theme defaults and use them to OVERWRITE the baseline.
-        defaults = config_manager.get_displayer_defaults(self.selected_displayer_key)
-        if defaults:
-            self.current_config.update(defaults)
-
-        # 3. Synchronize value ranges between source and displayer.
         source_min_val = self.current_config.get('graph_min_value')
         source_max_val = self.current_config.get('graph_max_value')
+        
         if source_min_val is not None and source_max_val is not None:
             if self.selected_displayer_key == 'arc_gauge':
                 self.current_config['gauge_min_value'] = source_min_val
@@ -209,12 +204,25 @@ class PanelBuilderDialog:
             elif self.selected_displayer_key == 'level_bar':
                 self.current_config['level_min_value'] = source_min_val
                 self.current_config['level_max_value'] = source_max_val
-
-        # 4. Now build the UI from the correctly assembled config.
+        
         build_ui_from_model(self.source_config_box, self.current_config, source_model, self.widgets)
         build_ui_from_model(self.displayer_config_box, self.current_config, displayer_model, self.widgets)
         build_ui_from_model(self.general_config_box, self.current_config, general_model, self.widgets)
+        
         build_background_config_ui(self.general_config_box, self.current_config, self.widgets, self.dialog, prefix="panel_", title="Panel Background")
+
+        # --- BUG FIX: Create temporary instances to call instance methods ---
+        # The original code called get_configure_callback on the class, not an instance, causing a TypeError.
+        temp_source_instance = self.source_class(config=self.current_config)
+        source_custom_builder = temp_source_instance.get_configure_callback()
+        if source_custom_builder:
+            source_custom_builder(self.dialog, self.source_config_box, self.widgets, self.AVAILABLE_DATA_SOURCES, self.current_config)
+        
+        temp_displayer_instance = self.displayer_class(panel_ref=None, config=self.current_config)
+        displayer_custom_builder = temp_displayer_instance.get_configure_callback()
+        if displayer_custom_builder:
+            displayer_custom_builder(self.dialog, self.displayer_config_box, self.widgets, self.AVAILABLE_DATA_SOURCES, self.current_config)
+
 
     def _on_create_panel(self, button):
         """Gathers all data and tells the grid manager to create the panel."""
@@ -240,6 +248,19 @@ class PanelBuilderDialog:
         final_config['id'] = f"panel_{uuid.uuid4().hex[:12]}"
         final_config['type'] = self.selected_source_key
         final_config['displayer_type'] = self.selected_displayer_key
+
+        # --- FIX: New self-healing logic for sensor-based sources ---
+        # Before creating the panel, check if a sensor key is needed and if it's valid.
+        # If not, auto-select the first available one.
+        if self.selected_source_key == 'system_temp' and not final_config.get('selected_sensor_key'):
+            sensors = SENSOR_CACHE.get('system_temp', {})
+            first_key = next((k for k in sensors if k), None)
+            if first_key: final_config['selected_sensor_key'] = first_key
+        
+        if self.selected_source_key == 'fan_speed' and not final_config.get('selected_fan_key'):
+            sensors = SENSOR_CACHE.get('fan_speed', {})
+            first_key = next((k for k in sensors if k), None)
+            if first_key: final_config['selected_fan_key'] = first_key
 
         if self.selected_source_key == 'combo':
             if self.selected_displayer_key == 'level_bar_combo':

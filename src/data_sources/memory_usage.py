@@ -13,15 +13,27 @@ class MemoryUsageDataSource(DataSource):
             return {"error": str(e)}
         
     def get_display_string(self, data):
-        # The robust type checking is now handled by the base DataSource class.
-        if not isinstance(data, dict):
-            return super().get_display_string(data)
-
-        if data.get("error"): return "N/A"
-        style = self.config.get("text_content_style", "gb_and_percent")
+        """Returns the main display string, configurable by the user."""
+        if not isinstance(data, dict) or data.get("error"): return "N/A"
+        
+        style = self.config.get("main_text_content_style", "percent_only")
         if style == "gb_only": return f"{data['used_gb']:.1f}/{data['total_gb']:.1f} GB"
+        if style == "gb_and_percent": return f"{data['used_gb']:.1f}/{data['total_gb']:.1f} GB ({data['percent']:.1f}%)"
+        return f"{data['percent']:.1f}%"
+
+    def get_primary_label_string(self, data):
+        """Returns the static primary label for this data source."""
+        return "RAM Usage"
+
+    def get_secondary_display_string(self, data):
+        """Returns the secondary display string, configurable by the user."""
+        if not isinstance(data, dict) or data.get("error"): return ""
+        
+        style = self.config.get("secondary_text_content_style", "gb_only")
+        if style == "gb_and_percent": return f"{data['used_gb']:.1f}/{data['total_gb']:.1f} GB ({data['percent']:.1f}%)"
         if style == "percent_only": return f"{data['percent']:.1f}%"
-        return f"{data['used_gb']:.1f}/{data['total_gb']:.1f} GB ({data['percent']:.1f}%)"
+        if style == "gb_only": return f"{data['used_gb']:.1f}/{data['total_gb']:.1f} GB"
+        return "" # Return empty string if style is 'none'
 
     def get_tooltip_string(self, data):
         if not isinstance(data, dict) or data.get("error"): 
@@ -31,9 +43,25 @@ class MemoryUsageDataSource(DataSource):
     @staticmethod
     def get_config_model():
         model = DataSource.get_config_model()
-        model["Data Source & Update"].append(ConfigOption("text_content_style", "dropdown", "Text Style:", "gb_and_percent", options_dict={"GB and Percentage": "gb_and_percent", "GB Only": "gb_only", "Percentage Only": "percent_only"}))
+        
+        main_text_opts = {
+            "Percentage Only": "percent_only",
+            "GB Only": "gb_only",
+            "GB and Percentage": "gb_and_percent"
+        }
+        secondary_text_opts = {
+            "None": "none",
+            "GB Only": "gb_only",
+            "Percentage Only": "percent_only",
+            "GB and Percentage": "gb_and_percent"
+        }
+
+        model["Data Source & Update"].extend([
+            ConfigOption("main_text_content_style", "dropdown", "Main Text Style:", "percent_only", options_dict=main_text_opts),
+            ConfigOption("secondary_text_content_style", "dropdown", "Secondary Text Style:", "gb_only", options_dict=secondary_text_opts)
+        ])
+        
         model["Alarm"][1] = ConfigOption(f"data_alarm_high_value", "scale", "Alarm High Value (%):", "90.0", 0.0, 100.0, 1.0, 1)
-        # Add an explicit graph range so displayers know how to scale the data.
         model["Graph Range"] = [
             ConfigOption("graph_min_value", "spinner", "Graph Min Value (%):", "0.0", 0.0, 100.0, 1.0, 0),
             ConfigOption("graph_max_value", "spinner", "Graph Max Value (%):", "100.0", 0.0, 100.0, 1.0, 0)

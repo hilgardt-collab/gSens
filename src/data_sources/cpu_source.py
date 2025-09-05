@@ -22,19 +22,6 @@ class CPUDataSource(DataSource):
         # Initial call to setup for psutil.cpu_percent
         psutil.cpu_percent(interval=None, percpu=True)
 
-        # --- FIX: Pre-select the first available sensor on initialization ---
-        # This prevents the warning when opening the config dialog for the first time
-        # if a sensor key hasn't been explicitly saved yet.
-        selected_key = self.config.get("cpu_temp_sensor_key")
-        if not selected_key or '::' not in selected_key:
-            cached_sensors = SENSOR_CACHE.get('cpu_temp', {})
-            if cached_sensors:
-                # Find the first key that is not empty
-                first_valid_key = next((k for k in cached_sensors if k), None)
-                if first_valid_key:
-                    # Update the config dictionary directly
-                    self.config["cpu_temp_sensor_key"] = first_valid_key
-
     @staticmethod
     def _discover_cpu_temp_sensors_statically():
         """
@@ -91,7 +78,6 @@ class CPUDataSource(DataSource):
         
         selected_key = self.config.get("cpu_temp_sensor_key", "")
         
-        # This check is now mostly redundant due to the __init__ fix, but remains as a safeguard
         if not selected_key or '::' not in selected_key:
             cached_sensors = SENSOR_CACHE.get('cpu_temp', {})
             if cached_sensors:

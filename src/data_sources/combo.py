@@ -6,7 +6,6 @@ from data_source import DataSource
 from config_dialog import ConfigOption, build_ui_from_model, get_config_from_widgets
 from utils import populate_defaults_from_model
 
-# --- FIX: Correct the GTK version from "40" to "4.0" ---
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk, GLib
 
@@ -146,8 +145,6 @@ class ComboDataSource(DataSource):
                     unprefixed_widgets = {}
                     build_ui_from_model(parent_box, child_config, model, unprefixed_widgets)
                     
-                    dialog.all_widgets.update(unprefixed_widgets)
-                    
                     for key, widget in unprefixed_widgets.items():
                         widgets[f"{sub_opt_prefix}{key}"] = widget
 
@@ -160,7 +157,7 @@ class ComboDataSource(DataSource):
                     temp_instance = SourceClass(config=child_config)
                     custom_cb = temp_instance.get_configure_callback()
                     if custom_cb:
-                        custom_cb(dialog, parent_box, dialog.all_widgets, available_sources, child_config, prefix)
+                        custom_cb(dialog, parent_box, widgets, available_sources, child_config, prefix)
 
         def _build_arc_config_ui(dialog, content_box, widgets, available_sources, panel_config, source_opts):
             arc_count_model = {"": [ConfigOption("combo_arc_count", "spinner", "Number of Arcs:", 5, 0, 16, 1, 0)]}
@@ -383,4 +380,3 @@ class ComboDataSource(DataSource):
                 _build_arc_config_ui(dialog, content_box, widgets, available_sources, panel_config, source_opts)
 
         return build_main_config_ui
-

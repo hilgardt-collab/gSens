@@ -9,13 +9,12 @@ from gi.repository import Gtk, Gdk
 
 class DataDisplayer(ABC):
     def __init__(self, panel_ref, config):
-        # --- FIX: Use a private variable for the panel reference ---
+ 
         self._panel_ref = panel_ref
         self.config = config
         self.widget = self._create_widget()
         self.is_clock_source = False
 
-    # --- FIX: Implement a property setter to allow overriding ---
     @property
     def panel_ref(self):
         return self._panel_ref
@@ -39,6 +38,15 @@ class DataDisplayer(ABC):
         return None
     def apply_styles(self):
         pass
+
+    @staticmethod
+    def get_config_key_prefixes():
+        """
+        Returns a list of unique prefixes used for dynamically generated
+        config keys, e.g., ['speedo_', 'graph_']. The config manager uses
+        this to find all relevant styles to save in the theme.
+        """
+        return []
 
     def reset_state(self):
         """Optional method to reset any internal state when config changes."""

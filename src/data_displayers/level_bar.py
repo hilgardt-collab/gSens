@@ -132,7 +132,6 @@ class LevelBarDisplayer(DataDisplayer):
             ConfigOption("level_bar_on_pulse_color2", "color", "Pulse End Color:", "rgba(255,255,255,1)"),
             ConfigOption("level_bar_on_pulse_duration_ms", "spinner", "Pulse Duration (ms):", 1000, 100, 5000, 100, 0)
         ]
-        # --- FEATURE: Add text/bar split ratio controls ---
         model["Labels & Layout"] = [
             ConfigOption("level_bar_text_layout", "dropdown", "Text Layout:", "superimposed", 
                          options_dict={"Superimposed": "superimposed", "Top": "top", "Bottom": "bottom", "Left": "left", "Right": "right"}),
@@ -329,37 +328,37 @@ class LevelBarDisplayer(DataDisplayer):
                 ctx.move_to(current_x, s_y); PangoCairo.show_layout(ctx, layout_s)
 
     def draw_bar(self, ctx, bar_x, bar_y, bar_width, bar_height):
+        """Draws the main bar, accounting for slant to prevent clipping."""
         if bar_width <= 0 or bar_height <= 0: return
         
         slant = float(self.config.get("level_bar_slant_px", 0))
         orientation = self.config.get("level_bar_orientation", "vertical")
         
+        ctx.save()
+
+        # --- FIX: Calculate drawing area and offsets to contain the slanted shape ---
         if orientation == "vertical":
             rect_width = bar_width - abs(slant)
-            rect_x = bar_x + abs(slant) / 2.0
-            rect_y = bar_y
             rect_height = bar_height
+            if rect_width <= 0: ctx.restore(); return
+            
+            offset_x = bar_x - slant if slant < 0 else bar_x
+            ctx.translate(offset_x, bar_y)
+            
+            tan_angle = slant / rect_height if rect_height > 0 else 0
+            matrix = cairo.Matrix(1, 0, tan_angle, 1, 0, 0)
+            ctx.transform(matrix)
         else: # Horizontal
-            rect_height = bar_height - abs(slant)
-            rect_y = bar_y + abs(slant) / 2.0
-            rect_x = bar_x
             rect_width = bar_width
-
-        if rect_width <= 0 or rect_height <= 0: return
-
-        ctx.save()
-        ctx.translate(rect_x, rect_y)
-
-        if orientation == "vertical":
-            if rect_height > 0:
-                tan_angle = slant / rect_height
-                matrix = cairo.Matrix(1, 0, tan_angle, 1, 0, 0)
-                ctx.transform(matrix)
-        else: # Horizontal
-            if rect_width > 0:
-                tan_angle = slant / rect_width
-                matrix = cairo.Matrix(1, tan_angle, 0, 1, 0, 0)
-                ctx.transform(matrix)
+            rect_height = bar_height - abs(slant)
+            if rect_height <= 0: ctx.restore(); return
+            
+            offset_y = bar_y - slant if slant < 0 else bar_y
+            ctx.translate(bar_x, offset_y)
+            
+            tan_angle = slant / rect_width if rect_width > 0 else 0
+            matrix = cairo.Matrix(1, tan_angle, 0, 1, 0, 0)
+            ctx.transform(matrix)
 
         bg_rgba = Gdk.RGBA(); bg_rgba.parse(self.config.get("level_bar_background_color"))
         ctx.set_source_rgba(bg_rgba.red, bg_rgba.green, bg_rgba.blue, bg_rgba.alpha)

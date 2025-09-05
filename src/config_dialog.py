@@ -265,4 +265,3 @@ def get_config_from_widgets(widgets, models_list):
                 new_config[key] = option_def.default
     return new_config
 
-
