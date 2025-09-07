@@ -1,15 +1,8 @@
-1. Fan speed no data until clicked/late (confirmed: arc_guage)
-
-
 4. Optional graph outline
 4.1  Graph should respect panel edges
-
-
 7. Dial background not part of save as default (Speedometer)
 8. Clock not saving settings in default
 9. Text clock should have alarm & timer
 10. Graph displayer for disk usage
 11. Text displayer not saving primary text font for default
-
-13. Network activity - graph has no limits?
 

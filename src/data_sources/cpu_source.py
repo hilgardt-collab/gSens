@@ -270,28 +270,12 @@ class CPUDataSource(DataSource):
     def get_configure_callback(self):
         """Provides a callback to dynamically show/hide UI sections in the config dialog."""
         def setup_dynamic_options(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
-            is_combo_child = prefix is not None
-            config = panel_config if is_combo_child else self.config
             
-            if is_combo_child:
-                temp_state = {
-                    "cpu_metric_to_display": config.get("cpu_metric_to_display", "usage"),
-                    "cpu_usage_mode": config.get("cpu_usage_mode", "overall"),
-                    "cpu_temp_sensor_key": config.get("cpu_temp_sensor_key", ""),
-                    "cpu_freq_mode": config.get("cpu_freq_mode", "overall"),
-                    "graph_min_value": config.get("graph_min_value", "0.0"),
-                    "graph_max_value": config.get("graph_max_value", "100.0")
-                }
-                
-                def custom_getter():
-                    opt_prefix = f"{prefix}opt_"
-                    return { f"{opt_prefix}{k}": v for k, v in temp_state.items() }
-
-                if not hasattr(dialog, 'custom_value_getters'):
-                    dialog.custom_value_getters = []
-                dialog.custom_value_getters.append(custom_getter)
-
-            metric_combo = widgets.get("cpu_metric_to_display")
+            # --- FIX: Construct prefixed keys for all widgets ---
+            key_prefix = f"{prefix}opt_" if prefix else ""
+            
+            metric_combo_key = f"{key_prefix}cpu_metric_to_display"
+            metric_combo = widgets.get(metric_combo_key)
             if not metric_combo: return
 
             full_model = self.get_config_model()
@@ -300,7 +284,8 @@ class CPUDataSource(DataSource):
                 if section_title.endswith(" Settings"):
                     section_widgets[section_title] = []
                     for opt in options:
-                        widget = widgets.get(opt.key)
+                        # --- FIX: Use prefixed keys to find the correct widgets ---
+                        widget = widgets.get(f"{key_prefix}{opt.key}")
                         if widget and widget.get_parent():
                             section_widgets[section_title].append(widget.get_parent())
 
@@ -311,38 +296,19 @@ class CPUDataSource(DataSource):
                     try:
                         idx = all_children.index(first_row)
                         if idx > 1 and isinstance(all_children[idx-1], Gtk.Label) and isinstance(all_children[idx-2], Gtk.Separator):
-                            s_widgets.insert(0, all_children[idx-1])
-                            s_widgets.insert(0, all_children[idx-2])
+                            section_widgets[section_title].insert(0, all_children[idx-1])
+                            section_widgets[section_title].insert(0, all_children[idx-2])
                     except ValueError:
                         pass
 
             def on_metric_changed(combo):
                 active_metric = combo.get_active_id()
-                if is_combo_child:
-                    temp_state["cpu_metric_to_display"] = active_metric
                 
                 for w_list in section_widgets.get("Usage Settings", []): w_list.set_visible(active_metric == "usage")
                 for w_list in section_widgets.get("Temperature Settings", []): w_list.set_visible(active_metric == "temperature")
                 for w_list in section_widgets.get("Frequency Settings", []): w_list.set_visible(active_metric == "frequency")
             
             metric_combo.connect("changed", on_metric_changed)
-            
-            if is_combo_child:
-                widgets_to_track = {
-                    "cpu_usage_mode": "changed",
-                    "cpu_temp_sensor_key": "changed",
-                    "cpu_freq_mode": "changed",
-                    "graph_min_value": "value-changed",
-                    "graph_max_value": "value-changed"
-                }
-                for key, signal in widgets_to_track.items():
-                    widget = widgets.get(key)
-                    if widget:
-                        handler = (lambda c, k=key: temp_state.update({k: c.get_active_id()})) \
-                                  if signal == "changed" else \
-                                  (lambda s, k=key: temp_state.update({k: str(s.get_value())}))
-                        widget.connect(signal, handler)
-
             GLib.idle_add(on_metric_changed, metric_combo)
 
         return setup_dynamic_options

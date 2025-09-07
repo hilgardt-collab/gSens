@@ -116,8 +116,8 @@ class SystemTempDataSource(DataSource):
                 spinner = widgets.get(f"{key_prefix}system_temp_spinner")
                 if not sensor_combo: return
 
-                # --- BUG FIX: Hide the spinner ONLY, not its parent. ---
-                if spinner: spinner.set_visible(False)
+                if spinner:
+                    spinner.set_visible(False)
 
                 sensor_combo.remove_all()
                 
@@ -143,10 +143,12 @@ class SystemTempDataSource(DataSource):
             is_combo_child = prefix is not None
             key_prefix = f"{prefix}opt_" if is_combo_child else ""
             
-            sensor_combo = widgets.get(f"{key_prefix}selected_sensor_key")
+            sensor_combo_key = f"{key_prefix}selected_sensor_key"
+            sensor_combo = widgets.get(sensor_combo_key)
             if not sensor_combo: return
 
-            title_entry = widgets.get("title_text") if not is_combo_child else widgets.get(f"{prefix}caption")
+            caption_key = f"{prefix}caption" if is_combo_child else "title_text"
+            title_entry = widgets.get(caption_key)
             if title_entry:
                 def on_sensor_changed(combo):
                     display_name = combo.get_active_text()
@@ -159,7 +161,8 @@ class SystemTempDataSource(DataSource):
                 sensor_combo.connect("changed", on_sensor_changed)
                 GLib.idle_add(on_sensor_changed, sensor_combo)
 
-            row, spinner = sensor_combo.get_parent(), Gtk.Spinner(spinning=True)
+            row = sensor_combo.get_parent()
+            spinner = Gtk.Spinner(spinning=True)
             widgets[f"{key_prefix}system_temp_spinner"] = spinner
             row.append(spinner)
 

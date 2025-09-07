@@ -27,7 +27,9 @@ class ComboDataSource(DataSource):
         """
         with self.lock:
             self.child_sources.clear()
-            source_map = {info['key']: info['class'] for info in available_sources.values()}
+            # --- FIX: Handle both dict and list for available_sources ---
+            sources_iterable = available_sources.values() if isinstance(available_sources, dict) else available_sources
+            source_map = {info['key']: info['class'] for info in sources_iterable}
             
             mode = self.config.get('combo_mode', 'arc')
 
@@ -126,7 +128,9 @@ class ComboDataSource(DataSource):
             while child: parent_box.remove(child); child = parent_box.get_first_child()
 
             if source_key and source_key != "none":
-                SourceClass = next((s['class'] for s in available_sources.values() if s['key'] == source_key), None)
+                # --- FIX: Handle both dict and list for available_sources ---
+                sources_iterable = available_sources.values() if isinstance(available_sources, dict) else available_sources
+                SourceClass = next((s['class'] for s in sources_iterable if s['key'] == source_key), None)
                 if SourceClass:
                     model = SourceClass.get_config_model()
                     valid_keys = set()
@@ -157,7 +161,7 @@ class ComboDataSource(DataSource):
                     temp_instance = SourceClass(config=child_config)
                     custom_cb = temp_instance.get_configure_callback()
                     if custom_cb:
-                        custom_cb(dialog, parent_box, widgets, available_sources, child_config, prefix)
+                        custom_cb(dialog, parent_box, widgets, available_sources, panel_config, prefix)
 
         def _build_arc_config_ui(dialog, content_box, widgets, available_sources, panel_config, source_opts):
             arc_count_model = {"": [ConfigOption("combo_arc_count", "spinner", "Number of Arcs:", 5, 0, 16, 1, 0)]}
@@ -350,7 +354,10 @@ class ComboDataSource(DataSource):
                     _rebuild_slot_config_ui(panel_config.get(slot_key, "none"), sub_config_box, prefix, dialog, widgets, available_sources, panel_config)
 
         def build_main_config_ui(dialog, content_box, widgets, available_sources, panel_config):
-            source_opts = {"None": "none", **{info['name']: info['key'] for info in available_sources.values() if info['key'] != 'combo'}}
+            # --- FIX: Handle both dict and list for available_sources ---
+            sources_iterable = available_sources.values() if isinstance(available_sources, dict) else available_sources
+            source_opts = {"None": "none", **{info['name']: info['key'] for info in sources_iterable if info['key'] != 'combo'}}
+
             mode = panel_config.get('combo_mode', 'arc')
             
             update_interval_model = {
@@ -380,3 +387,4 @@ class ComboDataSource(DataSource):
                 _build_arc_config_ui(dialog, content_box, widgets, available_sources, panel_config, source_opts)
 
         return build_main_config_ui
+

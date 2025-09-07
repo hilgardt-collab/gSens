@@ -17,7 +17,6 @@ class GPUDataSource(DataSource):
         """
         gpu_index = int(self.config.get("gpu_index", "0"))
         return {
-            "name": gpu_manager.get_gpu_names().get(gpu_index, f"GPU {gpu_index}"),
             "temperature": gpu_manager.get_temperature(gpu_index),
             "utilization": gpu_manager.get_utilization(gpu_index),
             "frequency": gpu_manager.get_graphics_clock(gpu_index),
@@ -37,70 +36,74 @@ class GPUDataSource(DataSource):
             return vram_data.get("percent") if vram_data else None
         return data.get(metric)
 
-    def _format_metric(self, metric_key, data):
-        """Helper to format any given metric based on its type and config."""
-        value = data.get(metric_key)
-        if value is None: return "N/A"
+    @staticmethod
+    def _format_metric(metric_key, value, config, data):
+        """Static helper to format any given GPU metric value."""
+        if value is None:
+            return "N/A"
 
         if metric_key == "utilization":
             return f"{value:.0f}%"
         elif metric_key == "temperature":
-            unit = self.config.get("display_unit_temp", "C")
+            unit = config.get("display_unit_temp", "C")
             val_display, unit_suffix = value, "°C"
             if unit == "F": val_display, unit_suffix = (value * 9/5) + 32, "°F"
             elif unit == "K": val_display, unit_suffix = value + 273.15, "K"
             return f"{val_display:.1f}{unit_suffix}"
         elif metric_key == "frequency":
-            unit = self.config.get("display_unit_freq", "GHz")
-            return f"{value / 1000:.2f} GHz" if unit == "GHz" else f"{value:.0f} MHz"
+            unit = config.get("display_unit_freq", "GHz")
+            if unit == "GHz":
+                return f"{value / 1000:.2f} GHz"
+            else:
+                return f"{value:.0f} MHz"
         elif metric_key == "vram":
             if not isinstance(value, dict): return "N/A"
-            return f"{value['used_gb']:.1f}/{value['total_gb']:.1f}GB ({value['percent']:.1f}%)"
+            style = config.get("text_content_style_vram", "gb_and_percent")
+            if style == "gb_only": return f"{value['used_gb']:.1f}/{value['total_gb']:.1f} GB"
+            if style == "percent_only": return f"{value['percent']:.1f}%"
+            return f"{value['used_gb']:.1f}/{value['total_gb']:.1f} GB ({value['percent']:.1f}%)"
         elif metric_key == "power":
             return f"{value:.1f} W"
         elif metric_key == "fan_speed":
             return f"{value:.0f}%"
         elif metric_key == "processes":
-            return f"{value} Proc"
+            return f"{value} Process{'es' if value != 1 else ''}"
+        
         return "N/A"
 
     def get_display_string(self, data):
-        """Formats the main display string for the primary metric."""
-        metric = self.config.get("gpu_metric_to_display", "utilization")
-        # For VRAM, the text style is user-configurable.
-        if metric == "vram":
-            value = data.get("vram")
-            if not isinstance(value, dict): return "N/A"
-            style = self.config.get("text_content_style_vram", "gb_and_percent")
-            if style == "gb_only": return f"{value['used_gb']:.1f}/{value['total_gb']:.1f} GB"
-            if style == "percent_only": return f"{value['percent']:.1f}%"
-            return f"{value['used_gb']:.1f}/{value['total_gb']:.1f} GB ({value['percent']:.1f}%)"
-        
-        return self._format_metric(metric, data)
+        """Formats the display string for the primary metric."""
+        primary_metric = self.config.get("gpu_metric_to_display", "utilization")
+        value = data.get(primary_metric)
+        return GPUDataSource._format_metric(primary_metric, value, self.config, data)
 
     def get_primary_label_string(self, data):
-        """Returns the GPU name and the primary metric being monitored."""
+        """Returns a descriptive label for the currently monitored metric."""
+        gpu_index = int(self.config.get("gpu_index", "0"))
+        gpu_names = gpu_manager.get_gpu_names()
+        gpu_name = gpu_names.get(gpu_index, f"GPU {gpu_index}")
+
+        metric_key = self.config.get("gpu_metric_to_display", "utilization")
         metric_map = {
             "utilization": "Usage", "temperature": "Temp", "frequency": "Clock",
             "vram": "VRAM", "power": "Power", "fan_speed": "Fan", "processes": "Processes"
         }
-        metric_key = self.config.get("gpu_metric_to_display", "utilization")
-        metric_label = metric_map.get(metric_key, "GPU")
-        gpu_name = data.get("name", "Unknown GPU")
-        return f"{gpu_name}: {metric_label}"
+        metric_name = metric_map.get(metric_key, "Metric")
+        
+        return f"{gpu_name}: {metric_name}"
 
     def get_secondary_display_string(self, data):
         """Returns a formatted string for a user-selected secondary metric."""
         secondary_metric = self.config.get("gpu_secondary_metric", "none")
-        if secondary_metric == "none":
+        if secondary_metric == "none" or data is None:
             return ""
+
+        value = data.get(secondary_metric)
+        formatted_value = GPUDataSource._format_metric(secondary_metric, value, self.config, data)
         
-        metric_map = {
-            "utilization": "Usage", "temperature": "Temp", "frequency": "Clock",
-            "vram": "VRAM", "power": "Power", "fan_speed": "Fan", "processes": "Processes"
-        }
+        metric_map = {"utilization": "Usage", "temperature": "Temp", "frequency": "Clock", "vram": "VRAM", "power": "Power", "fan_speed": "Fan", "processes": "Procs"}
         metric_label = metric_map.get(secondary_metric, "")
-        formatted_value = self._format_metric(secondary_metric, data)
+        
         return f"{metric_label}: {formatted_value}"
 
     @staticmethod
@@ -111,6 +114,10 @@ class GPUDataSource(DataSource):
         if not gpu_opts:
             gpu_opts = {"GPU 0": "0"}
 
+        model["GPU Selection"] = [
+            ConfigOption("gpu_index", "dropdown", "Monitored GPU:", "0", options_dict=gpu_opts)
+        ]
+        
         metric_opts = {
             "Usage (%)": "utilization", "Temperature": "temperature", "Clock Frequency": "frequency",
             "VRAM Usage": "vram", "Power Draw (W)": "power", "Fan Speed (%)": "fan_speed",
@@ -118,12 +125,11 @@ class GPUDataSource(DataSource):
         }
         secondary_metric_opts = {"None": "none", **metric_opts}
 
-        model["GPU Selection"] = [
-            ConfigOption("gpu_index", "dropdown", "Monitored GPU:", "0", options_dict=gpu_opts)
-        ]
         model["Metric & Display"] = [
-            ConfigOption("gpu_metric_to_display", "dropdown", "Primary Metric:", "utilization", options_dict=metric_opts),
-            ConfigOption("gpu_secondary_metric", "dropdown", "Secondary Metric:", "none", options_dict=secondary_metric_opts,
+            ConfigOption("gpu_metric_to_display", "dropdown", "Primary Metric:", "utilization",
+                         options_dict=metric_opts),
+            ConfigOption("gpu_secondary_metric", "dropdown", "Secondary Metric:", "none",
+                         options_dict=secondary_metric_opts,
                          tooltip="Display an additional metric as a secondary label.")
         ]
         model["Temperature Settings"] = [
@@ -148,7 +154,11 @@ class GPUDataSource(DataSource):
     def get_configure_callback(self):
         """Dynamically shows/hides UI sections based on the selected metric."""
         def setup_dynamic_options(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
-            metric_combo = widgets.get("gpu_metric_to_display")
+            # --- FIX: Construct prefixed keys for all widgets ---
+            key_prefix = f"{prefix}opt_" if prefix else ""
+            
+            metric_combo_key = f"{key_prefix}gpu_metric_to_display"
+            metric_combo = widgets.get(metric_combo_key)
             if not metric_combo: return
 
             full_model = self.get_config_model()
@@ -159,7 +169,8 @@ class GPUDataSource(DataSource):
                     section_widgets[section_title] = []
                     
                     for opt in options:
-                        widget = widgets.get(opt.key)
+                        # --- FIX: Use prefixed keys to find the correct widgets ---
+                        widget = widgets.get(f"{key_prefix}{opt.key}")
                         if widget and widget.get_parent():
                             section_widgets[section_title].append(widget.get_parent())
             
@@ -187,3 +198,4 @@ class GPUDataSource(DataSource):
             GLib.idle_add(on_metric_changed, metric_combo)
 
         return setup_dynamic_options
+

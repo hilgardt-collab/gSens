@@ -74,7 +74,6 @@ class FanSpeedDataSource(DataSource):
         
         display_name = fan_info.get('display_name', 'Fan Speed')
         
-        # Simplify the name for a cleaner label, e.g., "nct6798 / Fan 2" -> "Fan 2"
         simple_name = display_name.split('/')[-1].strip()
         return f"Fan: {simple_name}"
 
@@ -115,7 +114,7 @@ class FanSpeedDataSource(DataSource):
                 spinner = widgets.get(f"{key_prefix}fan_spinner")
                 if not sensor_combo: return
 
-                if spinner and spinner.get_parent():
+                if spinner:
                     spinner.set_visible(False)
 
                 sensor_combo.remove_all()
@@ -128,12 +127,12 @@ class FanSpeedDataSource(DataSource):
                     for key, data in sorted_fans:
                         sensor_combo.append(id=key, text=data['display_name'])
 
-                current_selection = panel_config.get("selected_fan_key")
+                current_selection = panel_config.get(sensor_combo_key)
                 if not current_selection or not sensor_combo.set_active_id(current_selection):
                     sensor_combo.set_active(0)
                     new_active_id = sensor_combo.get_active_id()
                     if new_active_id:
-                        panel_config["selected_fan_key"] = new_active_id
+                        panel_config[sensor_combo_key] = new_active_id
             except KeyError as e:
                 print(f"FanSpeedDataSource _repopulate_sensor_dropdown KeyError: {e}")
 
@@ -141,10 +140,12 @@ class FanSpeedDataSource(DataSource):
             is_combo_child = prefix is not None
             key_prefix = f"{prefix}opt_" if is_combo_child else ""
             
-            fan_combo = widgets.get(f"{key_prefix}selected_fan_key")
+            fan_combo_key = f"{key_prefix}selected_fan_key"
+            fan_combo = widgets.get(fan_combo_key)
             if not fan_combo: return
                 
-            title_entry = widgets.get("title_text") if not is_combo_child else widgets.get(f"{prefix}caption")
+            caption_key = f"{prefix}caption" if is_combo_child else "title_text"
+            title_entry = widgets.get(caption_key)
             if title_entry:
                 def on_fan_changed(combo):
                     display_name = combo.get_active_text()
@@ -158,7 +159,8 @@ class FanSpeedDataSource(DataSource):
                 fan_combo.connect("changed", on_fan_changed)
                 GLib.idle_add(on_fan_changed, fan_combo)
 
-            row, spinner = fan_combo.get_parent(), Gtk.Spinner(spinning=True)
+            row = fan_combo.get_parent()
+            spinner = Gtk.Spinner(spinning=True)
             widgets[f"{key_prefix}fan_spinner"] = spinner
             row.append(spinner)
 
