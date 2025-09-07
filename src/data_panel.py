@@ -9,7 +9,6 @@ from config_dialog import ConfigOption, build_ui_from_model, get_config_from_wid
 from ui_helpers import build_background_config_ui, CustomDialog
 
 gi.require_version("Gtk", "4.0")
-# --- FIX: Add missing Gdk import ---
 from gi.repository import Gtk, Gdk, GLib
 from config_manager import config_manager
 
@@ -28,7 +27,12 @@ class DataPanel(BasePanel):
         self.is_clock_source = isinstance(data_source, AnalogClockDataSource)
         self._clock_timer_id = None
         
-        super().__init__(title=config.get("title_text", "Data Panel"), config=config)
+        source_type = config.get('type')
+        default_title = "Data Panel"
+        if source_type and source_type in self.available_sources:
+            default_title = self.available_sources[source_type].get('name', default_title)
+        
+        super().__init__(title=config.get("title_text", default_title), config=config)
         
         self.data_displayer = data_displayer
         self.data_displayer.panel_ref = self
@@ -65,6 +69,23 @@ class DataPanel(BasePanel):
     def process_update(self, value):
         if not self.data_source or not self.data_displayer:
             return
+
+        # --- DYNAMIC TITLE LOGIC ---
+        # If the user has NOT set a custom title override, update the panel title
+        # dynamically from the data source's primary label.
+        user_set_title = self.config.get("title_text", "").strip()
+        
+        source_type = self.config.get('type')
+        default_source_name = self.available_sources.get(source_type, {}).get('name', 'Data Panel')
+
+        # We can dynamically update if the user title is blank or is the same as the default source name
+        can_dynamically_update = not user_set_title or user_set_title == default_source_name
+
+        if can_dynamically_update and value is not None:
+            dynamic_title = self.data_source.get_primary_label_string(value)
+            if dynamic_title and self.title_label.get_text() != dynamic_title:
+                self.title_label.set_text(dynamic_title)
+        # --- END DYNAMIC TITLE LOGIC ---
 
         if value is not None:
             numerical_value = self.data_source.get_numerical_value(value)
@@ -174,7 +195,13 @@ class DataPanel(BasePanel):
             return
 
         parent_window = self.get_ancestor(Gtk.Window)
-        dialog = CustomDialog(parent=parent_window, title=f"Configure: {self.config.get('title_text', self.original_title)}", modal=False)
+        
+        # Determine initial title for the dialog
+        source_type = self.config.get('type')
+        default_source_name = self.available_sources.get(source_type, {}).get('name', 'Data Panel')
+        initial_dialog_title = self.config.get('title_text', default_source_name)
+
+        dialog = CustomDialog(parent=parent_window, title=f"Configure: {initial_dialog_title}", modal=False)
         self._config_dialog = dialog
         dialog.ui_models = {}
         dialog.dynamic_models = []
@@ -208,7 +235,8 @@ class DataPanel(BasePanel):
         display_type_model = {"Display Type": [ConfigOption("displayer_type", "dropdown", "Display Style:", self.config.get('displayer_type'), options_dict=displayer_options)]}
         
         panel_model = { "General Panel Settings": [
-            ConfigOption("title_text", "string", "Panel Title:", self.config.get("title_text", self.original_title)),
+            ConfigOption("title_text", "string", "Panel Title:", self.config.get("title_text", ""), 
+                         tooltip="Leave blank to use the dynamic title from the data source."),
             ConfigOption("show_title", "bool", "Show Title:", str(self.config.get("show_title", True))),
             ConfigOption("title_font", "font", "Title Font:", self.config.get("title_font", "Sans Bold 10")),
             ConfigOption("title_color", "color", "Title Color:", self.config.get("title_color", "#FFFFFF")),
@@ -251,11 +279,11 @@ class DataPanel(BasePanel):
         notebook.append_page(display_scroll, Gtk.Label(label="Display"))
         build_ui_from_model(display_tab_box, self.config, display_model, all_widgets)
 
-        source_custom_builder = getattr(self.data_source, 'get_configure_callback', lambda: None)()
+        source_custom_builder = self.data_source.get_configure_callback()
         if source_custom_builder:
             source_custom_builder(dialog, source_tab_box, all_widgets, AVAILABLE_DATA_SOURCES, self.config)
             
-        display_custom_builder = getattr(self.data_displayer, 'get_configure_callback', lambda: None)()
+        display_custom_builder = self.data_displayer.get_configure_callback()
         if display_custom_builder:
             display_custom_builder(dialog, display_tab_box, all_widgets, AVAILABLE_DATA_SOURCES, self.config)
         
@@ -272,6 +300,15 @@ class DataPanel(BasePanel):
             final_displayer_key = new_conf.get('displayer_type', original_displayer_key_on_open)
             self.config.update(new_conf)
             self.config['displayer_type'] = final_displayer_key
+            
+            # --- TITLE LOGIC: If title is now blank, set it from dynamic label ---
+            if not self.config.get("title_text", "").strip():
+                # We need data to get the dynamic label, so we just apply the blank
+                # title for now, and process_update will fix it on the next tick.
+                self.title_label.set_text("")
+            else:
+                self.title_label.set_text(self.config.get("title_text"))
+            
             config_manager.update_panel_config(self.config["id"], self.config)
             if original_displayer_key_on_open != final_displayer_key:
                 main_window.grid_manager.recreate_panel(self.config['id'])

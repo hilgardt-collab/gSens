@@ -147,26 +147,31 @@ class CPUDataSource(DataSource):
             return freq_data.get("overall")
         return None
 
-    def get_display_string(self, data):
-        """Formats the display string for the selected metric."""
-        value = self.get_numerical_value(data)
+    @staticmethod
+    def _format_metric(metric_key, value, config):
+        """Static helper to format any given CPU metric value."""
         if value is None: return "N/A"
         
-        metric = self.config.get("cpu_metric_to_display", "usage")
-        if metric == "usage":
+        if metric_key == "usage":
             return f"{value:.1f}%"
-        elif metric == "temperature":
-            unit = self.config.get("display_unit_temp", "C")
+        elif metric_key == "temperature":
+            unit = config.get("display_unit_temp", "C")
             if unit == "F": value = (value * 9/5) + 32
             elif unit == "K": value = value + 273.15
             unit_suffix = "°F" if unit == "F" else "K" if unit == "K" else "°C"
             return f"{value:.1f}{unit_suffix}"
-        elif metric == "frequency":
-            unit = self.config.get("display_unit_freq", "GHz")
+        elif metric_key == "frequency":
+            unit = config.get("display_unit_freq", "GHz")
             if unit == "GHz":
                 return f"{value / 1000:.2f} GHz"
             return f"{value:.0f} MHz"
         return "N/A"
+
+    def get_display_string(self, data):
+        """Formats the display string for the selected primary metric."""
+        primary_metric = self.config.get("cpu_metric_to_display", "usage")
+        value = self.get_numerical_value(data)
+        return CPUDataSource._format_metric(primary_metric, value, self.config)
 
     def get_primary_label_string(self, data):
         """Returns a descriptive label for the currently displayed metric."""
@@ -180,9 +185,10 @@ class CPUDataSource(DataSource):
             
         elif metric == "temperature":
             sensor_key = self.config.get("cpu_temp_sensor_key", "")
-            if sensor_key and '::' in sensor_key:
-                return f"{sensor_key.split('::')[1]} Temp"
-            return "CPU Temperature"
+            cached_sensors = SENSOR_CACHE.get('cpu_temp', {})
+            sensor_info = cached_sensors.get(sensor_key, {})
+            label = sensor_info.get('display_name', 'CPU Temp').split('/')[-1].strip()
+            return f"{label} Temp"
 
         elif metric == "frequency":
             mode = self.config.get("cpu_freq_mode", "overall")
@@ -191,14 +197,43 @@ class CPUDataSource(DataSource):
             return "Average Frequency"
         return "CPU"
 
+    def get_secondary_display_string(self, data):
+        """Returns a formatted string for a user-selected secondary metric."""
+        secondary_metric = self.config.get("cpu_secondary_metric", "none")
+        if secondary_metric == "none" or data is None:
+            return ""
+
+        value = None
+        if secondary_metric == "usage":
+            usage_data = data.get("usage", {})
+            value = usage_data.get("overall")
+        elif secondary_metric == "temperature":
+            value = data.get("temperature")
+        elif secondary_metric == "frequency":
+            freq_data = data.get("frequency", {})
+            value = freq_data.get("overall")
+            
+        formatted_value = CPUDataSource._format_metric(secondary_metric, value, self.config)
+        
+        metric_map = {"usage": "Usage", "temperature": "Temp", "frequency": "Freq"}
+        metric_label = metric_map.get(secondary_metric, "")
+        
+        return f"{metric_label}: {formatted_value}"
+
     @staticmethod
     def get_config_model():
         """Returns a combined configuration model for all CPU metrics."""
         model = DataSource.get_config_model()
         
+        metric_opts = {"Usage": "usage", "Temperature": "temperature", "Frequency": "frequency"}
+        secondary_metric_opts = {"None": "none", **metric_opts}
+
         model["Metric & Display"] = [
-            ConfigOption("cpu_metric_to_display", "dropdown", "Metric to Display:", "usage",
-                         options_dict={"Usage": "usage", "Temperature": "temperature", "Frequency": "frequency"})
+            ConfigOption("cpu_metric_to_display", "dropdown", "Primary Metric:", "usage",
+                         options_dict=metric_opts),
+            ConfigOption("cpu_secondary_metric", "dropdown", "Secondary Metric:", "none",
+                         options_dict=secondary_metric_opts,
+                         tooltip="Display an additional metric as a secondary label.")
         ]
 
         # --- Usage Options ---
@@ -235,7 +270,6 @@ class CPUDataSource(DataSource):
     def get_configure_callback(self):
         """Provides a callback to dynamically show/hide UI sections in the config dialog."""
         def setup_dynamic_options(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
-            
             is_combo_child = prefix is not None
             config = panel_config if is_combo_child else self.config
             

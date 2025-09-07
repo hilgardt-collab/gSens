@@ -60,14 +60,27 @@ class FanSpeedDataSource(DataSource):
         return {"rpm": None}
 
     def get_display_string(self, data):
-        if not isinstance(data, dict):
-            if isinstance(data, (int, float)):
-                return f"{data:.0f} RPM"
-            return "N/A"
-
-        if data.get('rpm') is None:
+        """Returns the formatted RPM value."""
+        if not isinstance(data, dict) or data.get('rpm') is None:
             return "N/A"
         return f"{data.get('rpm'):.0f} RPM"
+
+    def get_primary_label_string(self, data):
+        """Returns the display name of the currently monitored fan."""
+        selected_key = self.config.get("selected_fan_key", "")
+        
+        cached_fans = SENSOR_CACHE.get('fan_speed', {})
+        fan_info = cached_fans.get(selected_key, {})
+        
+        display_name = fan_info.get('display_name', 'Fan Speed')
+        
+        # Simplify the name for a cleaner label, e.g., "nct6798 / Fan 2" -> "Fan 2"
+        simple_name = display_name.split('/')[-1].strip()
+        return f"Fan: {simple_name}"
+
+    def get_secondary_display_string(self, data):
+        """Returns an empty string as there is no secondary metric for fans."""
+        return ""
 
     def get_numerical_value(self, data): 
         """Returns the raw RPM value from the data dictionary."""
@@ -102,8 +115,8 @@ class FanSpeedDataSource(DataSource):
                 spinner = widgets.get(f"{key_prefix}fan_spinner")
                 if not sensor_combo: return
 
-                # --- BUG FIX: Hide the spinner ONLY, not its parent. ---
-                if spinner: spinner.set_visible(False)
+                if spinner and spinner.get_parent():
+                    spinner.set_visible(False)
 
                 sensor_combo.remove_all()
                 
@@ -115,13 +128,12 @@ class FanSpeedDataSource(DataSource):
                     for key, data in sorted_fans:
                         sensor_combo.append(id=key, text=data['display_name'])
 
-                current_selection = panel_config.get(sensor_combo_key)
+                current_selection = panel_config.get("selected_fan_key")
                 if not current_selection or not sensor_combo.set_active_id(current_selection):
                     sensor_combo.set_active(0)
                     new_active_id = sensor_combo.get_active_id()
                     if new_active_id:
-                        panel_config[sensor_combo_key] = new_active_id
-
+                        panel_config["selected_fan_key"] = new_active_id
             except KeyError as e:
                 print(f"FanSpeedDataSource _repopulate_sensor_dropdown KeyError: {e}")
 
