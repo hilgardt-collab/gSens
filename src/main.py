@@ -230,12 +230,15 @@ class MainWindow(Gtk.ApplicationWindow):
 class SystemMonitorApp(Gtk.Application):
     def __init__(self, **kwargs):
         super().__init__(application_id="com.example.gtk-system-monitor", 
-                         flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE, **kwargs)
+                         # --- FIX: Change the flag to allow multiple instances ---
+                         flags=Gio.ApplicationFlags.NON_UNIQUE, **kwargs)
         self.window = None
         # Create an event to signal when sensor discovery is complete
         self.sensors_ready_event = threading.Event()
 
     def do_activate(self):
+        # --- NOTE: With NON_UNIQUE, this method is called for each new instance ---
+        # The 'self.window' check is now effectively per-instance.
         if not self.window or not self.window.is_visible():
             # Pass the event to the main window when it's created
             self.window = MainWindow(self, sensors_ready_event=self.sensors_ready_event)
@@ -260,8 +263,6 @@ class SystemMonitorApp(Gtk.Application):
         # Start the central update manager's worker thread
         update_manager.start()
         
-        # --- FIX: Discover sensors in a background thread to prevent UI freezes ---
-        # Pass the event to the discovery thread
         sensor_discovery_thread = threading.Thread(target=self._discover_sensors_background, 
                                                    args=(self.sensors_ready_event,), 
                                                    daemon=True)

@@ -464,6 +464,7 @@ class ArcComboDisplayer(ComboBase):
             ctx.stroke()
 
     def _draw_text_on_arc(self, ctx, cx, cy, radius, arc_width, text, index, start_angle, total_angle):
+        # --- FIX: Create a robust list of character data instead of parallel lists ---
         rgba = Gdk.RGBA(); rgba.parse(self.config.get(f"arc{index}_label_color")); ctx.set_source_rgba(rgba.red, rgba.green, rgba.blue, rgba.alpha)
         layout = PangoCairo.create_layout(ctx); layout.set_font_description(Pango.FontDescription.from_string(self.config.get(f"arc{index}_label_font")))
         
@@ -471,8 +472,16 @@ class ArcComboDisplayer(ComboBase):
         if is_inverted:
             text = text[::-1]
 
-        char_widths = [layout.set_text(char, -1) or layout.get_pixel_extents()[1].width for char in text]
-        total_text_angular_width = sum(char_widths) / radius if radius > 0 else 0
+        # --- FIX: Create a single source of truth for character data ---
+        char_data = []
+        for char in text:
+            layout.set_text(char, -1)
+            _, log = layout.get_pixel_extents()
+            char_width = log.width
+            char_angle = char_width / radius if radius > 0 else 0
+            char_data.append({'char': char, 'width': char_width, 'angle': char_angle})
+
+        total_text_angular_width = sum(item['angle'] for item in char_data)
         pos = self.config.get(f"arc{index}_label_position")
 
         if is_inverted:
@@ -490,9 +499,12 @@ class ArcComboDisplayer(ComboBase):
             char_angle_step = 1
         
         ctx.save(); ctx.translate(cx, cy)
-        for i, char in enumerate(text):
+        # --- FIX: Iterate over the robust char_data list ---
+        for item in char_data:
+            char = item['char']
+            char_angle = item['angle']
+            
             layout.set_text(char, -1); _, log = layout.get_pixel_extents()
-            char_angle = char_widths[i] / radius if radius > 0 else 0
             
             rotation_angle = text_angle + (char_angle / 2.0) * char_angle_step
 
@@ -509,4 +521,3 @@ class ArcComboDisplayer(ComboBase):
     def close(self):
         self._stop_animation_timer()
         super().close()
-

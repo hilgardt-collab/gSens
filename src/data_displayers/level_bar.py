@@ -23,6 +23,10 @@ class LevelBarDisplayer(DataDisplayer):
         self._animation_timer_id, self._last_segment_count = None, 0
         self.current_on_level, self.target_on_level = 0, 0
         
+        # Caching State for performance optimization
+        self._static_surface = None
+        self._last_draw_width, self._last_draw_height = -1, -1
+        
         self.primary_text = ""
         self.secondary_text = ""
 
@@ -194,6 +198,9 @@ class LevelBarDisplayer(DataDisplayer):
         super().apply_styles()
         self._sync_state_with_config()
         
+        # Invalidate the cache whenever styles change
+        self._static_surface = None
+        
         if self.widget.get_realized(): self._start_animation_timer()
         self.widget.queue_draw()
 
@@ -328,42 +335,106 @@ class LevelBarDisplayer(DataDisplayer):
                 ctx.move_to(current_x, s_y); PangoCairo.show_layout(ctx, layout_s)
 
     def draw_bar(self, ctx, bar_x, bar_y, bar_width, bar_height):
-        """Draws the main bar, accounting for slant to prevent clipping."""
+        """Draws the main bar, accounting for slant and using a static cache."""
         if bar_width <= 0 or bar_height <= 0: return
+
+        # Check if cache is invalid (size changed or style changed)
+        if not self._static_surface or self._last_draw_width != bar_width or self._last_draw_height != bar_height:
+            # Create a new surface for the static parts
+            self._static_surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, int(bar_width), int(bar_height))
+            static_ctx = cairo.Context(self._static_surface)
+            # Draw the static elements (background, all 'off' segments) onto the cache
+            self._draw_static_bar_elements(static_ctx, bar_width, bar_height)
+            # Update cache dimensions
+            self._last_draw_width, self._last_draw_height = bar_width, bar_height
+
+        # Paint the cached static background onto the main context
+        ctx.save()
+        ctx.translate(bar_x, bar_y)
+        ctx.set_source_surface(self._static_surface, 0, 0)
+        ctx.paint()
+        ctx.restore()
         
+        # Draw only the dynamic elements (on/fading segments) on the main context
+        ctx.save()
+        ctx.translate(bar_x, bar_y)
+        self._draw_dynamic_bar_elements(ctx, bar_width, bar_height)
+        ctx.restore()
+
+    def _draw_static_bar_elements(self, ctx, bar_width, bar_height):
+        """Draws elements that don't change frame-to-frame onto a surface."""
         slant = float(self.config.get("level_bar_slant_px", 0))
         orientation = self.config.get("level_bar_orientation", "vertical")
         
         ctx.save()
 
-        # --- FIX: Calculate drawing area and offsets to contain the slanted shape ---
+        # Apply transformations to handle slant without clipping
         if orientation == "vertical":
-            rect_width = bar_width - abs(slant)
-            rect_height = bar_height
+            rect_width, rect_height = bar_width - abs(slant), bar_height
             if rect_width <= 0: ctx.restore(); return
-            
-            offset_x = bar_x - slant if slant < 0 else bar_x
-            ctx.translate(offset_x, bar_y)
-            
+            offset_x = -slant if slant < 0 else 0
+            ctx.translate(offset_x, 0)
             tan_angle = slant / rect_height if rect_height > 0 else 0
-            matrix = cairo.Matrix(1, 0, tan_angle, 1, 0, 0)
-            ctx.transform(matrix)
+            ctx.transform(cairo.Matrix(1, 0, tan_angle, 1, 0, 0))
         else: # Horizontal
-            rect_width = bar_width
-            rect_height = bar_height - abs(slant)
+            rect_width, rect_height = bar_width, bar_height - abs(slant)
             if rect_height <= 0: ctx.restore(); return
-            
-            offset_y = bar_y - slant if slant < 0 else bar_y
-            ctx.translate(bar_x, offset_y)
-            
+            offset_y = -slant if slant < 0 else 0
+            ctx.translate(0, offset_y)
             tan_angle = slant / rect_width if rect_width > 0 else 0
-            matrix = cairo.Matrix(1, tan_angle, 0, 1, 0, 0)
-            ctx.transform(matrix)
+            ctx.transform(cairo.Matrix(1, tan_angle, 0, 1, 0, 0))
 
+        # Draw main background
         bg_rgba = Gdk.RGBA(); bg_rgba.parse(self.config.get("level_bar_background_color"))
         ctx.set_source_rgba(bg_rgba.red, bg_rgba.green, bg_rgba.blue, bg_rgba.alpha)
-        ctx.rectangle(0, 0, rect_width, rect_height)
-        ctx.fill()
+        ctx.rectangle(0, 0, rect_width, rect_height); ctx.fill()
+
+        # Draw all segments in their OFF state
+        num_segments = int(self.config.get("level_bar_segment_count", 30))
+        spacing = float(self.config.get("level_bar_spacing", 2))
+        off_color = Gdk.RGBA(); off_color.parse(self.config.get("level_bar_off_color"))
+        ctx.set_source_rgba(off_color.red, off_color.green, off_color.blue, off_color.alpha)
+
+        if orientation == "vertical":
+            segment_height = (rect_height - (num_segments - 1) * spacing) / num_segments if num_segments > 0 else 0
+            if segment_height <= 0: ctx.restore(); return
+        else: # Horizontal
+            segment_width = (rect_width - (num_segments - 1) * spacing) / num_segments if num_segments > 0 else 0
+            if segment_width <= 0: ctx.restore(); return
+
+        for i in range(num_segments):
+            if orientation == "vertical":
+                seg_y = rect_height - (i + 1) * segment_height - i * spacing
+                ctx.rectangle(0, seg_y, rect_width, segment_height)
+            else:
+                seg_x = i * (segment_width + spacing)
+                ctx.rectangle(seg_x, 0, segment_width, rect_height)
+            ctx.fill()
+        
+        ctx.restore()
+
+    def _draw_dynamic_bar_elements(self, ctx, bar_width, bar_height):
+        """Draws elements that change frame-to-frame (on, fading, pulsing)."""
+        slant = float(self.config.get("level_bar_slant_px", 0))
+        orientation = self.config.get("level_bar_orientation", "vertical")
+        
+        ctx.save()
+
+        # Apply the same transformations as the static part
+        if orientation == "vertical":
+            rect_width, rect_height = bar_width - abs(slant), bar_height
+            if rect_width <= 0: ctx.restore(); return
+            offset_x = -slant if slant < 0 else 0
+            ctx.translate(offset_x, 0)
+            tan_angle = slant / rect_height if rect_height > 0 else 0
+            ctx.transform(cairo.Matrix(1, 0, tan_angle, 1, 0, 0))
+        else: # Horizontal
+            rect_width, rect_height = bar_width, bar_height - abs(slant)
+            if rect_height <= 0: ctx.restore(); return
+            offset_y = -slant if slant < 0 else 0
+            ctx.translate(0, offset_y)
+            tan_angle = slant / rect_width if rect_width > 0 else 0
+            ctx.transform(cairo.Matrix(1, tan_angle, 0, 1, 0, 0))
         
         num_segments = int(self.config.get("level_bar_segment_count", 30))
         spacing = float(self.config.get("level_bar_spacing", 2))
@@ -380,14 +451,18 @@ class LevelBarDisplayer(DataDisplayer):
 
         if orientation == "vertical":
             segment_height = (rect_height - (num_segments - 1) * spacing) / num_segments if num_segments > 0 else 0
-            if segment_height <= 0: ctx.restore(); return
         else: # Horizontal
             segment_width = (rect_width - (num_segments - 1) * spacing) / num_segments if num_segments > 0 else 0
-            if segment_width <= 0: ctx.restore(); return
 
         for i in range(num_segments):
+            is_on_segment = i < self.current_on_level
+            state = self.segment_states[i]
+            is_fading_segment = fade_enabled and not state['is_on'] and state['off_timestamp'] > 0 and (now - state['off_timestamp']) < fade_duration_s
+
+            if not (is_on_segment or is_fading_segment): continue
+
             base_color_str = on_color1_str
-            if i < self.current_on_level: 
+            if is_on_segment:
                 if on_grad_enabled and self.current_on_level > 1:
                     base_color_str = self._interpolate_color(i / (self.current_on_level - 1), on_color1_str, on_color2_str).to_string()
                 color_to_use = base_color_str
@@ -399,11 +474,10 @@ class LevelBarDisplayer(DataDisplayer):
                         if on_grad_enabled and self.current_on_level > 1:
                             pulse_target_color_str = self._interpolate_color(i / (self.current_on_level - 1), pulse_color1_str, pulse_color2_str).to_string()
                         color_to_use = self._interpolate_color(fade_factor, base_color_str, pulse_target_color_str).to_string()
+            elif is_fading_segment:
+                color_to_use = self._interpolate_color((now - state['off_timestamp'])/fade_duration_s, on_color1_str, off_color_str).to_string()
             else:
-                state = self.segment_states[i]
-                if fade_enabled and not state['is_on'] and state['off_timestamp'] > 0 and (now - state['off_timestamp']) < fade_duration_s:
-                    color_to_use = self._interpolate_color((now - state['off_timestamp'])/fade_duration_s, on_color1_str, off_color_str).to_string()
-                else: color_to_use = off_color_str
+                continue
             
             color_rgba = Gdk.RGBA(); color_rgba.parse(color_to_use)
             ctx.set_source_rgba(color_rgba.red, color_rgba.green, color_rgba.blue, color_rgba.alpha)

@@ -723,11 +723,10 @@ class AnalogClockDisplayer(DataDisplayer):
         vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin_top=15, margin_bottom=15, margin_start=15, margin_end=15)
         content_area.append(vbox)
 
-        # FIX 1: Read from the safe, cached data instead of the live data_source.
         if self._current_time_data.get("is_timer_running") or self._current_time_data.get("is_timer_ringing"):
             vbox.append(Gtk.Label(label="A timer is currently active."))
-            # FIX 2: Use a valid Gtk.ResponseType member, like REJECT.
-            stop_btn = dialog.add_styled_button("_Stop Timer", Gtk.ResponseType.REJECT, "destructive-action")
+            # --- BUG FIX: Use a valid Gtk.ResponseType member ---
+            stop_btn = dialog.add_styled_button("_Stop Timer", Gtk.ResponseType.CLOSE, "destructive-action")
         else:
             grid = Gtk.Grid(column_spacing=10, row_spacing=5)
             vbox.append(grid)
@@ -765,12 +764,11 @@ class AnalogClockDisplayer(DataDisplayer):
             s = s_spin.get_value_as_int()
             total_seconds = h * 3600 + m * 60 + s
             data_source.start_timer(total_seconds)
-        # FIX 3: Check for the corrected ResponseType here as well.
-        elif response == Gtk.ResponseType.REJECT:
+        # --- BUG FIX: Check for the corrected ResponseType here as well ---
+        elif response == Gtk.ResponseType.CLOSE:
             data_source.cancel_timer()
             self.panel_ref.exit_alarm_state()
             if self._sound_player: self._sound_player.set_state(Gst.State.NULL)
         
         dialog.destroy()
         self.drawing_area.queue_draw()
-
