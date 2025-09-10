@@ -135,12 +135,24 @@ class ArcComboDisplayer(ComboBase):
             source_arc_combo = Gtk.ComboBoxText()
             copy_grid.attach(Gtk.Label(label="Source Arc:", xalign=1), 0, 0, 1, 1)
             copy_grid.attach(source_arc_combo, 1, 0, 1, 1)
+            
             copy_checkboxes = { "Angles": Gtk.CheckButton(label="Angles (Start/End)"), "Colors": Gtk.CheckButton(label="Colors (FG/BG)"), "Line Style": Gtk.CheckButton(label="Line Style (Cap/Width/Fill)"), "Label Style": Gtk.CheckButton(label="Label Style (Font/Color/Invert)"), "Label Content": Gtk.CheckButton(label="Label Content & Position") }
             for i, (key, chk) in enumerate(copy_checkboxes.items()):
                 chk.set_active(True); copy_grid.attach(chk, 0, i + 1, 2, 1)
-            apply_style_button = Gtk.Button(label="Apply Selected Style to All Other Arcs")
-            copy_grid.attach(apply_style_button, 0, len(copy_checkboxes) + 2, 2, 1)
             
+            copy_grid.attach(Gtk.Separator(margin_top=5, margin_bottom=5), 0, len(copy_checkboxes) + 1, 2, 1)
+            dest_label = Gtk.Label(label="<b>Apply to:</b>", xalign=0, use_markup=True)
+            copy_grid.attach(dest_label, 0, len(copy_checkboxes) + 2, 2, 1)
+            
+            dest_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, min_content_height=100)
+            dest_flowbox = Gtk.FlowBox(valign=Gtk.Align.START, max_children_per_line=4, min_children_per_line=2, selection_mode=Gtk.SelectionMode.NONE)
+            dest_scroll.set_child(dest_flowbox)
+            copy_grid.attach(dest_scroll, 0, len(copy_checkboxes) + 3, 2, 1)
+            
+            dest_arc_checkboxes = {}
+            apply_style_button = Gtk.Button(label="Apply to Selected Arcs")
+            copy_grid.attach(apply_style_button, 0, len(copy_checkboxes) + 4, 2, 1)
+
             effects_box.append(Gtk.Separator(margin_top=15, margin_bottom=10))
             effects_box.append(Gtk.Label(label="<b>Apply Color Gradient</b>", xalign=0, use_markup=True))
             grad_grid = Gtk.Grid(column_spacing=10, row_spacing=10)
@@ -185,24 +197,26 @@ class ArcComboDisplayer(ComboBase):
             property_map = { "Angles": ["start_angle", "end_angle"], "Colors": ["bg_color", "fg_color"], "Line Style": ["line_cap_style", "fill_direction", "width_factor"], "Label Style": ["label_font", "label_color", "label_inverted"], "Label Content": ["label_position", "label_content"] }
 
             def on_apply_same_style_clicked(button):
-                arc_count = widgets["combo_arc_count"].get_value_as_int()
                 source_arc_id_str = source_arc_combo.get_active_id()
                 if not source_arc_id_str: return
                 source_index = int(source_arc_id_str)
+                
                 keys_to_copy = []
                 for key, chk in copy_checkboxes.items():
                     if chk.get_active(): keys_to_copy.extend(property_map.get(key, []))
-                for i in range(1, arc_count + 1):
-                    if i == source_index: continue 
-                    for key_suffix in keys_to_copy:
-                        source_key, dest_key = f"arc{source_index}_{key_suffix}", f"arc{i}_{key_suffix}"
-                        source_widget, dest_widget = widgets.get(source_key), widgets.get(dest_key)
-                        if source_widget and dest_widget:
-                            if isinstance(source_widget, (Gtk.SpinButton, Gtk.Scale)): dest_widget.set_value(source_widget.get_value())
-                            elif isinstance(source_widget, Gtk.ColorButton): dest_widget.set_rgba(source_widget.get_rgba())
-                            elif isinstance(source_widget, Gtk.FontButton): dest_widget.set_font(source_widget.get_font())
-                            elif isinstance(source_widget, Gtk.ComboBoxText): dest_widget.set_active_id(source_widget.get_active_id())
-                            elif isinstance(source_widget, Gtk.Switch): dest_widget.set_active(source_widget.get_active())
+                
+                for dest_index, chk in dest_arc_checkboxes.items():
+                    if chk.get_active():
+                        for key_suffix in keys_to_copy:
+                            source_key, dest_key = f"arc{source_index}_{key_suffix}", f"arc{dest_index}_{key_suffix}"
+                            source_widget, dest_widget = widgets.get(source_key), widgets.get(dest_key)
+                            if source_widget and dest_widget:
+                                if isinstance(source_widget, (Gtk.SpinButton, Gtk.Scale)): dest_widget.set_value(source_widget.get_value())
+                                elif isinstance(source_widget, Gtk.ColorButton): dest_widget.set_rgba(source_widget.get_rgba())
+                                elif isinstance(source_widget, Gtk.FontButton): dest_widget.set_font(source_widget.get_font())
+                                elif isinstance(source_widget, Gtk.ComboBoxText): dest_widget.set_active_id(source_widget.get_active_id())
+                                elif isinstance(source_widget, Gtk.Switch): dest_widget.set_active(source_widget.get_active())
+
             apply_style_button.connect("clicked", on_apply_same_style_clicked)
 
             arc_tabs_content = []
@@ -215,8 +229,25 @@ class ArcComboDisplayer(ComboBase):
                 arc_model = {f"Arc {i} Style": full_model[f"Arc {i} Style"]}
                 build_ui_from_model(tab_box, panel_config, arc_model, widgets)
 
+            # --- BUG FIX: Refactored to remove recursion ---
+            def update_destination_checkboxes():
+                count = widgets["combo_arc_count"].get_value_as_int()
+                dest_arc_checkboxes.clear()
+                child = dest_flowbox.get_first_child()
+                while child: dest_flowbox.remove(child); child = dest_flowbox.get_first_child()
+                
+                source_id_str = source_arc_combo.get_active_id()
+                source_index = int(source_id_str) if source_id_str else -1
+
+                for i in range(1, count + 1):
+                    if i == source_index: continue
+                    chk = Gtk.CheckButton(label=f"Arc {i}"); chk.set_active(True)
+                    dest_flowbox.append(chk)
+                    dest_arc_checkboxes[i] = chk
+
             def on_arc_count_changed(spinner):
                 count = spinner.get_value_as_int()
+                
                 source_arc_combo.remove_all(); grad_start_arc_combo.remove_all(); grad_end_arc_combo.remove_all()
                 for i in range(1, count + 1):
                     source_arc_combo.append(id=str(i), text=f"Arc {i}")
@@ -228,10 +259,14 @@ class ArcComboDisplayer(ComboBase):
                 for i, content_widget in enumerate(arc_tabs_content):
                     content_widget.set_visible(i < count)
 
+                update_destination_checkboxes()
+
             arc_count_spinner = widgets.get("combo_arc_count")
             if arc_count_spinner: 
                 arc_count_spinner.connect("value-changed", on_arc_count_changed)
+                source_arc_combo.connect("changed", lambda c: update_destination_checkboxes())
                 GLib.idle_add(on_arc_count_changed, arc_count_spinner)
+            # --- END BUG FIX ---
 
         return build_style_tabs
 
@@ -464,7 +499,6 @@ class ArcComboDisplayer(ComboBase):
             ctx.stroke()
 
     def _draw_text_on_arc(self, ctx, cx, cy, radius, arc_width, text, index, start_angle, total_angle):
-        # --- FIX: Create a robust list of character data instead of parallel lists ---
         rgba = Gdk.RGBA(); rgba.parse(self.config.get(f"arc{index}_label_color")); ctx.set_source_rgba(rgba.red, rgba.green, rgba.blue, rgba.alpha)
         layout = PangoCairo.create_layout(ctx); layout.set_font_description(Pango.FontDescription.from_string(self.config.get(f"arc{index}_label_font")))
         
@@ -472,7 +506,6 @@ class ArcComboDisplayer(ComboBase):
         if is_inverted:
             text = text[::-1]
 
-        # --- FIX: Create a single source of truth for character data ---
         char_data = []
         for char in text:
             layout.set_text(char, -1)
@@ -499,7 +532,6 @@ class ArcComboDisplayer(ComboBase):
             char_angle_step = 1
         
         ctx.save(); ctx.translate(cx, cy)
-        # --- FIX: Iterate over the robust char_data list ---
         for item in char_data:
             char = item['char']
             char_angle = item['angle']
@@ -521,3 +553,4 @@ class ArcComboDisplayer(ComboBase):
     def close(self):
         self._stop_animation_timer()
         super().close()
+

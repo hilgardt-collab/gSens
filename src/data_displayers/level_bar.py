@@ -130,6 +130,8 @@ class LevelBarDisplayer(DataDisplayer):
             ConfigOption("level_bar_fade_enabled", "bool", "Enable 'Off' Fade Out:", "True"), 
             ConfigOption("level_bar_fade_duration_ms", "spinner", "'Off' Fade Duration (ms):", 500, 50, 2000, 50, 0),
             ConfigOption("level_bar_on_gradient_enabled", "bool", "Enable 'On' Color Gradient:", "False"),
+            ConfigOption("level_bar_gradient_mode", "dropdown", "Gradient Mode:", "full", 
+                         options_dict={"Over Full Bar": "full", "Over Active Segments": "active"}),
             ConfigOption("level_bar_on_color2", "color", "End 'On' Color:", "rgba(255,255,0,1)"),
             ConfigOption("level_bar_on_pulse_enabled", "bool", "Enable 'On' Color Pulse:", "False"),
             ConfigOption("level_bar_on_pulse_color1", "color", "Pulse Start Color:", "rgba(170,220,255,1)"),
@@ -163,6 +165,7 @@ class LevelBarDisplayer(DataDisplayer):
                 layout_combo = widgets["level_bar_text_layout"]
                 split_ratio_scale = widgets["level_bar_split_ratio"]
                 grad_end_color = widgets["level_bar_on_color2"].get_parent()
+                grad_mode_combo = widgets["level_bar_gradient_mode"].get_parent()
                 pulse_start_color = widgets["level_bar_on_pulse_color1"].get_parent()
                 pulse_end_color = widgets["level_bar_on_pulse_color2"].get_parent()
                 pulse_duration = widgets["level_bar_on_pulse_duration_ms"].get_parent()
@@ -173,6 +176,7 @@ class LevelBarDisplayer(DataDisplayer):
                 is_grad = grad_switch.get_active()
                 is_pulse = pulse_switch.get_active()
                 grad_end_color.set_visible(is_grad)
+                grad_mode_combo.set_visible(is_grad)
                 pulse_start_color.set_visible(is_pulse)
                 pulse_end_color.set_visible(is_pulse)
                 pulse_duration.set_visible(is_pulse)
@@ -198,7 +202,7 @@ class LevelBarDisplayer(DataDisplayer):
         super().apply_styles()
         self._sync_state_with_config()
         
-        # Invalidate the cache whenever styles change
+        # Invalidate the cache whenever styles change to apply new geometry/colors
         self._static_surface = None
         
         if self.widget.get_realized(): self._start_animation_timer()
@@ -344,7 +348,7 @@ class LevelBarDisplayer(DataDisplayer):
             self._static_surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, int(bar_width), int(bar_height))
             static_ctx = cairo.Context(self._static_surface)
             # Draw the static elements (background, all 'off' segments) onto the cache
-            self._draw_static_bar_elements(static_ctx, bar_width, bar_height)
+            self._draw_static_bar_elements(static_ctx, bar_width, bar_height, self.config)
             # Update cache dimensions
             self._last_draw_width, self._last_draw_height = bar_width, bar_height
 
@@ -358,13 +362,14 @@ class LevelBarDisplayer(DataDisplayer):
         # Draw only the dynamic elements (on/fading segments) on the main context
         ctx.save()
         ctx.translate(bar_x, bar_y)
-        self._draw_dynamic_bar_elements(ctx, bar_width, bar_height)
+        self._draw_dynamic_bar_elements(ctx, bar_width, bar_height, self.config, self.current_on_level, self.segment_states)
         ctx.restore()
 
-    def _draw_static_bar_elements(self, ctx, bar_width, bar_height):
+    @staticmethod
+    def _draw_static_bar_elements(ctx, bar_width, bar_height, config):
         """Draws elements that don't change frame-to-frame onto a surface."""
-        slant = float(self.config.get("level_bar_slant_px", 0))
-        orientation = self.config.get("level_bar_orientation", "vertical")
+        slant = float(config.get("level_bar_slant_px", 0))
+        orientation = config.get("level_bar_orientation", "vertical")
         
         ctx.save()
 
@@ -385,14 +390,14 @@ class LevelBarDisplayer(DataDisplayer):
             ctx.transform(cairo.Matrix(1, tan_angle, 0, 1, 0, 0))
 
         # Draw main background
-        bg_rgba = Gdk.RGBA(); bg_rgba.parse(self.config.get("level_bar_background_color"))
+        bg_rgba = Gdk.RGBA(); bg_rgba.parse(config.get("level_bar_background_color"))
         ctx.set_source_rgba(bg_rgba.red, bg_rgba.green, bg_rgba.blue, bg_rgba.alpha)
         ctx.rectangle(0, 0, rect_width, rect_height); ctx.fill()
 
         # Draw all segments in their OFF state
-        num_segments = int(self.config.get("level_bar_segment_count", 30))
-        spacing = float(self.config.get("level_bar_spacing", 2))
-        off_color = Gdk.RGBA(); off_color.parse(self.config.get("level_bar_off_color"))
+        num_segments = int(config.get("level_bar_segment_count", 30))
+        spacing = float(config.get("level_bar_spacing", 2))
+        off_color = Gdk.RGBA(); off_color.parse(config.get("level_bar_off_color"))
         ctx.set_source_rgba(off_color.red, off_color.green, off_color.blue, off_color.alpha)
 
         if orientation == "vertical":
@@ -413,10 +418,11 @@ class LevelBarDisplayer(DataDisplayer):
         
         ctx.restore()
 
-    def _draw_dynamic_bar_elements(self, ctx, bar_width, bar_height):
+    @staticmethod
+    def _draw_dynamic_bar_elements(ctx, bar_width, bar_height, config, current_on_level, segment_states):
         """Draws elements that change frame-to-frame (on, fading, pulsing)."""
-        slant = float(self.config.get("level_bar_slant_px", 0))
-        orientation = self.config.get("level_bar_orientation", "vertical")
+        slant = float(config.get("level_bar_slant_px", 0))
+        orientation = config.get("level_bar_orientation", "vertical")
         
         ctx.save()
 
@@ -436,18 +442,18 @@ class LevelBarDisplayer(DataDisplayer):
             tan_angle = slant / rect_width if rect_width > 0 else 0
             ctx.transform(cairo.Matrix(1, tan_angle, 0, 1, 0, 0))
         
-        num_segments = int(self.config.get("level_bar_segment_count", 30))
-        spacing = float(self.config.get("level_bar_spacing", 2))
-        on_color1_str = self.config.get("level_bar_on_color")
-        off_color_str = self.config.get("level_bar_off_color")
-        fade_enabled = str(self.config.get("level_bar_fade_enabled", "True")).lower() == 'true'
-        fade_duration_s = float(self.config.get("level_bar_fade_duration_ms", 500))/1000.0
+        num_segments = int(config.get("level_bar_segment_count", 30))
+        spacing = float(config.get("level_bar_spacing", 2))
+        on_color1_str = config.get("level_bar_on_color")
+        off_color_str = config.get("level_bar_off_color")
+        fade_enabled = str(config.get("level_bar_fade_enabled", "True")).lower() == 'true'
+        fade_duration_s = float(config.get("level_bar_fade_duration_ms", 500))/1000.0
         now = time.monotonic()
-        on_grad_enabled = str(self.config.get("level_bar_on_gradient_enabled", "False")).lower() == 'true'
-        on_pulse_enabled = str(self.config.get("level_bar_on_pulse_enabled", "False")).lower() == 'true'
-        on_color2_str = self.config.get("level_bar_on_color2")
-        pulse_color1_str = self.config.get("level_bar_on_pulse_color1")
-        pulse_color2_str = self.config.get("level_bar_on_pulse_color2")
+        on_grad_enabled = str(config.get("level_bar_on_gradient_enabled", "False")).lower() == 'true'
+        on_pulse_enabled = str(config.get("level_bar_on_pulse_enabled", "False")).lower() == 'true'
+        on_color2_str = config.get("level_bar_on_color2")
+        pulse_color1_str = config.get("level_bar_on_pulse_color1")
+        pulse_color2_str = config.get("level_bar_on_pulse_color2")
 
         if orientation == "vertical":
             segment_height = (rect_height - (num_segments - 1) * spacing) / num_segments if num_segments > 0 else 0
@@ -455,27 +461,44 @@ class LevelBarDisplayer(DataDisplayer):
             segment_width = (rect_width - (num_segments - 1) * spacing) / num_segments if num_segments > 0 else 0
 
         for i in range(num_segments):
-            is_on_segment = i < self.current_on_level
-            state = self.segment_states[i]
+            is_on_segment = i < current_on_level
+            state = segment_states[i]
             is_fading_segment = fade_enabled and not state['is_on'] and state['off_timestamp'] > 0 and (now - state['off_timestamp']) < fade_duration_s
 
             if not (is_on_segment or is_fading_segment): continue
 
             base_color_str = on_color1_str
             if is_on_segment:
-                if on_grad_enabled and self.current_on_level > 1:
-                    base_color_str = self._interpolate_color(i / (self.current_on_level - 1), on_color1_str, on_color2_str).to_string()
+                if on_grad_enabled:
+                    grad_mode = config.get("level_bar_gradient_mode", "full")
+                    if grad_mode == 'full' and num_segments > 1:
+                        denominator = num_segments - 1
+                    elif current_on_level > 1: # 'active' mode
+                        denominator = current_on_level - 1
+                    else:
+                        denominator = 1 # Avoid division by zero
+
+                    factor = i / denominator if denominator > 0 else 0.0
+                    base_color_str = DataDisplayer._interpolate_color(None, factor, on_color1_str, on_color2_str).to_string()
+                
                 color_to_use = base_color_str
                 if on_pulse_enabled:
-                    pulse_duration_s = float(self.config.get("level_bar_on_pulse_duration_ms", 1000)) / 1000.0
+                    pulse_duration_s = float(config.get("level_bar_on_pulse_duration_ms", 1000)) / 1000.0
                     if pulse_duration_s > 0:
                         fade_factor = (math.sin(now * (2 * math.pi) / pulse_duration_s) + 1) / 2.0
                         pulse_target_color_str = pulse_color1_str
-                        if on_grad_enabled and self.current_on_level > 1:
-                            pulse_target_color_str = self._interpolate_color(i / (self.current_on_level - 1), pulse_color1_str, pulse_color2_str).to_string()
-                        color_to_use = self._interpolate_color(fade_factor, base_color_str, pulse_target_color_str).to_string()
+                        if on_grad_enabled: # Apply same logic to pulse target
+                            grad_mode = config.get("level_bar_gradient_mode", "full")
+                            if grad_mode == 'full' and num_segments > 1: denominator = num_segments - 1
+                            elif current_on_level > 1: denominator = current_on_level - 1
+                            else: denominator = 1
+                            factor = i / denominator if denominator > 0 else 0.0
+                            pulse_target_color_str = DataDisplayer._interpolate_color(None, factor, pulse_color1_str, pulse_color2_str).to_string()
+
+                        color_to_use = DataDisplayer._interpolate_color(None, fade_factor, base_color_str, pulse_target_color_str).to_string()
+            
             elif is_fading_segment:
-                color_to_use = self._interpolate_color((now - state['off_timestamp'])/fade_duration_s, on_color1_str, off_color_str).to_string()
+                color_to_use = DataDisplayer._interpolate_color(None, (now - state['off_timestamp'])/fade_duration_s, on_color1_str, off_color_str).to_string()
             else:
                 continue
             
@@ -494,3 +517,4 @@ class LevelBarDisplayer(DataDisplayer):
 
     def close(self):
         self._stop_animation_timer(); super().close()
+

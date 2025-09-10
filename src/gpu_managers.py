@@ -37,7 +37,9 @@ class GPUManager:
         self.intel_manager.init()
         
         # Build a unified list of all detected GPUs
-        if self.nvml_manager.nvml_is_available:
+        # --- FIX: Check device_count instead of nvml_is_available ---
+        # This ensures GPUs are listed even if the monitoring library fails to init.
+        if self.nvml_manager.device_count > 0:
             for i in range(self.nvml_manager.device_count):
                 self.all_gpus.append({"vendor": "nvidia", "original_index": i})
         
@@ -164,4 +166,3 @@ class GPUManager:
 
 # Create a single global instance of the unified manager
 gpu_manager = GPUManager()
-

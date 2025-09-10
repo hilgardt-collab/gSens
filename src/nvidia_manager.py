@@ -1,5 +1,7 @@
 # nvidia_manager.py
 # A singleton manager for handling all NVML (NVIDIA Management Library) interactions.
+import os
+import glob
 
 try:
     import pynvml
@@ -26,9 +28,30 @@ class NVMLManager:
         self._initialized = True
 
     def init(self):
-        """Initializes the NVML library and gets device handles."""
+        """Initializes the manager, first checking for physical hardware
+        via sysfs and then attempting to connect via the NVML library."""
+        
+        # --- NEW: Robust hardware check using sysfs ---
+        sysfs_device_count = 0
+        drm_path = "/sys/class/drm/"
+        if os.path.isdir(drm_path):
+            card_paths = sorted(glob.glob(os.path.join(drm_path, "card[0-9]*")))
+            for card_path in card_paths:
+                try:
+                    vendor_path = os.path.join(card_path, "device/vendor")
+                    with open(vendor_path, 'r') as f:
+                        vendor_id = f.read().strip()
+                    # NVIDIA's PCI vendor ID is 0x10de
+                    if vendor_id == "0x10de":
+                        sysfs_device_count += 1
+                except Exception:
+                    continue # Ignore errors on non-GPU devices
+
+        # --- MODIFIED: NVML initialization ---
         if not PYNML_AVAILABLE:
-            print("pynvml library not found. GPU monitoring will fall back to nvidia-smi command.")
+            print("pynvml library not found. NVIDIA GPU monitoring is disabled.")
+            self.device_count = sysfs_device_count # Still report presence
+            self.nvml_is_available = False
             return
 
         try:
@@ -36,10 +59,16 @@ class NVMLManager:
             self.device_count = pynvml.nvmlDeviceGetCount()
             self.device_handles = [pynvml.nvmlDeviceGetHandleByIndex(i) for i in range(self.device_count)]
             self.nvml_is_available = True
-            print(f"NVML initialized successfully. Found {self.device_count} GPU(s).")
+            print(f"NVML initialized successfully. Found {self.device_count} NVIDIA GPU(s).")
         except pynvml.NVMLError as e:
-            print(f"Failed to initialize NVML: {e}. GPU monitoring will fall back to nvidia-smi.")
+            print(f"Failed to initialize NVML: {e}. NVIDIA GPU data will be unavailable.")
             self.nvml_is_available = False
+            # --- FALLBACK: Use sysfs count if NVML fails but hardware exists ---
+            if sysfs_device_count > 0:
+                self.device_count = sysfs_device_count
+                print(f"Detected {sysfs_device_count} NVIDIA GPU(s) via sysfs, but NVML failed. The card might be in a low-power state.")
+            else:
+                self.device_count = 0
 
     def shutdown(self):
         """Shuts down the NVML library."""

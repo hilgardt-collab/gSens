@@ -577,6 +577,13 @@ class LCARSComboDisplayer(ComboBase):
             if key.startswith(f"{prefix}_"):
                 unprefixed_key = key[len(prefix) + 1:]
                 drawer_config[unprefixed_key] = value
+        
+        # --- BUG FIX: Manually inject min/max from data packet into the drawer's config ---
+        if 'min_value' in data and data['min_value'] is not None:
+            drawer_config['graph_min_value'] = data['min_value']
+        if 'max_value' in data and data['max_value'] is not None:
+            drawer_config['graph_max_value'] = data['max_value']
+        # --- END BUG FIX ---
 
         lcars_bg_color = self.config.get(f"{prefix}_graph_lcars_bg_color")
         if lcars_bg_color:
