@@ -27,9 +27,9 @@ from ui_helpers import CustomDialog
 from panel_builder_dialog import PanelBuilderDialog
 from data_panel import DataPanel
 from gpu_managers import gpu_manager
-from update_manager import update_manager # Import the new manager
+from update_manager import update_manager 
 
-# --- FIX: Import sensor data sources for background discovery ---
+# --- Import sensor data sources for background discovery ---
 from data_sources.cpu_source import CPUDataSource
 from data_sources.fan_speed import FanSpeedDataSource
 from data_sources.system_temp import SystemTempDataSource
@@ -48,7 +48,6 @@ class MainWindow(Gtk.ApplicationWindow):
     def __init__(self, app, sensors_ready_event=None):
         super().__init__(title="GTK System Monitor", application=app)
         self.app = app
-        # Store the event object passed from the application
         self.sensors_ready_event = sensors_ready_event
 
         # Use the centrally loaded module data
@@ -82,7 +81,21 @@ class MainWindow(Gtk.ApplicationWindow):
             
         self.connect("notify::fullscreened", self._on_fullscreen_changed)
         self._setup_key_press_controller()
+        GLib.timeout_add(100, self._check_sensors_ready)
+        
         GLib.idle_add(self._apply_startup_fullscreen_settings)
+        
+    def _check_sensors_ready(self):
+        """Periodically checks if the sensor discovery thread is done."""
+        if self.sensors_ready_event and self.sensors_ready_event.is_set():
+            self._on_sensors_ready()
+            return GLib.SOURCE_REMOVE
+        return GLib.SOURCE_CONTINUE 
+
+    def _on_sensors_ready(self):
+        """Called when the background sensor discovery is complete."""
+        self.add_panel_button.set_sensitive(True)
+        return GLib.SOURCE_REMOVE
 
     def _setup_key_press_controller(self):
         key_controller = Gtk.EventControllerKey.new()
@@ -140,9 +153,10 @@ class MainWindow(Gtk.ApplicationWindow):
     def build_header_bar_and_actions(self):
         header = Gtk.HeaderBar(); self.set_titlebar(header)
         
-        add_button = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="Add Panel")
-        add_button.set_action_name("win.add_panel")
-        header.pack_start(add_button)
+        self.add_panel_button = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="Add Panel")
+        self.add_panel_button.set_action_name("win.add_panel")
+        self.add_panel_button.set_sensitive(False) # Initially disabled while scanning
+        header.pack_start(self.add_panel_button)
 
         menu_btn = Gtk.MenuButton(icon_name="open-menu-symbolic", tooltip_text="Menu")
         main_menu = Gio.Menu()
@@ -230,17 +244,12 @@ class MainWindow(Gtk.ApplicationWindow):
 class SystemMonitorApp(Gtk.Application):
     def __init__(self, **kwargs):
         super().__init__(application_id="com.example.gtk-system-monitor", 
-                         # --- FIX: Change the flag to allow multiple instances ---
                          flags=Gio.ApplicationFlags.NON_UNIQUE, **kwargs)
         self.window = None
-        # Create an event to signal when sensor discovery is complete
         self.sensors_ready_event = threading.Event()
 
     def do_activate(self):
-        # --- NOTE: With NON_UNIQUE, this method is called for each new instance ---
-        # The 'self.window' check is now effectively per-instance.
         if not self.window or not self.window.is_visible():
-            # Pass the event to the main window when it's created
             self.window = MainWindow(self, sensors_ready_event=self.sensors_ready_event)
         self.window.present()
 
@@ -260,7 +269,6 @@ class SystemMonitorApp(Gtk.Application):
             print(f"An unexpected error occurred while setting default icon: {e}")
 
         gpu_manager.init()
-        # Start the central update manager's worker thread
         update_manager.start()
         
         sensor_discovery_thread = threading.Thread(target=self._discover_sensors_background, 
@@ -279,8 +287,6 @@ class SystemMonitorApp(Gtk.Application):
     def _discover_sensors_background(self, ready_event):
         """
         Worker function to discover all hardware sensors in the background.
-        This is run in a separate thread at startup to avoid blocking the UI.
-        The results are stored in the global SENSOR_CACHE.
         """
         print("Starting background sensor discovery...")
         try:
@@ -297,11 +303,9 @@ class SystemMonitorApp(Gtk.Application):
             print(f"Error during background sensor discovery: {e}")
         finally:
             print("Background sensor discovery finished.")
-            # Signal that the discovery process is complete
             ready_event.set()
 
     def do_shutdown(self):
-        # Stop the central update manager's worker thread
         update_manager.stop()
         gpu_manager.shutdown()
         Gtk.Application.do_shutdown(self)
@@ -320,3 +324,4 @@ class SystemMonitorApp(Gtk.Application):
 if __name__ == "__main__":
     app = SystemMonitorApp()
     sys.exit(app.run(sys.argv))
+

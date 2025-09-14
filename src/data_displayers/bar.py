@@ -316,4 +316,3 @@ class BarDisplayer(DataDisplayer):
         
         ctx.move_to(draw_x, y)
         PangoCairo.show_layout(ctx, layout)
-

@@ -71,14 +71,9 @@ class DataPanel(BasePanel):
             return
 
         # --- DYNAMIC TITLE LOGIC ---
-        # If the user has NOT set a custom title override, update the panel title
-        # dynamically from the data source's primary label.
         user_set_title = self.config.get("title_text", "").strip()
-        
         source_type = self.config.get('type')
         default_source_name = self.available_sources.get(source_type, {}).get('name', 'Data Panel')
-
-        # We can dynamically update if the user title is blank or is the same as the default source name
         can_dynamically_update = not user_set_title or user_set_title == default_source_name
 
         if can_dynamically_update and value is not None:
@@ -196,7 +191,6 @@ class DataPanel(BasePanel):
 
         parent_window = self.get_ancestor(Gtk.Window)
         
-        # Determine initial title for the dialog
         source_type = self.config.get('type')
         default_source_name = self.available_sources.get(source_type, {}).get('name', 'Data Panel')
         initial_dialog_title = self.config.get('title_text', default_source_name)
@@ -301,10 +295,7 @@ class DataPanel(BasePanel):
             self.config.update(new_conf)
             self.config['displayer_type'] = final_displayer_key
             
-            # --- TITLE LOGIC: If title is now blank, set it from dynamic label ---
             if not self.config.get("title_text", "").strip():
-                # We need data to get the dynamic label, so we just apply the blank
-                # title for now, and process_update will fix it on the next tick.
                 self.title_label.set_text("")
             else:
                 self.title_label.set_text(self.config.get("title_text"))

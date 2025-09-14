@@ -264,6 +264,7 @@ class ArcComboDisplayer(ComboBase):
             arc_count_spinner = widgets.get("combo_arc_count")
             if arc_count_spinner: 
                 arc_count_spinner.connect("value-changed", on_arc_count_changed)
+                # The source combo now only updates the destination list, breaking the loop.
                 source_arc_combo.connect("changed", lambda c: update_destination_checkboxes())
                 GLib.idle_add(on_arc_count_changed, arc_count_spinner)
             # --- END BUG FIX ---

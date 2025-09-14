@@ -2,14 +2,16 @@ import gi
 import math
 import re
 import cairo
+import os
 from data_displayer import DataDisplayer
 from config_dialog import ConfigOption
 from utils import populate_defaults_from_model
+from ui_helpers import build_background_config_ui
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Pango", "1.0")
 gi.require_version("PangoCairo", "1.0")
-from gi.repository import Gtk, Gdk, GLib, Pango, PangoCairo
+from gi.repository import Gtk, Gdk, GLib, Pango, PangoCairo, GdkPixbuf
 
 class ArcGaugeDisplayer(DataDisplayer):
     """
@@ -23,13 +25,14 @@ class ArcGaugeDisplayer(DataDisplayer):
 
         # --- Animation State ---
         self._animation_timer_id = None
-        self._is_first_update = True
         self._current_display_value = 0.0
         self._target_value = 0.0
         
         # --- Caching State ---
         self._static_surface = None
         self._last_draw_width, self._last_draw_height = -1, -1
+        self._cached_bg_pixbuf = None
+        self._cached_image_path = None
         
         super().__init__(panel_ref, config)
         populate_defaults_from_model(self.config, self.get_config_model())
@@ -39,20 +42,22 @@ class ArcGaugeDisplayer(DataDisplayer):
 
     def _create_widget(self):
         self.drawing_area = Gtk.DrawingArea(hexpand=True, vexpand=True)
-        self.drawing_area.set_draw_func(self.on_draw_gauge)
+        self.drawing_area.set_draw_func(self.on_draw)
         return self.drawing_area
 
-    def update_display(self, value):
-        if not self.panel_ref: return
-        new_value = self.panel_ref.data_source.get_numerical_value(value) or 0.0
+    def update_display(self, value, **kwargs):
+        source = self.panel_ref.data_source
+        if 'source_override' in kwargs and kwargs['source_override']:
+            source = kwargs['source_override']
+            
+        new_value = source.get_numerical_value(value) or 0.0
         
-        if self._is_first_update:
-            self._current_display_value = new_value
-            self._is_first_update = False
+        if self._target_value == 0.0 and self._current_display_value == 0.0:
+             self._current_display_value = new_value
 
         self._target_value = new_value
         
-        display_string = self.panel_ref.data_source.get_display_string(value)
+        display_string = source.get_display_string(value)
         
         if display_string and display_string != "N/A":
             match = re.match(r'\s*([+-]?\d+\.?\d*)\s*(.*)', display_string)
@@ -76,7 +81,6 @@ class ArcGaugeDisplayer(DataDisplayer):
             ConfigOption("gauge_yellow_zone_end", "spinner", "Yellow Zone End:", 80, -100000, 100000, 1, 1)
         ]
         model["Gauge Colors"] = [
-            ConfigOption("gauge_bg_color", "color", "Background Color:", "rgba(40, 40, 40, 1.0)"),
             ConfigOption("gauge_green_color", "color", "Green Zone Color:", "rgba(0, 255, 0, 0.8)"),
             ConfigOption("gauge_yellow_color", "color", "Yellow Zone Color:", "rgba(255, 255, 0, 0.8)"),
             ConfigOption("gauge_red_color", "color", "Red Zone Color:", "rgba(255, 0, 0, 0.8)"),
@@ -86,10 +90,11 @@ class ArcGaugeDisplayer(DataDisplayer):
             ConfigOption("gauge_num_lines", "spinner", "Number of Lines:", 60, 12, 200, 1, 0),
             ConfigOption("gauge_start_angle", "spinner", "Start Angle (deg):", 135, 0, 359, 1, 0),
             ConfigOption("gauge_end_angle", "spinner", "End Angle (deg):", 45, 0, 359, 1, 0),
-            ConfigOption("gauge_inner_radius_factor", "scale", "Inner Radius (% of Panel):", 0.6, 0.1, 1.0, 0.05, 2),
-            ConfigOption("gauge_outer_radius_factor", "scale", "Outer Radius (% of Panel):", 0.8, 0.1, 1.0, 0.05, 2),
-            ConfigOption("gauge_active_line_width", "scale", "Active Line Width:", 2.5, 0.5, 10, 0.5, 1),
-            ConfigOption("gauge_inactive_line_width", "scale", "Inactive Line Width:", 1.5, 0.5, 10, 0.5, 1)
+            ConfigOption("gauge_bg_radius_factor", "spinner", "BG Radius (% of Panel):", 0.85, 0.1, 1.5, 0.05, 2),
+            ConfigOption("gauge_inner_radius_factor", "spinner", "Inner Radius (% of Panel):", 0.6, 0.1, 1.0, 0.05, 2),
+            ConfigOption("gauge_outer_radius_factor", "spinner", "Outer Radius (% of Panel):", 0.8, 0.1, 1.0, 0.05, 2),
+            ConfigOption("gauge_active_line_width", "spinner", "Active Line Width:", 2.5, 0.5, 10, 0.5, 1),
+            ConfigOption("gauge_inactive_line_width", "spinner", "Inactive Line Width:", 1.5, 0.5, 10, 0.5, 1)
         ]
         model["Gauge Text"] = [
             ConfigOption("gauge_value_font", "font", "Value Font:", "Sans Bold 48"),
@@ -101,13 +106,30 @@ class ArcGaugeDisplayer(DataDisplayer):
         ]
         model["Animation"] = [
             ConfigOption("gauge_animation_enabled", "bool", "Enable Animation:", "True"),
-            ConfigOption("gauge_animation_duration", "scale", "Animation Duration (ms):", "400", 50, 2000, 50, 0, tooltip="How long the needle takes to travel the full arc.")
+            ConfigOption("gauge_animation_duration", "spinner", "Animation Duration (ms):", "400", 50, 2000, 50, 0, tooltip="How long the needle takes to travel the full arc.")
         ]
         return model
+        
+    @staticmethod
+    def get_config_key_prefixes():
+        return ["gauge_"]
+
+    def get_configure_callback(self):
+        def build_gauge_config(dialog, content_box, widgets, available_sources, panel_config):
+            build_background_config_ui(content_box, panel_config, widgets, dialog, prefix="gauge_", title="Gauge Dial Background")
+        return build_gauge_config
 
     def apply_styles(self):
         super().apply_styles()
-        self._static_surface = None # Invalidate cache on style change
+        image_path = self.config.get("gauge_background_image_path", "")
+        if self._cached_image_path != image_path:
+            self._cached_image_path = image_path
+            try:
+                self._cached_bg_pixbuf = GdkPixbuf.Pixbuf.new_from_file(image_path) if image_path and os.path.exists(image_path) else None
+            except GLib.Error as e:
+                print(f"Error loading gauge image: {e}")
+                self._cached_bg_pixbuf = None
+        self._static_surface = None 
         self.drawing_area.queue_draw()
 
     def _start_animation_timer(self, widget=None):
@@ -156,21 +178,45 @@ class ArcGaugeDisplayer(DataDisplayer):
         self.drawing_area.queue_draw()
         return GLib.SOURCE_CONTINUE
 
-    def on_draw_gauge(self, area, ctx, width, height):
+    def on_draw(self, area, ctx, width_float, height_float):
+        width, height = int(width_float), int(height_float)
         if width <= 0 or height <= 0: return
 
-        # Regenerate static surface if needed
         if not self._static_surface or self._last_draw_width != width or self._last_draw_height != height:
             self._static_surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, width, height)
             static_ctx = cairo.Context(self._static_surface)
             
-            # Draw static background
-            bg_color = Gdk.RGBA(); bg_color.parse(self.config.get("gauge_bg_color", "rgba(40,40,40,1.0)"))
-            static_ctx.set_source_rgba(bg_color.red, bg_color.green, bg_color.blue, bg_color.alpha); static_ctx.paint()
-            
-            # Geometry for static drawing
             cx, cy = width / 2, height / 2
             min_dim = min(width, height)
+            
+            bg_radius = min_dim / 2 * float(self.config.get("gauge_bg_radius_factor", 0.85))
+            
+            if bg_radius > 0:
+                static_ctx.save(); static_ctx.arc(cx, cy, bg_radius, 0, 2 * math.pi); static_ctx.clip()
+                bg_type = self.config.get("gauge_bg_type", "solid")
+                if bg_type == "image" and self._cached_bg_pixbuf:
+                    img_w, img_h = self._cached_bg_pixbuf.get_width(), self._cached_bg_pixbuf.get_height()
+                    scale = max((2*bg_radius)/img_w, (2*bg_radius)/img_h)
+                    static_ctx.save()
+                    static_ctx.translate(cx, cy); static_ctx.scale(scale, scale); static_ctx.translate(-img_w/2, -img_h/2)
+                    Gdk.cairo_set_source_pixbuf(static_ctx, self._cached_bg_pixbuf, 0, 0)
+                    static_ctx.paint_with_alpha(float(self.config.get("gauge_background_image_alpha", 1.0)))
+                    static_ctx.restore()
+                elif bg_type == "gradient_linear":
+                    c1=Gdk.RGBA(); c1.parse(self.config.get("gauge_gradient_linear_color1")); c2=Gdk.RGBA(); c2.parse(self.config.get("gauge_gradient_linear_color2"))
+                    angle = float(self.config.get("gauge_gradient_linear_angle_deg", 90.0)); angle_rad = angle * math.pi / 180
+                    x1, y1, x2, y2 = cx - bg_radius * math.cos(angle_rad), cy - bg_radius * math.sin(angle_rad), cx + bg_radius * math.cos(angle_rad), cy + bg_radius * math.sin(angle_rad)
+                    pat = cairo.LinearGradient(x1, y1, x2, y2); pat.add_color_stop_rgba(0, c1.red,c1.green,c1.blue,c1.alpha); pat.add_color_stop_rgba(1, c2.red,c2.green,c2.blue,c2.alpha)
+                    static_ctx.set_source(pat); static_ctx.paint()
+                elif bg_type == "gradient_radial":
+                    c1=Gdk.RGBA(); c1.parse(self.config.get("gauge_gradient_radial_color1")); c2=Gdk.RGBA(); c2.parse(self.config.get("gauge_gradient_radial_color2"))
+                    pat = cairo.RadialGradient(cx, cy, 0, cx, cy, bg_radius); pat.add_color_stop_rgba(0, c1.red,c1.green,c1.blue,c1.alpha); pat.add_color_stop_rgba(1, c2.red,c2.green,c2.blue,c2.alpha)
+                    static_ctx.set_source(pat); static_ctx.paint()
+                else:
+                    bg_color = Gdk.RGBA(); bg_color.parse(self.config.get("gauge_bg_color", "rgba(40,40,40,1.0)"))
+                    static_ctx.set_source_rgba(bg_color.red, bg_color.green, bg_color.blue, bg_color.alpha); static_ctx.paint()
+                static_ctx.restore()
+            
             inner_r = min_dim / 2 * float(self.config.get("gauge_inner_radius_factor", 0.6))
             outer_r = min_dim / 2 * float(self.config.get("gauge_outer_radius_factor", 0.8))
             start_angle = math.radians(float(self.config.get("gauge_start_angle", 135)))
@@ -180,7 +226,6 @@ class ArcGaugeDisplayer(DataDisplayer):
             if total_angle <= 0: total_angle += 2 * math.pi
             angle_step = total_angle / (num_lines - 1) if num_lines > 1 else 0
 
-            # Draw all segments in INACTIVE state
             inactive_c = Gdk.RGBA(); inactive_c.parse(self.config.get("gauge_inactive_color"))
             inactive_width = float(self.config.get("gauge_inactive_line_width", 1.5))
             static_ctx.set_line_width(inactive_width)
@@ -194,13 +239,8 @@ class ArcGaugeDisplayer(DataDisplayer):
 
             self._last_draw_width, self._last_draw_height = width, height
 
-        # Paint the cached surface
-        ctx.set_source_surface(self._static_surface, 0, 0)
-        ctx.paint()
+        ctx.set_source_surface(self._static_surface, 0, 0); ctx.paint()
 
-        # --- DYNAMIC DRAWING ---
-
-        # Geometry Calculations
         cx, cy = width / 2, height / 2
         min_dim = min(width, height)
         inner_r = min_dim / 2 * float(self.config.get("gauge_inner_radius_factor", 0.6))
@@ -212,7 +252,6 @@ class ArcGaugeDisplayer(DataDisplayer):
         if total_angle <= 0: total_angle += 2 * math.pi
         angle_step = total_angle / (num_lines - 1) if num_lines > 1 else 0
 
-        # Value & Zone Calculations
         min_v = float(self.config.get("gauge_min_value", 0))
         max_v = float(self.config.get("gauge_max_value", 100))
         v_range = max_v - min_v if max_v > min_v else 1
@@ -222,13 +261,11 @@ class ArcGaugeDisplayer(DataDisplayer):
         value_ratio = (min(max(self._current_display_value, min_v), max_v) - min_v) / v_range
         active_line_count = int(round(value_ratio * num_lines))
 
-        # Colors & Line Widths
         green_c = Gdk.RGBA(); green_c.parse(self.config.get("gauge_green_color"))
         yellow_c = Gdk.RGBA(); yellow_c.parse(self.config.get("gauge_yellow_color"))
         red_c = Gdk.RGBA(); red_c.parse(self.config.get("gauge_red_color"))
         active_width = float(self.config.get("gauge_active_line_width", 2.5))
 
-        # Draw ACTIVE Segments
         ctx.set_line_width(active_width)
         for i in range(active_line_count):
             segment_value = min_v + (i / (num_lines -1)) * v_range if num_lines > 1 else min_v
@@ -244,7 +281,6 @@ class ArcGaugeDisplayer(DataDisplayer):
             x2, y2 = cx + math.cos(angle) * outer_r, cy + math.sin(angle) * outer_r
             ctx.move_to(x1, y1); ctx.line_to(x2, y2); ctx.stroke()
 
-        # Draw Text
         layout_v = PangoCairo.create_layout(ctx)
         layout_v.set_font_description(Pango.FontDescription.from_string(self.config.get("gauge_value_font", "Sans Bold 48")))
         layout_v.set_text(self.display_value_text, -1)
@@ -273,3 +309,4 @@ class ArcGaugeDisplayer(DataDisplayer):
     def close(self):
         self._stop_animation_timer()
         super().close()
+

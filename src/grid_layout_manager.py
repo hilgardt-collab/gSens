@@ -20,7 +20,6 @@ class GridLayoutManager(Gtk.Fixed):
     """
     def __init__(self, available_sources, available_displayers, all_source_classes):
         super().__init__()
-        # --- FIX: Store the available sources list passed down from the main window ---
         self.AVAILABLE_DATA_SOURCES = available_sources
         self.AVAILABLE_DISPLAYERS = available_displayers
         self.ALL_SOURCE_CLASSES = all_source_classes
@@ -113,6 +112,11 @@ class GridLayoutManager(Gtk.Fixed):
             source_info = self.AVAILABLE_DATA_SOURCES[type_id]
             disp_key = config_dict.get('displayer_type')
             
+            # --- FIX: If config has old 'combo' key, map it to the new 'arc_combo' key for backward compatibility ---
+            if disp_key == 'combo':
+                disp_key = 'arc_combo'
+                config_dict['displayer_type'] = 'arc_combo'
+            
             if not disp_key or disp_key not in source_info['displayers']:
                 disp_key = source_info['displayers'][0] if source_info['displayers'] else None
             
@@ -123,7 +127,6 @@ class GridLayoutManager(Gtk.Fixed):
                 source = SourceClass(config=config_dict)
                 displayer = DisplayerClass(panel_ref=None, config=config_dict)
                 
-                # --- FIX: Pass the available sources list to the DataPanel constructor ---
                 return DataPanel(
                     config=config_dict, 
                     data_source=source, 
@@ -401,7 +404,6 @@ class GridLayoutManager(Gtk.Fixed):
         
         css_rules = []
         
-        # If config data is passed directly, use it. Otherwise, fall back to the global config.
         grid_config = config_data if config_data is not None else config_manager.config["GridLayout"]
         
         bg_type = grid_config.get("grid_bg_type", "solid")
@@ -701,6 +703,7 @@ class GridLayoutManager(Gtk.Fixed):
         if is_valid:
             exclude = self.selected_panel_ids if not self.is_copy_drag else None
             for pid_check in self.selected_panel_ids:
+                if pid_check not in self.drag_panel_offsets: continue
                 offset_x_grid, offset_y_grid = self.drag_panel_offsets[pid_check]
                 w_units, h_units = self.panel_sizes[pid_check]
                 target_x = snapped_group_grid_x + offset_x_grid
@@ -746,14 +749,15 @@ class GridLayoutManager(Gtk.Fixed):
             else: # Move logic
                 max_x, max_y = 0, 0
                 for pid_move in self.selected_panel_ids:
+                    if pid_move not in self.drag_panel_offsets: continue
                     offset_x_grid, offset_y_grid = self.drag_panel_offsets[pid_move]
                     final_x, final_y = snapped_group_grid_x + offset_x_grid, snapped_group_grid_y + offset_y_grid
                     
                     self.panel_positions[pid_move] = (final_x, final_y)
                     self.move(self.panel_widgets[pid_move], final_x * CELL_SIZE, final_y * CELL_SIZE)
                     
-                    self.panel_widgets[pid_move].config["grid_x"] = final_x
-                    self.panel_widgets[pid_move].config["grid_y"] = final_y
+                    self.panel_widgets[pid_move].config["grid_x"] = str(final_x)
+                    self.panel_widgets[pid_move].config["grid_y"] = str(final_y)
                     config_manager.update_panel_config(pid_move, self.panel_widgets[pid_move].config)
                     
                     panel_w, panel_h = self.panel_sizes[pid_move]
@@ -777,3 +781,4 @@ class GridLayoutManager(Gtk.Fixed):
                 y < current_y2 and rect_to_check_y2 > current_y):
                 return True
         return False
+

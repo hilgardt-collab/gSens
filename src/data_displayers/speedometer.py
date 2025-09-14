@@ -2,6 +2,7 @@ import gi
 import math
 import re
 import cairo
+import os
 from data_displayer import DataDisplayer
 from config_dialog import ConfigOption, build_ui_from_model
 from utils import populate_defaults_from_model
@@ -10,7 +11,7 @@ from ui_helpers import build_background_config_ui
 gi.require_version("Gtk", "4.0")
 gi.require_version("Pango", "1.0")
 gi.require_version("PangoCairo", "1.0")
-from gi.repository import Gtk, Gdk, GLib, Pango, PangoCairo
+from gi.repository import Gtk, Gdk, GLib, Pango, PangoCairo, GdkPixbuf
 
 class SpeedometerDisplayer(DataDisplayer):
     """
@@ -24,13 +25,14 @@ class SpeedometerDisplayer(DataDisplayer):
         
         # Animation state
         self._animation_timer_id = None
-        # --- FIX: Initialize current_display_value from config ---
         self._current_display_value = float(config.get("speedo_min_value", 0.0))
         self._target_value = self._current_display_value
         
         # Caching state
         self._static_surface = None
         self._last_draw_width, self._last_draw_height = -1, -1
+        self._cached_bg_pixbuf = None
+        self._cached_image_path = None
         
         super().__init__(panel_ref, config)
         populate_defaults_from_model(self.config, self.get_config_model())
@@ -40,18 +42,18 @@ class SpeedometerDisplayer(DataDisplayer):
 
     def _create_widget(self):
         drawing_area = Gtk.DrawingArea(hexpand=True, vexpand=True)
-        drawing_area.set_draw_func(self.on_draw_speedometer)
+        drawing_area.set_draw_func(self.on_draw)
         return drawing_area
 
-    def update_display(self, value):
-        if not self.panel_ref: return
-        new_value = self.panel_ref.data_source.get_numerical_value(value) or 0.0
-        
-        # --- FIX: Remove the special-casing for the first update ---
-        # Always set the target and let the animation handle it.
+    def update_display(self, value, **kwargs):
+        source = self.panel_ref.data_source
+        if 'source_override' in kwargs and kwargs['source_override']:
+            source = kwargs['source_override']
+            
+        new_value = source.get_numerical_value(value) or 0.0
         self._target_value = new_value
         
-        display_string = self.panel_ref.data_source.get_display_string(value)
+        display_string = source.get_display_string(value)
         
         if display_string and display_string != "N/A":
             match = re.match(r'\s*([+-]?\d+\.?\d*)\s*(.*)', display_string)
@@ -107,6 +109,15 @@ class SpeedometerDisplayer(DataDisplayer):
 
     def apply_styles(self):
         super().apply_styles()
+        image_path = self.config.get("speedo_background_image_path", "")
+        if self._cached_image_path != image_path:
+            self._cached_image_path = image_path
+            try:
+                self._cached_bg_pixbuf = GdkPixbuf.Pixbuf.new_from_file(image_path) if image_path and os.path.exists(image_path) else None
+            except GLib.Error as e:
+                print(f"Error loading speedometer image: {e}")
+                self._cached_bg_pixbuf = None
+
         self._static_surface = None # Invalidate cache
         self.widget.queue_draw()
 
@@ -140,7 +151,8 @@ class SpeedometerDisplayer(DataDisplayer):
             
         return GLib.SOURCE_CONTINUE
 
-    def on_draw_speedometer(self, area, ctx, width, height):
+    def on_draw(self, area, ctx, width_float, height_float):
+        width, height = int(width_float), int(height_float)
         if width <= 0 or height <= 0: return
 
         if not self._static_surface or self._last_draw_width != width or self._last_draw_height != height:
@@ -168,7 +180,15 @@ class SpeedometerDisplayer(DataDisplayer):
             if radius > 0:
                 static_ctx.save(); static_ctx.arc(cx, cy, radius, 0, 2 * math.pi); static_ctx.clip()
                 bg_type = self.config.get("speedo_bg_type", "solid")
-                if bg_type == "gradient_linear":
+                if bg_type == "image" and self._cached_bg_pixbuf:
+                    img_w, img_h = self._cached_bg_pixbuf.get_width(), self._cached_bg_pixbuf.get_height()
+                    scale = max((2*radius)/img_w, (2*radius)/img_h)
+                    static_ctx.save()
+                    static_ctx.translate(cx, cy); static_ctx.scale(scale, scale); static_ctx.translate(-img_w/2, -img_h/2)
+                    Gdk.cairo_set_source_pixbuf(static_ctx, self._cached_bg_pixbuf, 0, 0)
+                    static_ctx.paint_with_alpha(float(self.config.get("speedo_background_image_alpha", 1.0)))
+                    static_ctx.restore()
+                elif bg_type == "gradient_linear":
                     c1=Gdk.RGBA(); c1.parse(self.config.get("speedo_gradient_linear_color1")); c2=Gdk.RGBA(); c2.parse(self.config.get("speedo_gradient_linear_color2"))
                     angle = float(self.config.get("speedo_gradient_linear_angle_deg", 90.0)); angle_rad = angle * math.pi / 180
                     x1, y1, x2, y2 = cx - radius * math.cos(angle_rad), cy - radius * math.sin(angle_rad), cx + radius * math.cos(angle_rad), cy + radius * math.sin(angle_rad)
@@ -252,3 +272,4 @@ class SpeedometerDisplayer(DataDisplayer):
         ctx.move_to(-radius * 0.1, 0); ctx.line_to(radius * 0.85, 0); ctx.stroke(); ctx.restore()
         
         ctx.arc(cx, cy, radius * 0.05, 0, 2 * math.pi); ctx.fill()
+

@@ -36,9 +36,6 @@ class GPUManager:
         self.amd_manager.init()
         self.intel_manager.init()
         
-        # Build a unified list of all detected GPUs
-        # --- FIX: Check device_count instead of nvml_is_available ---
-        # This ensures GPUs are listed even if the monitoring library fails to init.
         if self.nvml_manager.device_count > 0:
             for i in range(self.nvml_manager.device_count):
                 self.all_gpus.append({"vendor": "nvidia", "original_index": i})
@@ -54,10 +51,19 @@ class GPUManager:
         self.device_count = len(self.all_gpus)
         print(f"Unified GPUManager initialized. Found {self.device_count} total GPU(s).")
 
+    # --- PERF OPT 1: New method to trigger a bulk update on all vendor managers ---
+    def update(self):
+        """
+        Triggers a bulk data update for all supported, present hardware.
+        This is called once per cycle by the main UpdateManager.
+        """
+        self.amd_manager.update()
+        self.intel_manager.update()
+        # NVML manager does not require an explicit update call as pynvml is efficient.
+
     def shutdown(self):
         """Shuts down all vendor-specific managers."""
         self.nvml_manager.shutdown()
-        # AMD and Intel managers do not require a shutdown call
 
     def get_gpu_names(self):
         """Returns a dictionary of combined GPU indices and their names."""

@@ -111,11 +111,7 @@ class FanSpeedDataSource(DataSource):
             try:
                 sensor_combo_key = f"{key_prefix}selected_fan_key"
                 sensor_combo = widgets.get(sensor_combo_key)
-                spinner = widgets.get(f"{key_prefix}fan_spinner")
                 if not sensor_combo: return
-
-                if spinner:
-                    spinner.set_visible(False)
 
                 sensor_combo.remove_all()
                 
@@ -159,22 +155,8 @@ class FanSpeedDataSource(DataSource):
                 fan_combo.connect("changed", on_fan_changed)
                 GLib.idle_add(on_fan_changed, fan_combo)
 
-            row = fan_combo.get_parent()
-            spinner = Gtk.Spinner(spinning=True)
-            widgets[f"{key_prefix}fan_spinner"] = spinner
-            row.append(spinner)
-
-            def check_cache_and_populate():
-                sensors = SENSOR_CACHE.get('fan_speed')
-                if sensors:
-                    _repopulate_sensor_dropdown(widgets, panel_config, prefix)
-                    return GLib.SOURCE_REMOVE
-                return GLib.SOURCE_CONTINUE
-
-            if not SENSOR_CACHE.get('fan_speed'):
-                GLib.timeout_add(200, check_cache_and_populate)
-            else:
-                check_cache_and_populate()
+            # --- BUGFIX 2: Remove spinner and polling logic ---
+            # The main window now ensures the cache is ready before this dialog can open.
+            _repopulate_sensor_dropdown(widgets, panel_config, prefix)
 
         return setup_auto_title_logic
-

@@ -209,6 +209,7 @@ class LevelBarDisplayer(DataDisplayer):
         self.widget.queue_draw()
 
     def on_draw(self, area, ctx, width, height):
+        width, height = int(width), int(height)
         if width <= 0 or height <= 0: return
         
         layout = self.config.get("level_bar_text_layout", "superimposed")
@@ -517,4 +518,3 @@ class LevelBarDisplayer(DataDisplayer):
 
     def close(self):
         self._stop_animation_timer(); super().close()
-

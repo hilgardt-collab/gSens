@@ -1,4 +1,3 @@
-# data_displayers/indicator.py
 import gi
 import math
 import cairo
@@ -15,6 +14,7 @@ class IndicatorDisplayer(DataDisplayer):
     """
     Displays a value as a solid color, interpolated from a user-defined
     gradient with 2 to 10 color stops, with fully configurable text.
+    The indicator can be displayed as a variety of shapes.
     """
     def __init__(self, panel_ref, config):
         self.current_value = 0.0
@@ -26,16 +26,18 @@ class IndicatorDisplayer(DataDisplayer):
 
     def _create_widget(self):
         drawing_area = Gtk.DrawingArea(hexpand=True, vexpand=True)
-        drawing_area.set_draw_func(self.on_draw_indicator)
+        drawing_area.set_draw_func(self.on_draw)
         return drawing_area
 
-    def update_display(self, value):
-        if not self.panel_ref: return # Guard against race condition on close
-        self.current_value = self.panel_ref.data_source.get_numerical_value(value) or 0.0
+    def update_display(self, value, **kwargs):
+        source = kwargs.get('source_override', self.panel_ref.data_source if self.panel_ref else None)
+        if not source: return
+
+        self.current_value = source.get_numerical_value(value) or 0.0
         
-        self.primary_text = self.panel_ref.data_source.get_primary_label_string(value)
-        self.main_text = self.panel_ref.data_source.get_display_string(value)
-        self.secondary_text = self.panel_ref.data_source.get_secondary_display_string(value)
+        self.primary_text = source.get_primary_label_string(value)
+        self.main_text = source.get_display_string(value)
+        self.secondary_text = source.get_secondary_display_string(value)
 
         self.widget.queue_draw()
 
@@ -43,6 +45,16 @@ class IndicatorDisplayer(DataDisplayer):
     def get_config_model():
         model = DataDisplayer.get_config_model()
         
+        model["Indicator Shape"] = [
+            ConfigOption("indicator_shape", "dropdown", "Shape:", "full_panel", 
+                         options_dict={"Full Panel": "full_panel", "Circle": "circle", 
+                                       "Square": "square", "Polygon": "polygon"}),
+            ConfigOption("indicator_shape_padding", "spinner", "Padding (px):", 10, 0, 100, 1, 0),
+            ConfigOption("indicator_square_keep_aspect", "bool", "Keep Aspect Ratio:", "True",
+                         tooltip="If unchecked, the square will stretch to fill the available space."),
+            ConfigOption("indicator_polygon_sides", "spinner", "Number of Sides:", 6, 3, 12, 1, 0)
+        ]
+
         color_stops = [
             ConfigOption("indicator_color_count", "spinner", "Number of Colors:", 3, 2, 10, 1, 0)
         ]
@@ -87,87 +99,125 @@ class IndicatorDisplayer(DataDisplayer):
         return model
 
     def get_configure_callback(self):
-        """A custom callback to dynamically show/hide color stop widgets."""
-        def setup_dynamic_color_stops(dialog, content_box, widgets, available_sources, panel_config):
+        """A custom callback to dynamically show/hide shape and color stop widgets."""
+        def setup_dynamic_options(dialog, content_box, widgets, available_sources, panel_config):
+            # --- Color Stop Logic ---
             color_count_spinner = widgets.get("indicator_color_count")
-            if not color_count_spinner:
-                return
+            if color_count_spinner:
+                stop_widgets = []
+                for i in range(1, 11): 
+                    val_widget = widgets.get(f"indicator_value{i}")
+                    col_widget = widgets.get(f"indicator_color{i}")
+                    if val_widget and col_widget:
+                        stop_widgets.append({
+                            "value_row": val_widget.get_parent(),
+                            "color_row": col_widget.get_parent().get_parent(),
+                        })
 
-            stop_widgets = []
-            for i in range(1, 11): 
-                val_widget = widgets.get(f"indicator_value{i}")
-                col_widget = widgets.get(f"indicator_color{i}")
-                if val_widget and col_widget:
-                    stop_widgets.append({
-                        "value_row": val_widget.get_parent(),
-                        "color_row": col_widget.get_parent().get_parent(),
-                    })
+                def on_color_count_changed(spinner):
+                    count = spinner.get_value_as_int()
+                    for i, widget_group in enumerate(stop_widgets, 1):
+                        is_visible = i <= count
+                        widget_group["value_row"].set_visible(is_visible)
+                        widget_group["color_row"].set_visible(is_visible)
+                        value_widget = widget_group["value_row"].get_first_child()
+                        if i == 1: value_widget.set_text(f"Value for Color 1 (Min):")
+                        elif i == count: value_widget.set_text(f"Value for Color {i} (Max):")
+                        else: value_widget.set_text(f"Value for Color {i}:")
 
-            def on_color_count_changed(spinner):
-                count = spinner.get_value_as_int()
+                color_count_spinner.connect("value-changed", on_color_count_changed)
+                GLib.idle_add(on_color_count_changed, color_count_spinner)
+
+            # --- Shape Logic ---
+            shape_combo = widgets.get("indicator_shape")
+            if shape_combo:
+                aspect_widget = widgets.get("indicator_square_keep_aspect")
+                sides_widget = widgets.get("indicator_polygon_sides")
                 
-                for i, widget_group in enumerate(stop_widgets, 1):
-                    is_visible = i <= count
-                    widget_group["value_row"].set_visible(is_visible)
-                    widget_group["color_row"].set_visible(is_visible)
-                    
-                    value_widget = widget_group["value_row"].get_first_child()
-                    if i == 1:
-                        value_widget.set_text(f"Value for Color 1 (Min):")
-                    elif i == count:
-                        value_widget.set_text(f"Value for Color {i} (Max):")
-                    else:
-                        value_widget.set_text(f"Value for Color {i}:")
+                def on_shape_changed(combo):
+                    shape = combo.get_active_id()
+                    if aspect_widget: aspect_widget.get_parent().set_visible(shape == "square")
+                    if sides_widget: sides_widget.get_parent().set_visible(shape == "polygon")
 
-            color_count_spinner.connect("value-changed", on_color_count_changed)
-            GLib.idle_add(on_color_count_changed, color_count_spinner)
+                shape_combo.connect("changed", on_shape_changed)
+                GLib.idle_add(on_shape_changed, shape_combo)
 
-        return setup_dynamic_color_stops
+        return setup_dynamic_options
 
     def apply_styles(self):
         super().apply_styles()
         self.widget.queue_draw()
 
-    def on_draw_indicator(self, area, ctx, width, height):
+    def on_draw(self, area, ctx, width, height):
         if width <= 0 or height <= 0: return
 
+        # --- Calculate Color ---
         num_stops = int(self.config.get("indicator_color_count", 3))
         stops = []
         for i in range(1, num_stops + 1):
             try:
                 val = float(self.config.get(f"indicator_value{i}"))
-                # --- FIX: Removed the extra closing parenthesis ---
                 col = self.config.get(f"indicator_color{i}")
                 stops.append({'val': val, 'col': col})
-            except (ValueError, TypeError):
-                continue
-        
+            except (ValueError, TypeError): continue
         stops.sort(key=lambda s: s['val'])
 
         final_color_str = "rgba(0,0,0,1)"
+        if stops:
+            if self.current_value <= stops[0]['val']: final_color_str = stops[0]['col']
+            elif self.current_value >= stops[-1]['val']: final_color_str = stops[-1]['col']
+            else:
+                for i in range(len(stops) - 1):
+                    s1, s2 = stops[i], stops[i+1]
+                    if s1['val'] <= self.current_value < s2['val']:
+                        v_range = s2['val'] - s1['val']
+                        factor = (self.current_value - s1['val']) / v_range if v_range > 0 else 0
+                        inter_color = self._interpolate_color(factor, s1['col'], s2['col'])
+                        final_color_str = inter_color.to_string()
+                        break
         
-        if not stops:
-            pass
-        elif self.current_value <= stops[0]['val']:
-            final_color_str = stops[0]['col']
-        elif self.current_value >= stops[-1]['val']:
-            final_color_str = stops[-1]['col']
-        else:
-            for i in range(len(stops) - 1):
-                s1, s2 = stops[i], stops[i+1]
-                if s1['val'] <= self.current_value < s2['val']:
-                    v_range = s2['val'] - s1['val']
-                    factor = (self.current_value - s1['val']) / v_range if v_range > 0 else 0
-                    inter_color = self._interpolate_color(factor, s1['col'], s2['col'])
-                    final_color_str = inter_color.to_string()
-                    break
-        
-        current_c = Gdk.RGBA()
-        current_c.parse(final_color_str)
+        current_c = Gdk.RGBA(); current_c.parse(final_color_str)
         ctx.set_source_rgba(current_c.red, current_c.green, current_c.blue, current_c.alpha)
-        ctx.rectangle(0, 0, width, height)
-        ctx.fill()
+
+        # --- Draw Shape ---
+        shape = self.config.get("indicator_shape", "full_panel")
+        padding = float(self.config.get("indicator_shape_padding", 10))
+
+        if shape == "full_panel":
+            ctx.rectangle(0, 0, width, height); ctx.fill()
+        elif shape == "circle":
+            radius = (min(width, height) / 2) - padding
+            if radius > 0:
+                ctx.arc(width / 2, height / 2, radius, 0, 2 * math.pi); ctx.fill()
+        elif shape == "square":
+            keep_aspect = str(self.config.get("indicator_square_keep_aspect", "True")).lower() == 'true'
+            if keep_aspect:
+                size = min(width, height) - (2 * padding)
+                if size > 0:
+                    rect_x = (width - size) / 2
+                    rect_y = (height - size) / 2
+                    ctx.rectangle(rect_x, rect_y, size, size); ctx.fill()
+            else:
+                rect_x, rect_y = padding, padding
+                rect_w, rect_h = width - 2 * padding, height - 2 * padding
+                if rect_w > 0 and rect_h > 0:
+                    ctx.rectangle(rect_x, rect_y, rect_w, rect_h); ctx.fill()
+        elif shape == "polygon":
+            sides = int(self.config.get("indicator_polygon_sides", 6))
+            if sides >= 3:
+                radius = (min(width, height) / 2) - padding
+                if radius > 0:
+                    cx, cy = width / 2, height / 2
+                    ctx.new_path()
+                    for i in range(sides):
+                        angle = (i / sides) * 2 * math.pi - (math.pi / 2)
+                        x = cx + radius * math.cos(angle)
+                        y = cy + radius * math.sin(angle)
+                        if i == 0: ctx.move_to(x, y)
+                        else: ctx.line_to(x, y)
+                    ctx.close_path(); ctx.fill()
         
+        # --- Draw Text ---
         self._draw_text_block(ctx, width, height)
 
     def _draw_text_block(self, ctx, width, height):

@@ -4,6 +4,8 @@
 import threading
 import time
 from gi.repository import GLib
+# --- PERF OPT 1: Import the unified GPU manager ---
+from gpu_managers import gpu_manager
 
 class UpdateManager:
     """
@@ -30,9 +32,6 @@ class UpdateManager:
         self._worker_thread = None
         self._stop_event = threading.Event()
         self._initialized = True
-        # The tick interval determines how frequently the worker thread wakes up
-        # to check if any panels need an update. A smaller value provides more
-        # accurate update timing at the cost of slightly higher CPU usage.
         self.TICK_INTERVAL = 0.1  # seconds
 
     def start(self):
@@ -59,7 +58,6 @@ class UpdateManager:
             panel_id = panel.config.get("id")
             if panel_id and panel_id not in self._panels:
                 self._panels[panel_id] = panel
-                # Set last update time to 0 to trigger an immediate first update
                 self._last_update_times[panel_id] = 0
 
     def unregister_panel(self, panel):
@@ -76,11 +74,12 @@ class UpdateManager:
             now = time.monotonic()
             panels_to_update = []
             
+            # --- PERF OPT 1: Perform a single bulk update for all GPUs ---
+            # This populates the caches in amd_manager and intel_manager.
+            gpu_manager.update()
+            
             with self._lock:
-                # Create a list of panels that need updating. This is done inside the lock
-                # to safely access the shared panel dictionaries, but the list is processed
-                # outside the lock to avoid blocking registration/unregistration during
-                # potentially slow data fetching.
+                # --- FIX: Corrected typo from self.panels to self._panels ---
                 for panel_id, panel in list(self._panels.items()):
                     try:
                         interval = float(panel.config.get("update_interval_seconds", 2.0))
@@ -90,18 +89,14 @@ class UpdateManager:
                             panels_to_update.append(panel)
                             self._last_update_times[panel_id] = now
                     except (ValueError, TypeError, AttributeError):
-                        # Handle cases where config might be malformed or panel is closing
                         continue
             
-            # Now, outside the lock, fetch data for the panels that need it
             for panel in panels_to_update:
                 if self._stop_event.is_set():
                     break
                 
-                # Check if panel still has a data_source before fetching
                 if hasattr(panel, 'data_source') and panel.data_source:
                     value = panel.data_source.get_data()
-                    # Dispatch the result to the main GTK thread for UI processing
                     GLib.idle_add(panel.process_update, value)
 
             time.sleep(self.TICK_INTERVAL)

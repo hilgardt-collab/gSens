@@ -217,53 +217,10 @@ class AnalogClockDisplayer(DataDisplayer):
         self._alarm_sound_bus_id = None
         self._alarm_current_repeat_count = 0
         self._alarm_repeat_count = 0
-        self._visual_update_timer_id = None
         self._date_str, self._tz_str = "", ""
         
         super().__init__(panel_ref, config)
         populate_defaults_from_model(self.config, self._get_static_config_model())
-        self.widget.connect("realize", self._start_visual_update_timer)
-        self.widget.connect("unrealize", self._stop_visual_update_timer)
-
-    def _start_visual_update_timer(self, widget=None):
-        self._stop_visual_update_timer() # Ensure no old timer is running
-        # Start the self-perpetuating timer loop
-        self._reschedule_update()
-
-    def _stop_visual_update_timer(self, widget=None):
-        if self._visual_update_timer_id:
-            GLib.source_remove(self._visual_update_timer_id)
-            self._visual_update_timer_id = None
-
-    def _reschedule_update(self):
-        """
-        Self-perpetuating timer that redraws the clock and schedules its
-        next update precisely at the start of the next second or minute,
-        preventing timer drift and ensuring a consistent tick.
-        """
-        if not self.widget.get_realized():
-            self._visual_update_timer_id = None
-            return GLib.SOURCE_REMOVE # Stop the loop if widget is gone
-
-        # 1. Redraw the UI immediately.
-        self.widget.queue_draw()
-
-        # 2. Determine the delay until the next required update.
-        now = datetime.datetime.now()
-        show_seconds = str(self.config.get("show_second_hand", "True")).lower() == 'true'
-
-        if show_seconds:
-            # Align to the start of the next second.
-            delay = 1000 - (now.microsecond // 1000)
-        else:
-            # Align to the start of the next minute.
-            delay = (60 - now.second) * 1000 - (now.microsecond // 1000)
-
-        # 3. Schedule the next call. This timer is a one-shot.
-        self._visual_update_timer_id = GLib.timeout_add(delay, self._reschedule_update)
-        
-        # 4. Tell GLib not to repeat this specific timer event.
-        return GLib.SOURCE_REMOVE
 
     def _create_widget(self):
         self.drawing_area = Gtk.DrawingArea(name="analog-clock-drawing-area", hexpand=True, vexpand=True)
@@ -506,10 +463,7 @@ class AnalogClockDisplayer(DataDisplayer):
             self._cached_image_path = image_path
             self._cached_face_pixbuf = GdkPixbuf.Pixbuf.new_from_file(image_path) if image_path and os.path.exists(image_path) else None
         
-        # Invalidate cache and restart timer to apply new settings (e.g. show/hide second hand)
         self._static_surface = None
-        if self.widget.get_realized():
-            self._start_visual_update_timer()
         self.drawing_area.queue_draw()
     
     def update_display(self, data):
@@ -531,6 +485,8 @@ class AnalogClockDisplayer(DataDisplayer):
         elif not is_alarm_ringing and not is_timer_ringing and self.panel_ref.is_in_alarm_state:
             self.panel_ref.exit_alarm_state()
             if self._sound_player: self._sound_player.set_state(Gst.State.NULL)
+
+        self.widget.queue_draw()
     
     def on_draw_clock(self, area, context, width, height):
         if width <= 0 or height <= 0: return 
@@ -565,7 +521,7 @@ class AnalogClockDisplayer(DataDisplayer):
         self._draw_timer_indicator(context, width, height)
         
     def close(self):
-        super().close(); self._stop_visual_update_timer() 
+        super().close()
         if self._sound_player: self._sound_player.set_state(Gst.State.NULL)
         if self._alarm_sound_bus_id: GLib.source_remove(self._alarm_sound_bus_id); self._alarm_sound_bus_id = None
         
@@ -725,7 +681,6 @@ class AnalogClockDisplayer(DataDisplayer):
 
         if self._current_time_data.get("is_timer_running") or self._current_time_data.get("is_timer_ringing"):
             vbox.append(Gtk.Label(label="A timer is currently active."))
-            # --- BUG FIX: Use a valid Gtk.ResponseType member ---
             stop_btn = dialog.add_styled_button("_Stop Timer", Gtk.ResponseType.CLOSE, "destructive-action")
         else:
             grid = Gtk.Grid(column_spacing=10, row_spacing=5)
@@ -764,7 +719,6 @@ class AnalogClockDisplayer(DataDisplayer):
             s = s_spin.get_value_as_int()
             total_seconds = h * 3600 + m * 60 + s
             data_source.start_timer(total_seconds)
-        # --- BUG FIX: Check for the corrected ResponseType here as well ---
         elif response == Gtk.ResponseType.CLOSE:
             data_source.cancel_timer()
             self.panel_ref.exit_alarm_state()
@@ -772,3 +726,4 @@ class AnalogClockDisplayer(DataDisplayer):
         
         dialog.destroy()
         self.drawing_area.queue_draw()
+

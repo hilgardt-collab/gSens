@@ -19,6 +19,22 @@ class DataSource(ABC):
             self.alarm_config_prefix = "data_"
         populate_defaults_from_model(self.config, self.get_config_model())
 
+    @property
+    def is_clock_source(self):
+        """
+        Property to indicate if this source requires a high-precision,
+        non-drifting timer, typical for clocks.
+        """
+        return False
+
+    @property
+    def needs_second_updates(self):
+        """
+        Property to indicate if the clock source is configured to display
+        seconds, requiring a one-second update interval.
+        """
+        return False
+
     @abstractmethod
     def get_data(self):
         """
@@ -35,9 +51,6 @@ class DataSource(ABC):
         """
         if value is None: return "N/A"
         
-        # --- FIX: The original implementation would crash if 'value' was a dictionary. ---
-        # This version safely attempts to get a numerical value first.
-        # If that fails, it falls back to a simple string representation.
         try:
             numerical_value = self.get_numerical_value(value)
             if numerical_value is not None and isinstance(numerical_value, (int, float)):
@@ -45,9 +58,7 @@ class DataSource(ABC):
         except (TypeError, ValueError):
             pass
 
-        # Fallback for non-numerical data or complex dicts
         if isinstance(value, dict):
-             # Don't show a raw dictionary, return a placeholder
              return "..." 
         return str(value)
         
@@ -121,3 +132,4 @@ class DataSource(ABC):
     def close(self):
         """Optional cleanup method for data sources."""
         pass
+

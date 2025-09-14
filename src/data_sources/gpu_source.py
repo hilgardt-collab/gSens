@@ -30,6 +30,10 @@ class GPUDataSource(DataSource):
         """
         Returns the numerical value for the metric selected for display.
         """
+        # --- FIX: Handle the case where data might be None on initial draw ---
+        if data is None:
+            return None
+            
         metric = self.config.get("gpu_metric_to_display", "utilization")
         if metric == "vram":
             vram_data = data.get("vram")
@@ -73,6 +77,9 @@ class GPUDataSource(DataSource):
 
     def get_display_string(self, data):
         """Formats the display string for the primary metric."""
+        # --- FIX: Handle the case where data might be None on initial draw ---
+        if data is None:
+            return "N/A"
         primary_metric = self.config.get("gpu_metric_to_display", "utilization")
         value = data.get(primary_metric)
         return GPUDataSource._format_metric(primary_metric, value, self.config, data)
@@ -154,7 +161,6 @@ class GPUDataSource(DataSource):
     def get_configure_callback(self):
         """Dynamically shows/hides UI sections based on the selected metric."""
         def setup_dynamic_options(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
-            # --- FIX: Construct prefixed keys for all widgets ---
             key_prefix = f"{prefix}opt_" if prefix else ""
             
             metric_combo_key = f"{key_prefix}gpu_metric_to_display"
@@ -169,7 +175,6 @@ class GPUDataSource(DataSource):
                     section_widgets[section_title] = []
                     
                     for opt in options:
-                        # --- FIX: Use prefixed keys to find the correct widgets ---
                         widget = widgets.get(f"{key_prefix}{opt.key}")
                         if widget and widget.get_parent():
                             section_widgets[section_title].append(widget.get_parent())

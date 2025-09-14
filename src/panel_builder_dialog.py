@@ -5,7 +5,6 @@ from config_dialog import ConfigOption, build_ui_from_model, get_config_from_wid
 from ui_helpers import CustomDialog, build_background_config_ui
 from utils import populate_defaults_from_model
 from config_manager import config_manager
-# --- NEW: Import SENSOR_CACHE to perform pre-creation validation ---
 from sensor_cache import SENSOR_CACHE
 
 gi.require_version("Gtk", "4.0")
@@ -211,8 +210,6 @@ class PanelBuilderDialog:
         
         build_background_config_ui(self.general_config_box, self.current_config, self.widgets, self.dialog, prefix="panel_", title="Panel Background")
 
-        # --- BUG FIX: Create temporary instances to call instance methods ---
-        # The original code called get_configure_callback on the class, not an instance, causing a TypeError.
         temp_source_instance = self.source_class(config=self.current_config)
         source_custom_builder = temp_source_instance.get_configure_callback()
         if source_custom_builder:
@@ -249,9 +246,6 @@ class PanelBuilderDialog:
         final_config['type'] = self.selected_source_key
         final_config['displayer_type'] = self.selected_displayer_key
 
-        # --- FIX: New self-healing logic for sensor-based sources ---
-        # Before creating the panel, check if a sensor key is needed and if it's valid.
-        # If not, auto-select the first available one.
         if self.selected_source_key == 'system_temp' and not final_config.get('selected_sensor_key'):
             sensors = SENSOR_CACHE.get('system_temp', {})
             first_key = next((k for k in sensors if k), None)
@@ -267,8 +261,12 @@ class PanelBuilderDialog:
                 final_config['combo_mode'] = 'level_bar'
             elif self.selected_displayer_key == 'lcars_combo':
                 final_config['combo_mode'] = 'lcars'
-            else:
+            elif self.selected_displayer_key == 'arc_combo':
                 final_config['combo_mode'] = 'arc'
+            elif self.selected_displayer_key == 'dashboard_combo':
+                final_config['combo_mode'] = 'dashboard'
+            else:
+                final_config['combo_mode'] = 'arc' # Default fallback
         
         self.grid_manager.create_and_add_panel_from_config(final_config)
         

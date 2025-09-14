@@ -119,6 +119,10 @@ class CPUDataSource(DataSource):
 
     def get_numerical_value(self, data):
         """Extracts the specific numerical value based on the panel's configuration."""
+        # --- FIX: Handle the case where data might be None on initial draw ---
+        if data is None:
+            return None
+            
         metric = self.config.get("cpu_metric_to_display", "usage")
         
         if metric == "usage":
@@ -312,4 +316,3 @@ class CPUDataSource(DataSource):
             GLib.idle_add(on_metric_changed, metric_combo)
 
         return setup_dynamic_options
-

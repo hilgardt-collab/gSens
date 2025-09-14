@@ -177,7 +177,6 @@ class LCARSComboDisplayer(ComboBase):
             build_ui_from_model(frame_box, panel_config, frame_ui_model, widgets)
             dialog.dynamic_models.append(frame_ui_model)
 
-            # Dynamic visibility for extension height spinners
             ext_mode_combo = widgets.get("lcars_sidebar_extension_mode")
             top_ext_spinner = widgets.get("lcars_top_extension_height")
             bottom_ext_spinner = widgets.get("lcars_bottom_extension_height")
@@ -226,7 +225,6 @@ class LCARSComboDisplayer(ComboBase):
             seg_count_spinner.connect("value-changed", on_segment_count_changed)
             GLib.idle_add(on_segment_count_changed, seg_count_spinner)
 
-            # --- Tab 2: Content ---
             content_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
             content_box_tab = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
             content_scroll.set_child(content_box_tab)
@@ -236,7 +234,6 @@ class LCARSComboDisplayer(ComboBase):
             content_notebook.set_scrollable(True)
             content_box_tab.append(content_notebook)
 
-            # --- Primary Item Sub-Tab ---
             primary_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
             primary_scroll.set_min_content_height(300)
             primary_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
@@ -248,7 +245,6 @@ class LCARSComboDisplayer(ComboBase):
             self._setup_dynamic_content_ui(dialog, primary_box, widgets, panel_config, "primary")
             dialog.dynamic_models.append(primary_model)
 
-            # --- Secondary Items Sub-Tabs ---
             secondary_tabs_content = []
             for i in range(1, 13):
                 prefix = f"secondary{i}"
@@ -412,26 +408,20 @@ class LCARSComboDisplayer(ComboBase):
         mode = self.config.get("lcars_sidebar_extension_mode", "top")
         top_ext_h = float(self.config.get("lcars_top_extension_height", 40)) if mode in ["top", "both"] else 0
         
-        # This top_bar_h is now effectively the starting Y of the main content area
         top_bar_h = top_ext_h
 
         ctx.new_path()
-        # Top-left and top edge
         ctx.move_to(0, radius)
         ctx.arc(radius, radius, radius, math.pi, 1.5 * math.pi)
         ctx.line_to(width, 0)
         
-        # Top-right down to content area
         ctx.line_to(width, top_bar_h)
         
-        # Top edge of content area and inner corner
         ctx.line_to(sidebar_w + radius, top_bar_h)
         ctx.arc_negative(sidebar_w + radius, top_bar_h + radius, radius, 1.5 * math.pi, math.pi)
         
-        # Left edge of content area, goes down to bottom of panel
         ctx.line_to(sidebar_w, height)
         
-        # Bottom edge and bottom-left corner
         ctx.line_to(0, height)
         ctx.close_path()
         
@@ -578,12 +568,10 @@ class LCARSComboDisplayer(ComboBase):
                 unprefixed_key = key[len(prefix) + 1:]
                 drawer_config[unprefixed_key] = value
         
-        # --- BUG FIX: Manually inject min/max from data packet into the drawer's config ---
         if 'min_value' in data and data['min_value'] is not None:
             drawer_config['graph_min_value'] = data['min_value']
         if 'max_value' in data and data['max_value'] is not None:
             drawer_config['graph_max_value'] = data['max_value']
-        # --- END BUG FIX ---
 
         lcars_bg_color = self.config.get(f"{prefix}_graph_lcars_bg_color")
         if lcars_bg_color:
@@ -598,7 +586,8 @@ class LCARSComboDisplayer(ComboBase):
         combined_text = f"{caption}: {value_str}" if caption and value_str else caption or value_str
         self._graph_drawer.secondary_text = combined_text
 
-        self._graph_drawer.on_draw_graph(None, ctx, w-2*padding, h)
+        # --- FIX: Call the standardized on_draw method ---
+        self._graph_drawer.on_draw(None, ctx, w-2*padding, h)
         ctx.restore()
 
     def _draw_secondary_level_bar(self, ctx, x, y, w, h, prefix, data):
@@ -686,7 +675,6 @@ class LCARSComboDisplayer(ComboBase):
                 bar_x = x
                 text_x = x + bar_w + spacing
 
-            # Draw bar part
             bar_anim_key = f"{prefix}_bar"
             percent = self._bar_values.get(bar_anim_key, {}).get('current', 0.0)
             bg_color_str = self.config.get(f"{prefix}_bar_bg_color", "rgba(0,0,0,0.5)")
@@ -702,7 +690,6 @@ class LCARSComboDisplayer(ComboBase):
                 self._draw_rounded_rect(ctx, bar_x, y, bar_w * percent, h, radius); ctx.fill()
             ctx.restore()
 
-            # Draw text part
             self._draw_key_value_text(ctx, text_x, y, text_w, h, prefix, data, radius=0)
 
 
@@ -719,3 +706,4 @@ class LCARSComboDisplayer(ComboBase):
         if self._level_bar_drawer: self._level_bar_drawer.close(); self._level_bar_drawer = None
         if self._graph_drawer: self._graph_drawer.close(); self._graph_drawer = None
         super().close()
+

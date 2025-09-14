@@ -28,16 +28,25 @@ class GraphDisplayer(DataDisplayer):
 
     def _create_widget(self):
         self.graph_area = Gtk.DrawingArea(hexpand=True, vexpand=True)
-        self.graph_area.set_draw_func(self.on_draw_graph)
+        self.graph_area.set_draw_func(self.on_draw)
         return self.graph_area
 
     def update_display(self, value):
-        if not self.panel_ref: return # Guard against race condition on close
-        num_val, max_hist = self.panel_ref.data_source.get_numerical_value(value), int(self.config.get("max_history_points", 100))
+        if not self.panel_ref: return
+        
+        raw_data = value
+        num_val = 0.0
+        if self.panel_ref.data_source:
+            num_val = self.panel_ref.data_source.get_numerical_value(raw_data)
+        
+        max_hist = int(self.config.get("max_history_points", 100))
         if num_val is not None:
             self.history.append((time.time(), num_val))
             if len(self.history) > max_hist: self.history = self.history[-max_hist:]
-        self.secondary_text = self.panel_ref.data_source.get_display_string(value)
+            
+        if self.panel_ref.data_source:
+            self.secondary_text = self.panel_ref.data_source.get_display_string(raw_data)
+            
         self.graph_area.queue_draw()
 
     @staticmethod
@@ -107,7 +116,7 @@ class GraphDisplayer(DataDisplayer):
             self._cached_bg_pixbuf = GdkPixbuf.Pixbuf.new_from_file(image_path) if image_path and os.path.exists(image_path) else None
         self.graph_area.queue_draw()
 
-    def on_draw_graph(self, area, ctx, width, height):
+    def on_draw(self, area, ctx, width, height):
         if width <= 0 or height <= 0: return
 
         is_alarm = self.panel_ref is not None and self.panel_ref.is_in_alarm_state and self.panel_ref._alarm_flash_on
@@ -146,7 +155,6 @@ class GraphDisplayer(DataDisplayer):
                 ctx.set_source_rgba(bg_rgba.red, bg_rgba.green, bg_rgba.blue, bg_rgba.alpha)
                 ctx.paint()
 
-        # --- FEATURE: Draw the grid ---
         if str(self.config.get("graph_grid_enabled", "False")).lower() == 'true':
             grid_rgba = Gdk.RGBA(); grid_rgba.parse(self.config.get("graph_grid_color"))
             ctx.set_source_rgba(grid_rgba.red, grid_rgba.green, grid_rgba.blue, grid_rgba.alpha)
