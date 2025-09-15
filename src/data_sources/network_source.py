@@ -91,5 +91,9 @@ class NetworkDataSource(DataSource):
             ConfigOption("network_display_mode", "dropdown", "Primary Value for Graphs:", "download",
                          options_dict={"Download Speed": "download", "Upload Speed": "upload"})
         ]
+        model["Graph Range"] = [
+            ConfigOption("graph_min_value", "spinner", "Graph Min Value (Mbps):", "0.0", 0.0, 10000.0, 1.0, 0),
+            ConfigOption("graph_max_value", "spinner", "Graph Max Value (Mbps):", "100.0", 0.0, 10000.0, 1.0, 0)
+        ]
         model["Alarm"][1] = ConfigOption("data_alarm_high_value", "scale", "Alarm High Value (Mbps):", "100.0", 0.0, 1000.0, 10.0, 1)
         return model

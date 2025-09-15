@@ -21,6 +21,9 @@ class IndicatorDisplayer(DataDisplayer):
         self.primary_text = ""
         self.main_text = ""
         self.secondary_text = ""
+        self._layout_primary = None
+        self._layout_main = None
+        self._layout_secondary = None
         super().__init__(panel_ref, config)
         populate_defaults_from_model(self.config, self.get_config_model())
 
@@ -67,7 +70,7 @@ class IndicatorDisplayer(DataDisplayer):
             label_suffix = " (Min)" if i == 1 else ""
             default_val = (i-1) * (100 / 9) if i > 1 else 0
             color_stops.extend([
-                ConfigOption(f"indicator_value{i}", "spinner", f"Value for Color {i}{label_suffix}:", f"{default_val:.1f}", -10000, 10000, 1, 1),
+                ConfigOption(f"indicator_percent{i}", "spinner", f"Percent for Color {i}{label_suffix}:", f"{default_val:.1f}", 0, 100, 1, 1),
                 ConfigOption(f"indicator_color{i}", "color", f"Color {i}:", default_colors[i-1]),
             ])
 
@@ -106,7 +109,7 @@ class IndicatorDisplayer(DataDisplayer):
             if color_count_spinner:
                 stop_widgets = []
                 for i in range(1, 11): 
-                    val_widget = widgets.get(f"indicator_value{i}")
+                    val_widget = widgets.get(f"indicator_percent{i}")
                     col_widget = widgets.get(f"indicator_color{i}")
                     if val_widget and col_widget:
                         stop_widgets.append({
@@ -121,9 +124,9 @@ class IndicatorDisplayer(DataDisplayer):
                         widget_group["value_row"].set_visible(is_visible)
                         widget_group["color_row"].set_visible(is_visible)
                         value_widget = widget_group["value_row"].get_first_child()
-                        if i == 1: value_widget.set_text(f"Value for Color 1 (Min):")
-                        elif i == count: value_widget.set_text(f"Value for Color {i} (Max):")
-                        else: value_widget.set_text(f"Value for Color {i}:")
+                        if i == 1: value_widget.set_text(f"Percent for Color 1 (Min):")
+                        elif i == count: value_widget.set_text(f"Percent for Color {i} (Max):")
+                        else: value_widget.set_text(f"Percent for Color {i}:")
 
                 color_count_spinner.connect("value-changed", on_color_count_changed)
                 GLib.idle_add(on_color_count_changed, color_count_spinner)
@@ -146,17 +149,25 @@ class IndicatorDisplayer(DataDisplayer):
 
     def apply_styles(self):
         super().apply_styles()
+        self._layout_primary = None
+        self._layout_main = None
+        self._layout_secondary = None
         self.widget.queue_draw()
 
     def on_draw(self, area, ctx, width, height):
         if width <= 0 or height <= 0: return
 
         # --- Calculate Color ---
+        min_v = float(self.config.get("graph_min_value", 0.0))
+        max_v = float(self.config.get("graph_max_value", 100.0))
+        v_range = max_v - min_v if max_v > min_v else 1.0
+
         num_stops = int(self.config.get("indicator_color_count", 3))
         stops = []
         for i in range(1, num_stops + 1):
             try:
-                val = float(self.config.get(f"indicator_value{i}"))
+                percent = float(self.config.get(f"indicator_percent{i}"))
+                val = min_v + (v_range * (percent / 100.0))
                 col = self.config.get(f"indicator_color{i}")
                 stops.append({'val': val, 'col': col})
             except (ValueError, TypeError): continue
@@ -170,8 +181,8 @@ class IndicatorDisplayer(DataDisplayer):
                 for i in range(len(stops) - 1):
                     s1, s2 = stops[i], stops[i+1]
                     if s1['val'] <= self.current_value < s2['val']:
-                        v_range = s2['val'] - s1['val']
-                        factor = (self.current_value - s1['val']) / v_range if v_range > 0 else 0
+                        stop_v_range = s2['val'] - s1['val']
+                        factor = (self.current_value - s1['val']) / stop_v_range if stop_v_range > 0 else 0
                         inter_color = self._interpolate_color(factor, s1['col'], s2['col'])
                         final_color_str = inter_color.to_string()
                         break
@@ -235,8 +246,15 @@ class IndicatorDisplayer(DataDisplayer):
         if not text_elements: return
         
         total_text_height = 0
+        
+        # This loop now just measures, it doesn't create layouts repeatedly
         for element in text_elements:
-            layout = PangoCairo.create_layout(ctx)
+            layout_cache_attr = f"_layout_{element['type']}"
+            layout = getattr(self, layout_cache_attr, None)
+            if layout is None:
+                layout = self.widget.create_pango_layout("")
+                setattr(self, layout_cache_attr, layout)
+
             font_str = self.config.get(f"indicator_{element['type']}_font")
             layout.set_font_description(Pango.FontDescription.from_string(font_str))
             layout.set_text(element['text'], -1)

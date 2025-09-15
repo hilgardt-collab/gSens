@@ -3,6 +3,77 @@ import os
 from gi.repository import Gtk, Gdk, GLib, Pango, PangoCairo
 from config_dialog import ConfigOption, build_ui_from_model
 import math
+import cairo
+
+def draw_cairo_background(ctx, width, height, config, prefix, pixbuf=None, shape_info=None):
+    """
+    A centralized helper to draw various background types (solid, gradient, image)
+    onto a Cairo context. The caller is responsible for setting any clipping path.
+
+    :param ctx: The Cairo context to draw on.
+    :param width: The width of the drawing area.
+    :param height: The height of the drawing area.
+    :param config: The configuration dictionary containing style keys.
+    :param prefix: The unique prefix for the background config keys (e.g., "gauge_").
+    :param pixbuf: An optional, pre-loaded GdkPixbuf for image backgrounds.
+    :param shape_info: Optional dict for gradients, e.g., {'type': 'circle', 'cx': w/2, 'cy': h/2, 'radius': r}
+    """
+    bg_type = config.get(f"{prefix}bg_type", "solid")
+
+    if bg_type == "image" and pixbuf:
+        img_w, img_h = pixbuf.get_width(), pixbuf.get_height()
+        if img_w == 0 or img_h == 0: return
+
+        # Default to cover/zoom style
+        scale = max(width / img_w, height / img_h)
+        ctx.save()
+        ctx.scale(scale, scale)
+        # Center the image within the scaled context
+        Gdk.cairo_set_source_pixbuf(ctx, pixbuf, (width / scale - img_w) / 2, (height / scale - img_h) / 2)
+        ctx.paint_with_alpha(float(config.get(f"{prefix}background_image_alpha", 1.0)))
+        ctx.restore()
+    
+    elif bg_type == "gradient_linear":
+        c1_str = config.get(f"{prefix}gradient_linear_color1")
+        c2_str = config.get(f"{prefix}gradient_linear_color2")
+        angle = float(config.get(f"{prefix}gradient_linear_angle_deg", 90.0))
+        angle_rad = math.radians(angle)
+
+        # Calculate gradient vector based on angle and bounding box of the shape
+        x1, y1 = 0.5 - 0.5 * math.cos(angle_rad), 0.5 - 0.5 * math.sin(angle_rad)
+        x2, y2 = 0.5 + 0.5 * math.cos(angle_rad), 0.5 + 0.5 * math.sin(angle_rad)
+        pat = cairo.LinearGradient(x1 * width, y1 * height, x2 * width, y2 * height)
+        
+        c1 = Gdk.RGBA(); c1.parse(c1_str)
+        c2 = Gdk.RGBA(); c2.parse(c2_str)
+        pat.add_color_stop_rgba(0, c1.red, c1.green, c1.blue, c1.alpha)
+        pat.add_color_stop_rgba(1, c2.red, c2.green, c2.blue, c2.alpha)
+        ctx.set_source(pat)
+        ctx.paint()
+
+    elif bg_type == "gradient_radial":
+        c1_str = config.get(f"{prefix}gradient_radial_color1")
+        c2_str = config.get(f"{prefix}gradient_radial_color2")
+        
+        # Use shape_info if available for a better fit, else use bounding box
+        cx = shape_info.get('cx', width/2) if shape_info else width/2
+        cy = shape_info.get('cy', height/2) if shape_info else height/2
+        radius = shape_info.get('radius', max(width, height)/2) if shape_info else max(width, height)/2
+        
+        pat = cairo.RadialGradient(cx, cy, 0, cx, cy, radius)
+        c1 = Gdk.RGBA(); c1.parse(c1_str)
+        c2 = Gdk.RGBA(); c2.parse(c2_str)
+        pat.add_color_stop_rgba(0, c1.red, c1.green, c1.blue, c1.alpha)
+        pat.add_color_stop_rgba(1, c2.red, c2.green, c2.blue, c2.alpha)
+        ctx.set_source(pat)
+        ctx.paint()
+
+    else:  # solid
+        bg_color_str = config.get(f"{prefix}bg_color", "rgba(40,40,40,1)")
+        bg_rgba = Gdk.RGBA()
+        bg_rgba.parse(bg_color_str)
+        ctx.set_source_rgba(bg_rgba.red, bg_rgba.green, bg_rgba.blue, bg_rgba.alpha)
+        ctx.paint()
 
 def build_background_config_ui(parent_box, config, widgets, dialog_parent, prefix, title="Background Settings"):
     """

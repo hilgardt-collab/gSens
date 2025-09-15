@@ -295,7 +295,11 @@ class LevelBarComboDisplayer(ComboBase):
             drawer_config['level_max_value'] = data_packet.get('max_value', 100.0)
 
             self._drawer.config = drawer_config
-            self._drawer._sync_state_with_config()
+            # This is the FIX:
+            # Explicitly call apply_styles on the drawer instance.
+            # This will invalidate its internal static surface cache, forcing it
+            # to be redrawn with the new style settings for the current bar.
+            self._drawer.apply_styles()
 
             self._drawer.primary_text = self.config.get(f"bar{i}_caption") or data_packet.get('primary_label', '')
             self._drawer.secondary_text = data_packet.get('display_string', '')
@@ -326,4 +330,3 @@ class LevelBarComboDisplayer(ComboBase):
             self._drawer.close()
             self._drawer = None
         super().close()
-

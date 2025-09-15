@@ -6,7 +6,7 @@ import os
 from data_displayer import DataDisplayer
 from config_dialog import ConfigOption, build_ui_from_model
 from utils import populate_defaults_from_model
-from ui_helpers import build_background_config_ui
+from ui_helpers import build_background_config_ui, draw_cairo_background
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Pango", "1.0")
@@ -25,7 +25,7 @@ class SpeedometerDisplayer(DataDisplayer):
         
         # Animation state
         self._animation_timer_id = None
-        self._current_display_value = float(config.get("speedo_min_value", 0.0))
+        self._current_display_value = float(config.get("graph_min_value", 0.0))
         self._target_value = self._current_display_value
         
         # Caching state
@@ -33,6 +33,9 @@ class SpeedometerDisplayer(DataDisplayer):
         self._last_draw_width, self._last_draw_height = -1, -1
         self._cached_bg_pixbuf = None
         self._cached_image_path = None
+        self._layout_value = None
+        self._layout_unit = None
+        self._layout_tick_numbers = None # For static drawing
         
         super().__init__(panel_ref, config)
         populate_defaults_from_model(self.config, self.get_config_model())
@@ -70,9 +73,7 @@ class SpeedometerDisplayer(DataDisplayer):
     @staticmethod
     def get_config_model():
         model = DataDisplayer.get_config_model()
-        model["Speedometer Range & Geometry"] = [
-            ConfigOption("speedo_min_value", "spinner", "Min Value:", 0, 0, 10000, 1, 0),
-            ConfigOption("speedo_max_value", "spinner", "Max Value:", 240, 1, 10000, 1, 0),
+        model["Speedometer Geometry"] = [
             ConfigOption("speedo_start_angle", "spinner", "Start Angle (deg):", 135, 0, 359, 1, 0),
             ConfigOption("speedo_end_angle", "spinner", "End Angle (deg):", 45, 0, 359, 1, 0),
             ConfigOption("speedo_padding", "spinner", "Padding (px):", 10, 0, 100, 1, 0)
@@ -119,6 +120,9 @@ class SpeedometerDisplayer(DataDisplayer):
                 self._cached_bg_pixbuf = None
 
         self._static_surface = None # Invalidate cache
+        self._layout_value = None
+        self._layout_unit = None
+        self._layout_tick_numbers = None
         self.widget.queue_draw()
 
     def _start_animation_timer(self, widget=None):
@@ -179,36 +183,17 @@ class SpeedometerDisplayer(DataDisplayer):
             radius = available_radius - padding
             if radius > 0:
                 static_ctx.save(); static_ctx.arc(cx, cy, radius, 0, 2 * math.pi); static_ctx.clip()
-                bg_type = self.config.get("speedo_bg_type", "solid")
-                if bg_type == "image" and self._cached_bg_pixbuf:
-                    img_w, img_h = self._cached_bg_pixbuf.get_width(), self._cached_bg_pixbuf.get_height()
-                    scale = max((2*radius)/img_w, (2*radius)/img_h)
-                    static_ctx.save()
-                    static_ctx.translate(cx, cy); static_ctx.scale(scale, scale); static_ctx.translate(-img_w/2, -img_h/2)
-                    Gdk.cairo_set_source_pixbuf(static_ctx, self._cached_bg_pixbuf, 0, 0)
-                    static_ctx.paint_with_alpha(float(self.config.get("speedo_background_image_alpha", 1.0)))
-                    static_ctx.restore()
-                elif bg_type == "gradient_linear":
-                    c1=Gdk.RGBA(); c1.parse(self.config.get("speedo_gradient_linear_color1")); c2=Gdk.RGBA(); c2.parse(self.config.get("speedo_gradient_linear_color2"))
-                    angle = float(self.config.get("speedo_gradient_linear_angle_deg", 90.0)); angle_rad = angle * math.pi / 180
-                    x1, y1, x2, y2 = cx - radius * math.cos(angle_rad), cy - radius * math.sin(angle_rad), cx + radius * math.cos(angle_rad), cy + radius * math.sin(angle_rad)
-                    pat = cairo.LinearGradient(x1, y1, x2, y2)
-                    pat.add_color_stop_rgba(0, c1.red,c1.green,c1.blue,c1.alpha); pat.add_color_stop_rgba(1, c2.red,c2.green,c2.blue,c2.alpha)
-                    static_ctx.set_source(pat); static_ctx.paint()
-                elif bg_type == "gradient_radial":
-                    c1=Gdk.RGBA(); c1.parse(self.config.get("speedo_gradient_radial_color1")); c2=Gdk.RGBA(); c2.parse(self.config.get("speedo_gradient_radial_color2"))
-                    pat = cairo.RadialGradient(cx, cy, 0, cx, cy, radius)
-                    pat.add_color_stop_rgba(0, c1.red,c1.green,c1.blue,c1.alpha); pat.add_color_stop_rgba(1, c2.red,c2.green,c2.blue,c2.alpha)
-                    static_ctx.set_source(pat); static_ctx.paint()
-                else:
-                    bg_color = Gdk.RGBA(); bg_color.parse(self.config.get("speedo_bg_color", "rgba(20,20,20,1)"))
-                    static_ctx.set_source_rgba(bg_color.red, bg_color.green, bg_color.blue, bg_color.alpha); static_ctx.paint()
+                
+                shape_info = {'type': 'circle', 'cx': cx, 'cy': cy, 'radius': radius}
+                draw_cairo_background(static_ctx, width, height, self.config, "speedo_",
+                                      self._cached_bg_pixbuf, shape_info)
+
                 static_ctx.restore()
 
                 start_angle = math.radians(float(self.config.get("speedo_start_angle", 135))); end_angle = math.radians(float(self.config.get("speedo_end_angle", 45)))
                 total_angle = end_angle - start_angle; 
                 if total_angle <= 0: total_angle += 2 * math.pi
-                min_v = float(self.config.get("speedo_min_value", 0)); max_v = float(self.config.get("speedo_max_value", 240)); v_range = max_v - min_v if max_v > min_v else 1
+                min_v = float(self.config.get("graph_min_value", 0)); max_v = float(self.config.get("graph_max_value", 100)); v_range = max_v - min_v if max_v > min_v else 1
                 num_major_ticks = int(self.config.get("speedo_major_tick_count", 9)); num_minor_ticks = int(self.config.get("speedo_minor_ticks_per_major", 5))
                 tick_color = Gdk.RGBA(); tick_color.parse(self.config.get("speedo_tick_color")); static_ctx.set_source_rgba(tick_color.red, tick_color.green, tick_color.blue, tick_color.alpha)
                 
@@ -222,13 +207,15 @@ class SpeedometerDisplayer(DataDisplayer):
                 
                 if show_numbers:
                     number_color = Gdk.RGBA(); number_color.parse(self.config.get("speedo_number_color")); static_ctx.set_source_rgba(number_color.red, number_color.green, number_color.blue, number_color.alpha)
-                    layout = PangoCairo.create_layout(static_ctx); layout.set_font_description(Pango.FontDescription.from_string(self.config.get("speedo_number_font", "Sans Bold 12")))
+                    if self._layout_tick_numbers is None:
+                        self._layout_tick_numbers = self.widget.create_pango_layout("")
+                    self._layout_tick_numbers.set_font_description(Pango.FontDescription.from_string(self.config.get("speedo_number_font", "Sans Bold 12")))
                     num_radius = radius * (0.8 if number_position == "inside" else 1.15)
                     for i in range(num_major_ticks):
                         angle = start_angle + (i / (num_major_ticks - 1)) * total_angle
                         value = int(min_v + (i / (num_major_ticks - 1)) * v_range)
-                        layout.set_text(str(value), -1); _, log = layout.get_pixel_extents()
-                        static_ctx.move_to(cx + math.cos(angle) * num_radius - log.width/2, cy + math.sin(angle) * num_radius - log.height/2); PangoCairo.show_layout(static_ctx, layout)
+                        self._layout_tick_numbers.set_text(str(value), -1); _, log = self._layout_tick_numbers.get_pixel_extents()
+                        static_ctx.move_to(cx + math.cos(angle) * num_radius - log.width/2, cy + math.sin(angle) * num_radius - log.height/2); PangoCairo.show_layout(static_ctx, self._layout_tick_numbers)
 
             self._last_draw_width, self._last_draw_height = width, height
 
@@ -245,8 +232,13 @@ class SpeedometerDisplayer(DataDisplayer):
         if radius <= 0: return
 
         v_offset = float(self.config.get("speedo_text_vertical_offset", 0))
-        layout_v = PangoCairo.create_layout(ctx); layout_v.set_font_description(Pango.FontDescription.from_string(self.config.get("speedo_value_font"))); layout_v.set_text(self.display_value_text, -1); _, log_v = layout_v.get_pixel_extents()
-        layout_u = PangoCairo.create_layout(ctx); layout_u.set_font_description(Pango.FontDescription.from_string(self.config.get("speedo_unit_font"))); layout_u.set_text(self.unit_text, -1); _, log_u = layout_u.get_pixel_extents()
+        
+        if self._layout_value is None: self._layout_value = self.widget.create_pango_layout("")
+        self._layout_value.set_font_description(Pango.FontDescription.from_string(self.config.get("speedo_value_font"))); self._layout_value.set_text(self.display_value_text, -1); _, log_v = self._layout_value.get_pixel_extents()
+        
+        if self._layout_unit is None: self._layout_unit = self.widget.create_pango_layout("")
+        self._layout_unit.set_font_description(Pango.FontDescription.from_string(self.config.get("speedo_unit_font"))); self._layout_unit.set_text(self.unit_text, -1); _, log_u = self._layout_unit.get_pixel_extents()
+        
         spacing = float(self.config.get("speedo_text_spacing", 5)); total_text_height = 0
         if str(self.config.get("speedo_show_value_text", "True")).lower() == 'true': total_text_height += log_v.height
         if str(self.config.get("speedo_show_unit_text", "True")).lower() == 'true': total_text_height += log_u.height
@@ -254,12 +246,12 @@ class SpeedometerDisplayer(DataDisplayer):
         start_y = (cy - total_text_height / 2) + v_offset
         if str(self.config.get("speedo_show_value_text", "True")).lower() == 'true':
             val_color = Gdk.RGBA(); val_color.parse(self.config.get("speedo_value_color")); ctx.set_source_rgba(val_color.red, val_color.green, val_color.blue, val_color.alpha)
-            ctx.move_to(cx - log_v.width/2, start_y); PangoCairo.show_layout(ctx, layout_v); start_y += log_v.height + spacing
+            ctx.move_to(cx - log_v.width/2, start_y); PangoCairo.show_layout(ctx, self._layout_value); start_y += log_v.height + spacing
         if str(self.config.get("speedo_show_unit_text", "True")).lower() == 'true':
             unit_color = Gdk.RGBA(); unit_color.parse(self.config.get("speedo_unit_color")); ctx.set_source_rgba(unit_color.red, unit_color.green, unit_color.blue, unit_color.alpha)
-            ctx.move_to(cx - log_u.width/2, start_y); PangoCairo.show_layout(ctx, layout_u)
+            ctx.move_to(cx - log_u.width/2, start_y); PangoCairo.show_layout(ctx, self._layout_unit)
 
-        min_v = float(self.config.get("speedo_min_value", 0)); max_v = float(self.config.get("speedo_max_value", 240)); v_range = max_v - min_v if max_v > min_v else 1
+        min_v = float(self.config.get("graph_min_value", 0)); max_v = float(self.config.get("graph_max_value", 100)); v_range = max_v - min_v if max_v > min_v else 1
         start_angle = math.radians(float(self.config.get("speedo_start_angle", 135))); end_angle = math.radians(float(self.config.get("speedo_end_angle", 45)))
         total_angle = end_angle - start_angle;
         if total_angle <= 0: total_angle += 2 * math.pi
@@ -272,4 +264,8 @@ class SpeedometerDisplayer(DataDisplayer):
         ctx.move_to(-radius * 0.1, 0); ctx.line_to(radius * 0.85, 0); ctx.stroke(); ctx.restore()
         
         ctx.arc(cx, cy, radius * 0.05, 0, 2 * math.pi); ctx.fill()
+
+    def close(self):
+        self._stop_animation_timer()
+        super().close()
 

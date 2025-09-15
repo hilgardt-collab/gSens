@@ -18,6 +18,7 @@ class TextDisplayer(DataDisplayer):
     """
     def __init__(self, panel_ref, config):
         self._text_lines = []
+        self._layout_cache = []
         super().__init__(panel_ref, config)
         populate_defaults_from_model(self.config, self.get_config_model())
 
@@ -43,6 +44,7 @@ class TextDisplayer(DataDisplayer):
         """Pre-populates the text line data structure based on config."""
         line_count = int(self.config.get("text_line_count", "2"))
         self._text_lines = [""] * line_count
+        self._layout_cache = [None] * line_count
 
     def update_display(self, data):
         """Updates the text content for each line and queues a redraw."""
@@ -161,20 +163,24 @@ class TextDisplayer(DataDisplayer):
         line_count = int(self.config.get("text_line_count", "2"))
         spacing = int(self.config.get("text_spacing", 4))
         
-        layouts = []
+        layouts_to_draw = []
         total_text_height = 0
         
         for i in range(min(line_count, len(self._text_lines))):
+            layout = self._layout_cache[i]
+            if layout is None:
+                layout = self.widget.create_pango_layout("")
+                self._layout_cache[i] = layout
+
             line_num = i + 1
-            layout = PangoCairo.create_layout(ctx)
             font_str = self.config.get(f"line{line_num}_font", "Sans 12")
             layout.set_font_description(Pango.FontDescription.from_string(font_str))
             layout.set_text(self._text_lines[i], -1)
-            layouts.append(layout)
+            layouts_to_draw.append(layout)
             total_text_height += layout.get_pixel_extents()[1].height
         
-        if len(layouts) > 1:
-            total_text_height += (len(layouts) - 1) * spacing
+        if len(layouts_to_draw) > 1:
+            total_text_height += (len(layouts_to_draw) - 1) * spacing
 
         v_align = self.config.get("text_vertical_align", "center")
         if v_align == "start":
@@ -184,7 +190,7 @@ class TextDisplayer(DataDisplayer):
         else: # center
             current_y = (height - total_text_height) / 2
 
-        for i, layout in enumerate(layouts):
+        for i, layout in enumerate(layouts_to_draw):
             line_num = i + 1
             
             ctx.save()

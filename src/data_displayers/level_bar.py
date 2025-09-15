@@ -26,6 +26,8 @@ class LevelBarDisplayer(DataDisplayer):
         # Caching State for performance optimization
         self._static_surface = None
         self._last_draw_width, self._last_draw_height = -1, -1
+        self._layout_primary = None
+        self._layout_secondary = None
         
         self.primary_text = ""
         self.secondary_text = ""
@@ -204,6 +206,8 @@ class LevelBarDisplayer(DataDisplayer):
         
         # Invalidate the cache whenever styles change to apply new geometry/colors
         self._static_surface = None
+        self._layout_primary = None
+        self._layout_secondary = None
         
         if self.widget.get_realized(): self._start_animation_timer()
         self.widget.queue_draw()
@@ -219,17 +223,20 @@ class LevelBarDisplayer(DataDisplayer):
             
             show_primary = str(self.config.get("level_bar_show_primary_label", "True")).lower() == 'true'
             show_secondary = str(self.config.get("level_bar_show_secondary_label", "True")).lower() == 'true'
-            layout_p = PangoCairo.create_layout(ctx) if show_primary else None
-            layout_s = PangoCairo.create_layout(ctx) if show_secondary else None
+
+            if self._layout_primary is None and show_primary:
+                self._layout_primary = self.widget.create_pango_layout("")
+            if self._layout_secondary is None and show_secondary:
+                self._layout_secondary = self.widget.create_pango_layout("")
             
-            if layout_p:
-                layout_p.set_font_description(Pango.FontDescription.from_string(self.config.get("level_bar_primary_font")))
-                layout_p.set_text(self.primary_text or "", -1)
-            if layout_s:
-                layout_s.set_font_description(Pango.FontDescription.from_string(self.config.get("level_bar_secondary_font")))
-                layout_s.set_text(self.secondary_text or "", -1)
+            if self._layout_primary:
+                self._layout_primary.set_font_description(Pango.FontDescription.from_string(self.config.get("level_bar_primary_font")))
+                self._layout_primary.set_text(self.primary_text or "", -1)
+            if self._layout_secondary:
+                self._layout_secondary.set_font_description(Pango.FontDescription.from_string(self.config.get("level_bar_secondary_font")))
+                self._layout_secondary.set_text(self.secondary_text or "", -1)
             
-            self._draw_superimposed_text(ctx, 0, 0, width, height, layout_p, layout_s)
+            self._draw_superimposed_text(ctx, 0, 0, width, height, self._layout_primary, self._layout_secondary)
         else:
             ratio = float(self.config.get("level_bar_split_ratio", 0.3))
             spacing = 4
@@ -257,17 +264,20 @@ class LevelBarDisplayer(DataDisplayer):
             
             show_primary = str(self.config.get("level_bar_show_primary_label", "True")).lower() == 'true'
             show_secondary = str(self.config.get("level_bar_show_secondary_label", "True")).lower() == 'true'
-            layout_p = PangoCairo.create_layout(ctx) if show_primary else None
-            layout_s = PangoCairo.create_layout(ctx) if show_secondary else None
             
-            if layout_p:
-                layout_p.set_font_description(Pango.FontDescription.from_string(self.config.get("level_bar_primary_font")))
-                layout_p.set_text(self.primary_text or "", -1)
-            if layout_s:
-                layout_s.set_font_description(Pango.FontDescription.from_string(self.config.get("level_bar_secondary_font")))
-                layout_s.set_text(self.secondary_text or "", -1)
+            if self._layout_primary is None and show_primary:
+                self._layout_primary = self.widget.create_pango_layout("")
+            if self._layout_secondary is None and show_secondary:
+                self._layout_secondary = self.widget.create_pango_layout("")
             
-            self._draw_label_set(ctx, text_x, text_y, text_w, text_h, layout_p, layout_s)
+            if self._layout_primary:
+                self._layout_primary.set_font_description(Pango.FontDescription.from_string(self.config.get("level_bar_primary_font")))
+                self._layout_primary.set_text(self.primary_text or "", -1)
+            if self._layout_secondary:
+                self._layout_secondary.set_font_description(Pango.FontDescription.from_string(self.config.get("level_bar_secondary_font")))
+                self._layout_secondary.set_text(self.secondary_text or "", -1)
+            
+            self._draw_label_set(ctx, text_x, text_y, text_w, text_h, self._layout_primary, self._layout_secondary)
 
 
     def _draw_superimposed_text(self, ctx, bar_x, bar_y, bar_width, bar_height, layout_p, layout_s):

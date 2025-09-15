@@ -7,7 +7,7 @@ import math
 from data_displayer import DataDisplayer
 from config_dialog import ConfigOption, build_ui_from_model
 from utils import populate_defaults_from_model
-from ui_helpers import build_background_config_ui
+from ui_helpers import build_background_config_ui, draw_cairo_background
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Pango", "1.0")
@@ -23,6 +23,7 @@ class GraphDisplayer(DataDisplayer):
         self.history, self.secondary_text = [], ""
         self._cached_bg_pixbuf = None
         self._cached_image_path = None
+        self._layout_overlay = None
         super().__init__(panel_ref, config)
         populate_defaults_from_model(self.config, self.get_config_model())
 
@@ -114,6 +115,7 @@ class GraphDisplayer(DataDisplayer):
         if self._cached_image_path != image_path:
             self._cached_image_path = image_path
             self._cached_bg_pixbuf = GdkPixbuf.Pixbuf.new_from_file(image_path) if image_path and os.path.exists(image_path) else None
+        self._layout_overlay = None
         self.graph_area.queue_draw()
 
     def on_draw(self, area, ctx, width, height):
@@ -126,34 +128,7 @@ class GraphDisplayer(DataDisplayer):
             ctx.set_source_rgba(bg_rgba.red, bg_rgba.green, bg_rgba.blue, bg_rgba.alpha)
             ctx.paint()
         else:
-            bg_type = self.config.get("graph_bg_type", "solid")
-            if bg_type == "image" and self._cached_bg_pixbuf:
-                img_w, img_h = self._cached_bg_pixbuf.get_width(), self._cached_bg_pixbuf.get_height()
-                scale = max(width/img_w, height/img_h)
-                ctx.save()
-                ctx.scale(scale, scale)
-                Gdk.cairo_set_source_pixbuf(ctx, self._cached_bg_pixbuf, 0, 0)
-                ctx.paint_with_alpha(float(self.config.get("graph_background_image_alpha", 1.0)))
-                ctx.restore()
-            elif bg_type == "gradient_linear":
-                c1_str, c2_str, angle = self.config.get("graph_gradient_linear_color1"), self.config.get("graph_gradient_linear_color2"), float(self.config.get("graph_gradient_linear_angle_deg", 90.0))
-                angle_rad = angle * math.pi / 180
-                x1, y1 = 0.5 - 0.5 * math.cos(angle_rad), 0.5 - 0.5 * math.sin(angle_rad)
-                x2, y2 = 0.5 + 0.5 * math.cos(angle_rad), 0.5 + 0.5 * math.sin(angle_rad)
-                pat = cairo.LinearGradient(x1 * width, y1 * height, x2 * width, y2 * height)
-                c1=Gdk.RGBA(); c1.parse(c1_str); c2=Gdk.RGBA(); c2.parse(c2_str)
-                pat.add_color_stop_rgba(0, c1.red,c1.green,c1.blue,c1.alpha); pat.add_color_stop_rgba(1, c2.red,c2.green,c2.blue,c2.alpha)
-                ctx.set_source(pat); ctx.paint()
-            elif bg_type == "gradient_radial":
-                c1_str, c2_str = self.config.get("graph_gradient_radial_color1"), self.config.get("graph_gradient_radial_color2")
-                pat = cairo.RadialGradient(width/2, height/2, 0, width/2, height/2, max(width,height)/2)
-                c1=Gdk.RGBA(); c1.parse(c1_str); c2=Gdk.RGBA(); c2.parse(c2_str)
-                pat.add_color_stop_rgba(0, c1.red,c1.green,c1.blue,c1.alpha); pat.add_color_stop_rgba(1, c2.red,c2.green,c2.blue,c2.alpha)
-                ctx.set_source(pat); ctx.paint()
-            else: # solid
-                bg_rgba = Gdk.RGBA(); bg_rgba.parse(self.config.get("graph_bg_color", "rgba(34,34,34,1)"))
-                ctx.set_source_rgba(bg_rgba.red, bg_rgba.green, bg_rgba.blue, bg_rgba.alpha)
-                ctx.paint()
+            draw_cairo_background(ctx, width, height, self.config, "graph_", self._cached_bg_pixbuf)
 
         if str(self.config.get("graph_grid_enabled", "False")).lower() == 'true':
             grid_rgba = Gdk.RGBA(); grid_rgba.parse(self.config.get("graph_grid_color"))
@@ -234,10 +209,11 @@ class GraphDisplayer(DataDisplayer):
                 ctx.set_line_width(float(self.config.get("graph_line_width", 2.0))); ctx.stroke()
 
         if str(self.config.get("show_overlay", "True")).lower() == 'true':
-            layout = PangoCairo.create_layout(ctx)
-            layout.set_font_description(Pango.FontDescription.from_string(self.config.get("overlay_font")))
-            layout.set_text(self.secondary_text, -1)
-            _, log_rect = layout.get_pixel_extents()
+            if self._layout_overlay is None:
+                self._layout_overlay = self.widget.create_pango_layout("")
+            self._layout_overlay.set_font_description(Pango.FontDescription.from_string(self.config.get("overlay_font")))
+            self._layout_overlay.set_text(self.secondary_text, -1)
+            _, log_rect = self._layout_overlay.get_pixel_extents()
             margin = 6
             
             pos = self.config.get("overlay_position", "top_right")
@@ -249,4 +225,5 @@ class GraphDisplayer(DataDisplayer):
 
             text_rgba = Gdk.RGBA(); text_rgba.parse(self.config.get("overlay_text_color"))
             ctx.set_source_rgba(text_rgba.red, text_rgba.green, text_rgba.blue, text_rgba.alpha)
-            ctx.move_to(text_x, text_y); PangoCairo.show_layout(ctx, layout)
+            ctx.move_to(text_x, text_y); PangoCairo.show_layout(ctx, self._layout_overlay)
+
