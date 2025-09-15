@@ -86,7 +86,6 @@ class DashboardComboDisplayer(ComboBase):
                 ConfigOption(f"satellite_{i}_display_as", "dropdown", "Display Type:", "arc_gauge", options_dict=sat_display_opts),
                 ConfigOption(f"satellite_{i}_size", "spinner", "Size (px):", 100, 20, 1000, 10, 0),
             ]
-            # --- FIX: Add individual placement controls for each satellite ---
             model[f"Satellite {i} Placement"] = [
                 ConfigOption(f"satellite_{i}_angle", "spinner", "Placement Angle (°):", 180 + (i-1)*20, -360, 360, 5, 0),
                 ConfigOption(f"satellite_{i}_distance", "scale", "Placement Distance (%):", 0.7, 0.1, 2.0, 0.05, 2),
@@ -110,7 +109,6 @@ class DashboardComboDisplayer(ComboBase):
             dialog.dynamic_models.append(layout_model)
             main_notebook.append_page(layout_scroll, Gtk.Label(label="Layout"))
 
-            # --- FIX: Helper to create dynamic style sections ---
             def setup_dynamic_style_ui(parent_box, prefix, display_type_key):
                 display_type_combo = widgets.get(display_type_key)
                 if not display_type_combo: return
@@ -120,8 +118,11 @@ class DashboardComboDisplayer(ComboBase):
                     section_title = f"Style for {key.replace('_', ' ').title()}"
                     style_sections[key] = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
                     
-                    sub_model = {section_title: [ConfigOption(f"{prefix}_{opt.key}", opt.type, opt.label, opt.default, opt.min_val, opt.max_val, opt.step, opt.digits, opt.options_dict, opt.tooltip, opt.file_filters) for s in drawer_class.get_config_model().values() for opt in s]}
-                    
+                    sub_model = {}
+                    for s_title, s_opts in drawer_class.get_config_model().items():
+                        prefixed_opts = [ConfigOption(f"{prefix}_{opt.key}", opt.type, opt.label, opt.default, opt.min_val, opt.max_val, opt.step, opt.digits, opt.options_dict, opt.tooltip, opt.file_filters) for opt in s_opts]
+                        sub_model[s_title] = prefixed_opts
+
                     build_ui_from_model(style_sections[key], panel_config, sub_model, widgets)
                     dialog.dynamic_models.append(sub_model)
                     parent_box.append(style_sections[key])
@@ -133,7 +134,6 @@ class DashboardComboDisplayer(ComboBase):
                 
                 display_type_combo.connect("changed", on_display_type_changed)
                 GLib.idle_add(on_display_type_changed, display_type_combo)
-
 
             # --- Center Styles Tab ---
             center_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
@@ -191,7 +191,7 @@ class DashboardComboDisplayer(ComboBase):
                 for i, tab in enumerate(satellite_tabs):
                     tab.set_visible(i < sat_count)
 
-            if dialog.apply_button:
+            if hasattr(dialog, 'apply_button') and dialog.apply_button:
                 dialog.apply_button.connect("clicked", lambda w: GLib.idle_add(update_tab_visibility))
             
             GLib.idle_add(update_tab_visibility)
@@ -203,7 +203,6 @@ class DashboardComboDisplayer(ComboBase):
         if not isinstance(value, dict) or not self.panel_ref:
             return
             
-        # --- FIX: Directly update child drawers when new data arrives ---
         all_prefixes = [f"center_{i}" for i in range(1,5)] + [f"satellite_{i}" for i in range(1,13)]
         for prefix in all_prefixes:
             source_key = f"{prefix}_source"
@@ -213,7 +212,6 @@ class DashboardComboDisplayer(ComboBase):
             
             if drawer and self.panel_ref.data_source and hasattr(self.panel_ref.data_source, 'child_sources'):
                 child_source_instance = self.panel_ref.data_source.child_sources.get(source_key)
-                # Pass the override so the child can format its own text
                 drawer.update_display(data_packet.get('raw_data'), source_override=child_source_instance)
 
 
@@ -304,11 +302,6 @@ class DashboardComboDisplayer(ComboBase):
         return positions
 
     def _draw_sub_display(self, ctx, x, y, w, h, prefix, data_bundle):
-        # --- FIX: This helper class is no longer needed with the new architecture ---
-        # class MockPanelRef:
-        #     def __init__(self, source_instance):
-        #         self.data_source = source_instance
-
         display_as = self.config.get(f"{prefix}_display_as", "speedometer")
         drawer = self._drawers.get(display_as)
         if not drawer: return
@@ -332,7 +325,6 @@ class DashboardComboDisplayer(ComboBase):
         
         # 3. Apply styles (which re-caches images etc.)
         drawer.apply_styles()
-        # Note: update_display is now handled by the main update_display loop
 
         # 4. Now draw the component
         ctx.save()
@@ -366,4 +358,3 @@ class DashboardComboDisplayer(ComboBase):
                 drawer.close()
         self._drawers.clear()
         super().close()
-

@@ -67,6 +67,10 @@ class PanelBuilderDialog:
         
         self.dialog.add_non_modal_button("_Cancel", style_class="destructive-action").connect("clicked", lambda w: self.dialog.destroy())
         self.create_button = self.dialog.add_non_modal_button("_Create Panel", style_class="suggested-action", is_default=True)
+        
+        # --- BUG FIX: Assign the button to the dialog attribute *before* building tabs that might need it ---
+        self.dialog.apply_button = self.create_button
+        
         self.create_button.connect("clicked", self._on_create_panel)
         self.create_button.set_sensitive(False)
 
@@ -271,4 +275,3 @@ class PanelBuilderDialog:
         self.grid_manager.create_and_add_panel_from_config(final_config)
         
         self.dialog.destroy()
-

@@ -46,7 +46,7 @@ DEFAULT_PANEL_LAYOUT = [
 
 class MainWindow(Gtk.ApplicationWindow):
     def __init__(self, app, sensors_ready_event=None):
-        super().__init__(title="GTK System Monitor", application=app)
+        super().__init__(title="gSens System Monitor", application=app)
         self.app = app
         self.sensors_ready_event = sensors_ready_event
 
@@ -260,13 +260,16 @@ class SystemMonitorApp(Gtk.Application):
     def do_startup(self):
         Gtk.Application.do_startup(self)
         
+        # Set the application icon using the Freedesktop Icon Theme Specification.
+        # This is the standard way for distributable Linux applications.
+        # For this to work, the icon (e.g., gSens.png) must be installed to a directory like:
+        # /usr/share/icons/hicolor/256x256/apps/com.example.gtk-system-monitor.png
         try:
-            icon_path = os.path.join(APP_DIR, "system-monitor-icon.png")
-            if os.path.exists(icon_path):
-                pixbuf = GdkPixbuf.Pixbuf.new_from_file(icon_path)
-                Gtk.Window.set_default_icon(pixbuf)
+            icon_name = self.get_application_id()
+            if icon_name:
+                Gtk.Window.set_default_icon_name(icon_name)
         except Exception as e:
-            print(f"An unexpected error occurred while setting default icon: {e}")
+            print(f"Warning: Could not set default icon by name: {e}")
 
         gpu_manager.init()
         update_manager.start()

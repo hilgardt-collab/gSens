@@ -77,6 +77,11 @@ class ComboDataSource(DataSource):
                 create_child("primary_")
                 num_secondary = int(self.config.get("number_of_secondary_sources", 4))
                 for i in range(1, num_secondary + 1): create_child(f"secondary{i}_")
+            elif mode == 'dashboard':
+                num_center = int(self.config.get("dashboard_center_count", 1))
+                for i in range(1, num_center + 1): create_child(f"center_{i}_")
+                num_satellite = int(self.config.get("dashboard_satellite_count", 4))
+                for i in range(1, num_satellite + 1): create_child(f"satellite_{i}_")
             else: # 'arc' mode
                 create_child("center_")
                 num_arcs = int(self.config.get("combo_arc_count", 5))
@@ -278,6 +283,61 @@ class ComboDataSource(DataSource):
             primary_combo.connect("changed", lambda c, cb=callback: cb(source_key=c.get_active_id()))
             GLib.idle_add(_build_slot_config_ui, panel_config.get("primary_source", "none"), primary_sub_config_box, "primary_", dialog, widgets, available_sources, panel_config)
 
+        def _build_dashboard_config_ui(dialog, content_box, widgets, available_sources, panel_config, source_opts):
+            """Builds the configuration UI for the Dashboard Combo's data sources."""
+            # --- Center Displays ---
+            center_count_model = {"": [ConfigOption("dashboard_center_count", "spinner", "Number of Center Displays:", 1, 1, 4, 1, 0)]}
+            build_ui_from_model(content_box, panel_config, center_count_model, widgets)
+            dialog.dynamic_models.append(center_count_model)
+            
+            content_box.append(Gtk.Label(label="<b>Center Display Sources</b>", use_markup=True, xalign=0, margin_top=10))
+            center_notebook = Gtk.Notebook(); center_notebook.set_scrollable(True); content_box.append(center_notebook)
+            center_tabs = []
+            for i in range(1, 5):
+                scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True, min_content_height=300)
+                tab_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10); scroll.set_child(tab_box)
+                page_num = center_notebook.append_page(scroll, Gtk.Label(label=f"Center {i}")); center_tabs.append(center_notebook.get_nth_page(page_num))
+                prefix, slot_key = f"center_{i}_", f"center_{i}_source"
+                model = {f"Center {i}": [ ConfigOption(slot_key, "dropdown", "Source:", "none", options_dict=source_opts), ConfigOption(f"{prefix}caption", "string", "Label Override:", "") ]}
+                build_ui_from_model(tab_box, panel_config, model, widgets); dialog.dynamic_models.append(model)
+                sub_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=20); tab_box.append(sub_box)
+                combo = widgets[slot_key]
+                cb = partial(_build_slot_config_ui, parent_box=sub_box, prefix=prefix, dialog=dialog, widgets=widgets, available_sources=available_sources, panel_config=panel_config)
+                combo.connect("changed", lambda c, callback=cb: callback(source_key=c.get_active_id()))
+                GLib.idle_add(_build_slot_config_ui, panel_config.get(slot_key, "none"), sub_box, prefix, dialog, widgets, available_sources, panel_config)
+
+            def on_center_count_changed(spinner):
+                for i, tab in enumerate(center_tabs): tab.set_visible(i < spinner.get_value_as_int())
+            
+            center_count_spinner = widgets["dashboard_center_count"]; center_count_spinner.connect("value-changed", on_center_count_changed); GLib.idle_add(on_center_count_changed, center_count_spinner)
+
+            # --- Satellite Displays ---
+            content_box.append(Gtk.Separator(margin_top=15, margin_bottom=5))
+            satellite_count_model = {"": [ConfigOption("dashboard_satellite_count", "spinner", "Number of Satellite Displays:", 4, 0, 12, 1, 0)]}
+            build_ui_from_model(content_box, panel_config, satellite_count_model, widgets)
+            dialog.dynamic_models.append(satellite_count_model)
+            
+            content_box.append(Gtk.Label(label="<b>Satellite Display Sources</b>", use_markup=True, xalign=0, margin_top=10))
+            satellite_notebook = Gtk.Notebook(); satellite_notebook.set_scrollable(True); content_box.append(satellite_notebook)
+            satellite_tabs = []
+            for i in range(1, 13):
+                scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True, min_content_height=300)
+                tab_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10); scroll.set_child(tab_box)
+                page_num = satellite_notebook.append_page(scroll, Gtk.Label(label=f"Satellite {i}")); satellite_tabs.append(satellite_notebook.get_nth_page(page_num))
+                prefix, slot_key = f"satellite_{i}_", f"satellite_{i}_source"
+                model = {f"Satellite {i}": [ ConfigOption(slot_key, "dropdown", "Source:", "none", options_dict=source_opts), ConfigOption(f"{prefix}caption", "string", "Label Override:", "") ]}
+                build_ui_from_model(tab_box, panel_config, model, widgets); dialog.dynamic_models.append(model)
+                sub_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=20); tab_box.append(sub_box)
+                combo = widgets[slot_key]
+                cb = partial(_build_slot_config_ui, parent_box=sub_box, prefix=prefix, dialog=dialog, widgets=widgets, available_sources=available_sources, panel_config=panel_config)
+                combo.connect("changed", lambda c, callback=cb: callback(source_key=c.get_active_id()))
+                GLib.idle_add(_build_slot_config_ui, panel_config.get(slot_key, "none"), sub_box, prefix, dialog, widgets, available_sources, panel_config)
+
+            def on_satellite_count_changed(spinner):
+                for i, tab in enumerate(satellite_tabs): tab.set_visible(i < spinner.get_value_as_int())
+            
+            satellite_count_spinner = widgets["dashboard_satellite_count"]; satellite_count_spinner.connect("value-changed", on_satellite_count_changed); GLib.idle_add(on_satellite_count_changed, satellite_count_spinner)
+
         def build_main_config_ui(dialog, content_box, widgets, available_sources, panel_config):
             sources_iterable = available_sources.values() if isinstance(available_sources, dict) else available_sources
             source_opts = {"None": "none", **{info['name']: info['key'] for info in sources_iterable if info['key'] != 'combo'}}
@@ -287,6 +347,8 @@ class ComboDataSource(DataSource):
                 _build_level_bar_config_ui(dialog, content_box, widgets, available_sources, panel_config, source_opts)
             elif mode == 'lcars':
                 _build_lcars_config_ui(dialog, content_box, widgets, available_sources, panel_config, source_opts)
+            elif mode == 'dashboard':
+                _build_dashboard_config_ui(dialog, content_box, widgets, available_sources, panel_config, source_opts)
             else: # Default to arc
                 _build_arc_config_ui(dialog, content_box, widgets, available_sources, panel_config, source_opts)
 

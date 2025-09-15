@@ -1,3 +1,4 @@
+
 # data_displayers/text.py
 import gi
 import math
@@ -19,6 +20,7 @@ class TextDisplayer(DataDisplayer):
     def __init__(self, panel_ref, config):
         self._text_lines = []
         self._layout_cache = []
+        self._last_data = None
         super().__init__(panel_ref, config)
         populate_defaults_from_model(self.config, self.get_config_model())
 
@@ -49,7 +51,15 @@ class TextDisplayer(DataDisplayer):
     def update_display(self, data):
         """Updates the text content for each line and queues a redraw."""
         if not self.panel_ref: return
+
+        # Cache the last valid data packet
+        if data is not None:
+            self._last_data = data
         
+        # Determine which data to use for this draw cycle
+        data_to_use = data if data is not None else self._last_data
+        
+        # Ensure our internal state matches the config before proceeding
         line_count = int(self.config.get("text_line_count", "2"))
         if len(self._text_lines) != line_count:
             self._initialize_text_lines()
@@ -59,21 +69,23 @@ class TextDisplayer(DataDisplayer):
             source_key = self.config.get(f"line{line_num}_source", "display_string")
             
             text = "N/A"
-            if data is not None:
+            if data_to_use is not None:
                 if source_key == "primary_label":
-                    text = self.panel_ref.data_source.get_primary_label_string(data)
+                    text = self.panel_ref.data_source.get_primary_label_string(data_to_use)
                 elif source_key == "secondary_label":
-                    text = self.panel_ref.data_source.get_secondary_display_string(data)
+                    text = self.panel_ref.data_source.get_secondary_display_string(data_to_use)
                 elif source_key == "tooltip_string":
-                    text = self.panel_ref.data_source.get_tooltip_string(data)
+                    text = self.panel_ref.data_source.get_tooltip_string(data_to_use)
                 elif source_key == "custom_text":
                     text = self.config.get(f"line{line_num}_custom_text", "")
                 else: # display_string
-                    text = self.panel_ref.data_source.get_display_string(data)
+                    text = self.panel_ref.data_source.get_display_string(data_to_use)
             
             self._text_lines[i] = text or ""
         
-        self.panel_ref.set_tooltip_text(self.panel_ref.data_source.get_tooltip_string(data))
+        if data_to_use is not None:
+            self.panel_ref.set_tooltip_text(self.panel_ref.data_source.get_tooltip_string(data_to_use))
+        
         self.widget.queue_draw()
 
     @staticmethod
@@ -150,11 +162,10 @@ class TextDisplayer(DataDisplayer):
         """Forces a redraw when styles change and ensures text line buffer is correct."""
         super().apply_styles()
         
-        line_count = int(self.config.get("text_line_count", "2"))
-        if len(self._text_lines) != line_count:
-            self._initialize_text_lines()
-            
-        self.widget.queue_draw()
+        # By calling update_display with None, we trigger a refresh using the
+        # last known data. This will correctly resize and repopulate the text
+        # lines if the number of lines has changed in the config.
+        self.update_display(None)
 
     def on_draw(self, area, ctx, width, height):
         """Draws all configured text lines onto the Cairo context."""
@@ -230,3 +241,4 @@ class TextDisplayer(DataDisplayer):
             ctx.restore()
             
             current_y += text_height + spacing
+

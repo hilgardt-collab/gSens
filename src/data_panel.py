@@ -273,14 +273,6 @@ class DataPanel(BasePanel):
         notebook.append_page(display_scroll, Gtk.Label(label="Display"))
         build_ui_from_model(display_tab_box, self.config, display_model, all_widgets)
 
-        source_custom_builder = self.data_source.get_configure_callback()
-        if source_custom_builder:
-            source_custom_builder(dialog, source_tab_box, all_widgets, AVAILABLE_DATA_SOURCES, self.config)
-            
-        display_custom_builder = self.data_displayer.get_configure_callback()
-        if display_custom_builder:
-            display_custom_builder(dialog, display_tab_box, all_widgets, AVAILABLE_DATA_SOURCES, self.config)
-        
         def apply_changes(widget=None):
             dialog_state['changes_applied'] = True 
             models_to_check = [ panel_model, display_type_model, source_model, self.data_displayer.get_config_model(), *dialog.dynamic_models ]
@@ -317,14 +309,26 @@ class DataPanel(BasePanel):
 
         cancel_button = dialog.add_non_modal_button("_Cancel", style_class="destructive-action")
         cancel_button.connect("clicked", lambda w: dialog.destroy())
+        
         apply_button = dialog.add_non_modal_button("_Apply")
+        # --- BUG FIX: Assign apply_button to the dialog object so custom builders can access it ---
         dialog.apply_button = apply_button
         apply_button.connect("clicked", apply_changes)
+        
         accept_button = dialog.add_non_modal_button("_Accept", style_class="suggested-action", is_default=True)
         def on_accept(widget):
             apply_changes(widget)
             if dialog.is_visible(): dialog.destroy()
         accept_button.connect("clicked", on_accept)
+        
+        # --- BUG FIX: Call custom builders *after* the apply button has been created ---
+        source_custom_builder = self.data_source.get_configure_callback()
+        if source_custom_builder:
+            source_custom_builder(dialog, source_tab_box, all_widgets, AVAILABLE_DATA_SOURCES, self.config)
+            
+        display_custom_builder = self.data_displayer.get_configure_callback()
+        if display_custom_builder:
+            display_custom_builder(dialog, display_tab_box, all_widgets, AVAILABLE_DATA_SOURCES, self.config)
 
         def on_dialog_destroy(d):
             if not dialog_state['changes_applied']:
@@ -338,4 +342,3 @@ class DataPanel(BasePanel):
 
         dialog.connect("destroy", on_dialog_destroy)
         dialog.present()
-
