@@ -36,9 +36,10 @@ class MemoryUsageDataSource(DataSource):
         return "" # Return empty string if style is 'none'
 
     def get_tooltip_string(self, data):
-        if not isinstance(data, dict) or data.get("error"): 
-            return f"Memory\\nError: {data.get('error', 'N/A')}"
-        return f"Memory Usage\\nUsed: {data['used_gb']:.1f} GB ({data['percent']:.1f}%)\\nTotal: {data['total_gb']:.1f} GB"
+        # BUG FIX: Add a check to handle None data gracefully
+        if data is None or not isinstance(data, dict) or data.get("error"): 
+            return f"Memory\nError: {data.get('error', 'N/A') if isinstance(data, dict) else 'No data'}"
+        return f"Memory Usage\nUsed: {data['used_gb']:.1f} GB ({data['percent']:.1f}%)\nTotal: {data['total_gb']:.1f} GB"
 
     @staticmethod
     def get_config_model():

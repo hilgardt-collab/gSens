@@ -22,11 +22,13 @@ class SpeedometerDisplayer(DataDisplayer):
         self.current_value = 0.0
         self.display_value_text = "0"
         self.unit_text = ""
+        self.caption_text = ""
         
         # Animation state
         self._animation_timer_id = None
         self._current_display_value = float(config.get("graph_min_value", 0.0))
         self._target_value = self._current_display_value
+        self._first_update = True
         
         # Caching state
         self._static_surface = None
@@ -35,7 +37,8 @@ class SpeedometerDisplayer(DataDisplayer):
         self._cached_image_path = None
         self._layout_value = None
         self._layout_unit = None
-        self._layout_tick_numbers = None # For static drawing
+        self._layout_caption = None
+        self._layout_tick_numbers = None
         
         super().__init__(panel_ref, config)
         populate_defaults_from_model(self.config, self.get_config_model())
@@ -49,12 +52,21 @@ class SpeedometerDisplayer(DataDisplayer):
         return drawing_area
 
     def update_display(self, value, **kwargs):
-        source = self.panel_ref.data_source
+        source = self.panel_ref.data_source if self.panel_ref else None
         if 'source_override' in kwargs and kwargs['source_override']:
             source = kwargs['source_override']
+        
+        if not source: return
             
         new_value = source.get_numerical_value(value) or 0.0
+        
+        if self._first_update:
+            self._current_display_value = new_value
+            self._first_update = False
+
         self._target_value = new_value
+        
+        self.caption_text = kwargs.get('caption', '')
         
         display_string = source.get_display_string(value)
         
@@ -98,10 +110,17 @@ class SpeedometerDisplayer(DataDisplayer):
             ConfigOption("speedo_show_unit_text", "bool", "Show Unit Text:", "True"),
             ConfigOption("speedo_unit_font", "font", "Unit Font:", "Sans 14"),
             ConfigOption("speedo_unit_color", "color", "Unit Color:", "rgba(200,200,200,1)"),
+            ConfigOption("speedo_show_caption", "bool", "Show Caption Text:", "True"),
+            ConfigOption("speedo_caption_font", "font", "Caption Font:", "Sans 12"),
+            ConfigOption("speedo_caption_color", "color", "Caption Color:", "rgba(200,200,200,1)"),
             ConfigOption("speedo_text_spacing", "spinner", "Text Spacing (px):", 5, 0, 50, 1, 0),
             ConfigOption("speedo_text_vertical_offset", "spinner", "V. Offset:", 0, -100, 100, 1, 0)
         ]
         return model
+
+    @staticmethod
+    def get_config_key_prefixes():
+        return ["speedo_"]
 
     def get_configure_callback(self):
         def build_dial_config(dialog, content_box, widgets, available_sources, panel_config):
@@ -119,9 +138,10 @@ class SpeedometerDisplayer(DataDisplayer):
                 print(f"Error loading speedometer image: {e}")
                 self._cached_bg_pixbuf = None
 
-        self._static_surface = None # Invalidate cache
+        self._static_surface = None
         self._layout_value = None
         self._layout_unit = None
+        self._layout_caption = None
         self._layout_tick_numbers = None
         self.widget.queue_draw()
 
@@ -238,16 +258,31 @@ class SpeedometerDisplayer(DataDisplayer):
         
         if self._layout_unit is None: self._layout_unit = self.widget.create_pango_layout("")
         self._layout_unit.set_font_description(Pango.FontDescription.from_string(self.config.get("speedo_unit_font"))); self._layout_unit.set_text(self.unit_text, -1); _, log_u = self._layout_unit.get_pixel_extents()
-        
+
+        if self._layout_caption is None: self._layout_caption = self.widget.create_pango_layout("")
+        self._layout_caption.set_font_description(Pango.FontDescription.from_string(self.config.get("speedo_caption_font"))); self._layout_caption.set_text(self.caption_text, -1); _, log_c = self._layout_caption.get_pixel_extents()
+
         spacing = float(self.config.get("speedo_text_spacing", 5)); total_text_height = 0
-        if str(self.config.get("speedo_show_value_text", "True")).lower() == 'true': total_text_height += log_v.height
-        if str(self.config.get("speedo_show_unit_text", "True")).lower() == 'true': total_text_height += log_u.height
-        if str(self.config.get("speedo_show_value_text", "True")).lower() == 'true' and str(self.config.get("speedo_show_unit_text", "True")).lower() == 'true': total_text_height += spacing
+        show_val = str(self.config.get("speedo_show_value_text", "True")).lower() == 'true'
+        show_unit = str(self.config.get("speedo_show_unit_text", "True")).lower() == 'true' and bool(self.unit_text)
+        show_caption = str(self.config.get("speedo_show_caption", "True")).lower() == 'true' and bool(self.caption_text)
+
+        if show_caption: total_text_height += log_c.height
+        if show_val: total_text_height += log_v.height
+        if show_unit: total_text_height += log_u.height
+        
+        active_elements = sum([show_caption, show_val, show_unit])
+        if active_elements > 1: total_text_height += (active_elements -1) * spacing
+
         start_y = (cy - total_text_height / 2) + v_offset
-        if str(self.config.get("speedo_show_value_text", "True")).lower() == 'true':
+        
+        if show_caption:
+            cap_color = Gdk.RGBA(); cap_color.parse(self.config.get("speedo_caption_color")); ctx.set_source_rgba(cap_color.red, cap_color.green, cap_color.blue, cap_color.alpha)
+            ctx.move_to(cx - log_c.width/2, start_y); PangoCairo.show_layout(ctx, self._layout_caption); start_y += log_c.height + spacing
+        if show_val:
             val_color = Gdk.RGBA(); val_color.parse(self.config.get("speedo_value_color")); ctx.set_source_rgba(val_color.red, val_color.green, val_color.blue, val_color.alpha)
             ctx.move_to(cx - log_v.width/2, start_y); PangoCairo.show_layout(ctx, self._layout_value); start_y += log_v.height + spacing
-        if str(self.config.get("speedo_show_unit_text", "True")).lower() == 'true':
+        if show_unit:
             unit_color = Gdk.RGBA(); unit_color.parse(self.config.get("speedo_unit_color")); ctx.set_source_rgba(unit_color.red, unit_color.green, unit_color.blue, unit_color.alpha)
             ctx.move_to(cx - log_u.width/2, start_y); PangoCairo.show_layout(ctx, self._layout_unit)
 

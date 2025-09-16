@@ -39,7 +39,6 @@ def draw_cairo_background(ctx, width, height, config, prefix, pixbuf=None, shape
         angle = float(config.get(f"{prefix}gradient_linear_angle_deg", 90.0))
         angle_rad = math.radians(angle)
 
-        # Calculate gradient vector based on angle and bounding box of the shape
         x1, y1 = 0.5 - 0.5 * math.cos(angle_rad), 0.5 - 0.5 * math.sin(angle_rad)
         x2, y2 = 0.5 + 0.5 * math.cos(angle_rad), 0.5 + 0.5 * math.sin(angle_rad)
         pat = cairo.LinearGradient(x1 * width, y1 * height, x2 * width, y2 * height)
@@ -55,7 +54,6 @@ def draw_cairo_background(ctx, width, height, config, prefix, pixbuf=None, shape
         c1_str = config.get(f"{prefix}gradient_radial_color1")
         c2_str = config.get(f"{prefix}gradient_radial_color2")
         
-        # Use shape_info if available for a better fit, else use bounding box
         cx = shape_info.get('cx', width/2) if shape_info else width/2
         cy = shape_info.get('cy', height/2) if shape_info else height/2
         radius = shape_info.get('radius', max(width, height)/2) if shape_info else max(width, height)/2
@@ -75,41 +73,63 @@ def draw_cairo_background(ctx, width, height, config, prefix, pixbuf=None, shape
         ctx.set_source_rgba(bg_rgba.red, bg_rgba.green, bg_rgba.blue, bg_rgba.alpha)
         ctx.paint()
 
+def get_background_config_model(prefix):
+    """
+    Returns a dictionary defining the configuration model for background styles,
+    with all keys using the provided prefix. This is a data-only function.
+    """
+    image_file_filters = [{"name": "Image Files", "patterns": ["*.png", "*.jpg", "*.jpeg", "*.bmp", "*.svg"]}, {"name": "All Files", "patterns": ["*"]}]
+    
+    return {
+        "Background Style": [
+            ConfigOption(f"{prefix}bg_type", "dropdown", "Style:", "solid", 
+                         options_dict={"Solid Color": "solid", "Linear Gradient": "gradient_linear", 
+                                       "Radial Gradient": "gradient_radial", "Image": "image"}),
+            ConfigOption(f"{prefix}bg_color", "color", "Color:", "#222222"),
+            ConfigOption(f"{prefix}gradient_linear_color1", "color", "Start Color:", "#444444"),
+            ConfigOption(f"{prefix}gradient_linear_color2", "color", "End Color:", "#222222"),
+            ConfigOption(f"{prefix}gradient_linear_angle_deg", "spinner", "Angle (°):", 90.0, 0, 359, 1, 0),
+            ConfigOption(f"{prefix}gradient_radial_color1", "color", "Center Color:", "#444444"),
+            ConfigOption(f"{prefix}gradient_radial_color2", "color", "Edge Color:", "#222222"),
+            ConfigOption(f"{prefix}background_image_path", "file", "Image File:", "", file_filters=image_file_filters),
+            ConfigOption(f"{prefix}background_image_style", "dropdown", "Style:", "zoom", 
+                                       options_dict={"Zoom (Cover)": "zoom", "Tile": "tile", "Stretch": "stretch"}),
+            ConfigOption(f"{prefix}background_image_alpha", "scale", "Image Opacity:", "1.0", min_val=0.0, max_val=1.0, step=0.05, digits=2),
+        ]
+    }
+
 def build_background_config_ui(parent_box, config, widgets, dialog_parent, prefix, title="Background Settings"):
     """
     Builds and adds a comprehensive set of UI controls for selecting a background
-    (solid, gradient, image) to a given parent container. All config keys are
-    prefixed to allow for multiple background configurations in the same dialog.
+    (solid, gradient, image) to a given parent container.
     """
-
     sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL, margin_top=12, margin_bottom=6)
     parent_box.append(sep)
     header_label = Gtk.Label(xalign=0)
     header_label.set_markup(f"<b>{title}</b>")
     parent_box.append(header_label)
 
-    image_file_filters = [{"name": "Image Files", "patterns": ["*.png", "*.jpg", "*.jpeg", "*.bmp", "*.svg"]}, {"name": "All Files", "patterns": ["*"]}]
-
+    # Use the helper to get the model definition
+    full_model = get_background_config_model(prefix)
+    bg_model_list = full_model.get("Background Style", [])
+    
     bg_model = {
-        "bg_type": ConfigOption(f"{prefix}bg_type", "dropdown", "Style:", "solid", 
-                                options_dict={"Solid Color": "solid", "Linear Gradient": "gradient_linear", 
-                                              "Radial Gradient": "gradient_radial", "Image": "image"}),
-        "bg_color": ConfigOption(f"{prefix}bg_color", "color", "Color:", "#222222"),
-        "gradient_linear_color1": ConfigOption(f"{prefix}gradient_linear_color1", "color", "Start Color:", "#444444"),
-        "gradient_linear_color2": ConfigOption(f"{prefix}gradient_linear_color2", "color", "End Color:", "#222222"),
-        "gradient_linear_angle": ConfigOption(f"{prefix}gradient_linear_angle_deg", "spinner", "Angle (°):", 90.0, 0, 359, 1, 0),
-        "gradient_radial_color1": ConfigOption(f"{prefix}gradient_radial_color1", "color", "Center Color:", "#444444"),
-        "gradient_radial_color2": ConfigOption(f"{prefix}gradient_radial_color2", "color", "Edge Color:", "#222222"),
-        "background_image_path": ConfigOption(f"{prefix}background_image_path", "file", "Image File:", "", file_filters=image_file_filters),
-        "background_image_style": ConfigOption(f"{prefix}background_image_style", "dropdown", "Style:", "zoom", 
-                                               options_dict={"Zoom (Cover)": "zoom", "Tile": "tile", "Stretch": "stretch"}),
-        "background_image_alpha": ConfigOption(f"{prefix}background_image_alpha", "scale", "Image Opacity:", "1.0", min_val=0.0, max_val=1.0, step=0.05, digits=2),
+        "bg_type": next(o for o in bg_model_list if o.key == f"{prefix}bg_type"),
+        "bg_color": next(o for o in bg_model_list if o.key == f"{prefix}bg_color"),
+        "gradient_linear_color1": next(o for o in bg_model_list if o.key == f"{prefix}gradient_linear_color1"),
+        "gradient_linear_color2": next(o for o in bg_model_list if o.key == f"{prefix}gradient_linear_color2"),
+        "gradient_linear_angle": next(o for o in bg_model_list if o.key == f"{prefix}gradient_linear_angle_deg"),
+        "gradient_radial_color1": next(o for o in bg_model_list if o.key == f"{prefix}gradient_radial_color1"),
+        "gradient_radial_color2": next(o for o in bg_model_list if o.key == f"{prefix}gradient_radial_color2"),
+        "background_image_path": next(o for o in bg_model_list if o.key == f"{prefix}background_image_path"),
+        "background_image_style": next(o for o in bg_model_list if o.key == f"{prefix}background_image_style"),
+        "background_image_alpha": next(o for o in bg_model_list if o.key == f"{prefix}background_image_alpha"),
     }
     
-    if not hasattr(dialog_parent, 'ui_models'):
+    if dialog_parent and not hasattr(dialog_parent, 'ui_models'):
         dialog_parent.ui_models = {}
-    
-    dialog_parent.ui_models[f'background_{prefix}'] = {title: list(bg_model.values())}
+    if dialog_parent:
+        dialog_parent.ui_models[f'background_{prefix}'] = {title: bg_model_list}
 
     build_ui_from_model(parent_box, config, {"": [bg_model["bg_type"]]}, widgets)
     
@@ -291,7 +311,7 @@ class CustomDialog(Gtk.Window):
             self.set_transient_for(parent)
         self.set_title(title)
         self.set_modal(modal)
-        self.set_resizable(True) # Changed from False to True
+        self.set_resizable(True) 
         self.set_deletable(True)
         self.set_hide_on_close(not modal) 
 

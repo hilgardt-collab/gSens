@@ -24,6 +24,7 @@ class GraphDisplayer(DataDisplayer):
         self._cached_bg_pixbuf = None
         self._cached_image_path = None
         self._layout_overlay = None
+        self.alarm_config_prefix = "data_" # Default prefix
         super().__init__(panel_ref, config)
         populate_defaults_from_model(self.config, self.get_config_model())
 
@@ -32,21 +33,25 @@ class GraphDisplayer(DataDisplayer):
         self.graph_area.set_draw_func(self.on_draw)
         return self.graph_area
 
-    def update_display(self, value):
-        if not self.panel_ref: return
+    def update_display(self, value, **kwargs):
+        source = kwargs.get('source_override', self.panel_ref.data_source if self.panel_ref else None)
+        if source is None: return
         
+        # Store the alarm prefix from the specific source for this update cycle
+        self.alarm_config_prefix = getattr(source, 'alarm_config_prefix', 'data_')
+
         raw_data = value
-        num_val = 0.0
-        if self.panel_ref.data_source:
-            num_val = self.panel_ref.data_source.get_numerical_value(raw_data)
+        num_val = source.get_numerical_value(raw_data)
         
         max_hist = int(self.config.get("max_history_points", 100))
         if num_val is not None:
             self.history.append((time.time(), num_val))
             if len(self.history) > max_hist: self.history = self.history[-max_hist:]
             
-        if self.panel_ref.data_source:
-            self.secondary_text = self.panel_ref.data_source.get_display_string(raw_data)
+        caption_text = kwargs.get('caption', source.get_primary_label_string(raw_data))
+        value_text = source.get_display_string(raw_data)
+        
+        self.secondary_text = f"{caption_text}: {value_text}" if caption_text and value_text else caption_text or value_text
             
         self.graph_area.queue_draw()
 
@@ -84,11 +89,9 @@ class GraphDisplayer(DataDisplayer):
 
     @staticmethod
     def get_config_key_prefixes():
-        """Returns the unique prefix used for the graph background settings."""
         return ["graph_"]
 
     def get_configure_callback(self):
-        """A custom callback to dynamically show/hide line-specific options."""
         def setup_dynamic_options(dialog, content_box, widgets, available_sources, panel_config):
             build_background_config_ui(content_box, panel_config, widgets, dialog, prefix="graph_", title="Graph Background")
             
@@ -123,7 +126,7 @@ class GraphDisplayer(DataDisplayer):
 
         is_alarm = self.panel_ref is not None and self.panel_ref.is_in_alarm_state and self.panel_ref._alarm_flash_on
         if is_alarm:
-            bg_color_str = self.config.get(self.panel_ref.data_source.alarm_config_prefix + "alarm_color", "rgba(255,0,0,0.6)")
+            bg_color_str = self.config.get(self.alarm_config_prefix + "alarm_color", "rgba(255,0,0,0.6)")
             bg_rgba = Gdk.RGBA(); bg_rgba.parse(bg_color_str)
             ctx.set_source_rgba(bg_rgba.red, bg_rgba.green, bg_rgba.blue, bg_rgba.alpha)
             ctx.paint()

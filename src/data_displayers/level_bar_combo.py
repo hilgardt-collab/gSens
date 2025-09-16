@@ -66,6 +66,10 @@ class LevelBarComboDisplayer(ComboBase):
 
     @staticmethod
     def get_config_model():
+        """
+        Returns an empty model. All UI for this complex displayer is built
+        inside the get_configure_callback method to handle the notebook layout.
+        """
         return {}
 
     def get_configure_callback(self):
@@ -97,7 +101,9 @@ class LevelBarComboDisplayer(ComboBase):
 
             # --- Effects Tab ---
             effects_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin_top=15, margin_bottom=15, margin_start=15, margin_end=15)
-            display_notebook.append_page(effects_box, Gtk.Label(label="Effects"))
+            effects_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
+            effects_scroll.set_child(effects_box)
+            display_notebook.append_page(effects_scroll, Gtk.Label(label="Effects"))
             
             # Effect 1: Copy Style
             effects_box.append(Gtk.Label(label="<b>Copy Bar Style</b>", xalign=0, use_markup=True))
@@ -246,7 +252,7 @@ class LevelBarComboDisplayer(ComboBase):
         else:
             for bar_key, values in self._bar_values.items():
                 diff = values['target'] - values['current']
-                if abs(diff) < 0.01:
+                if abs(diff) < 0.001:
                     if values['current'] != values['target']:
                         values['current'] = values['target']
                         needs_redraw = True
@@ -295,10 +301,6 @@ class LevelBarComboDisplayer(ComboBase):
             drawer_config['level_max_value'] = data_packet.get('max_value', 100.0)
 
             self._drawer.config = drawer_config
-            # This is the FIX:
-            # Explicitly call apply_styles on the drawer instance.
-            # This will invalidate its internal static surface cache, forcing it
-            # to be redrawn with the new style settings for the current bar.
             self._drawer.apply_styles()
 
             self._drawer.primary_text = self.config.get(f"bar{i}_caption") or data_packet.get('primary_label', '')
@@ -330,3 +332,4 @@ class LevelBarComboDisplayer(ComboBase):
             self._drawer.close()
             self._drawer = None
         super().close()
+

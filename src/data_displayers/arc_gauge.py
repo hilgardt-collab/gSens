@@ -22,6 +22,7 @@ class ArcGaugeDisplayer(DataDisplayer):
         self.current_value = 0.0
         self.display_value_text = "0.0"
         self.unit_text = ""
+        self.caption_text = ""
 
         # --- Animation State ---
         self._animation_timer_id = None
@@ -36,6 +37,7 @@ class ArcGaugeDisplayer(DataDisplayer):
         self._cached_image_path = None
         self._layout_value = None
         self._layout_unit = None
+        self._layout_caption = None
         
         super().__init__(panel_ref, config)
         populate_defaults_from_model(self.config, self.get_config_model())
@@ -49,18 +51,21 @@ class ArcGaugeDisplayer(DataDisplayer):
         return self.drawing_area
 
     def update_display(self, value, **kwargs):
-        source = self.panel_ref.data_source
+        source = self.panel_ref.data_source if self.panel_ref else None
         if 'source_override' in kwargs and kwargs['source_override']:
             source = kwargs['source_override']
+        
+        if not source: return
             
         new_value = source.get_numerical_value(value) or 0.0
         
-        # --- BUG FIX: Instantaneously set the first value to avoid slow startup animation ---
         if self._first_update:
             self._current_display_value = new_value
             self._first_update = False
 
         self._target_value = new_value
+        
+        self.caption_text = kwargs.get('caption', '')
         
         display_string = source.get_display_string(value)
         
@@ -106,6 +111,9 @@ class ArcGaugeDisplayer(DataDisplayer):
             ConfigOption("gauge_inactive_line_width", "spinner", "Inactive Line Width:", 1.5, 0.5, 10, 0.5, 1)
         ]
         model["Gauge Text"] = [
+            ConfigOption("gauge_show_caption", "bool", "Show Caption Text:", "True"),
+            ConfigOption("gauge_caption_font", "font", "Caption Font:", "Sans 12"),
+            ConfigOption("gauge_caption_color", "color", "Caption Color:", "rgba(200,200,200,1)"),
             ConfigOption("gauge_value_font", "font", "Value Font:", "Sans Bold 48"),
             ConfigOption("gauge_value_color", "color", "Value Color:", "rgba(255,255,255,1)"),
             ConfigOption("gauge_unit_font", "font", "Unit Font:", "Sans 24"),
@@ -141,6 +149,7 @@ class ArcGaugeDisplayer(DataDisplayer):
         self._static_surface = None 
         self._layout_value = None
         self._layout_unit = None
+        self._layout_caption = None
         self.drawing_area.queue_draw()
 
     def _start_animation_timer(self, widget=None):
@@ -282,32 +291,42 @@ class ArcGaugeDisplayer(DataDisplayer):
             x2, y2 = cx + math.cos(angle) * outer_r, cy + math.sin(angle) * outer_r
             ctx.move_to(x1, y1); ctx.line_to(x2, y2); ctx.stroke()
 
-        if self._layout_value is None:
-            self._layout_value = self.widget.create_pango_layout("")
-        self._layout_value.set_font_description(Pango.FontDescription.from_string(self.config.get("gauge_value_font", "Sans Bold 48")))
-        self._layout_value.set_text(self.display_value_text, -1)
-        _, log_v = self._layout_value.get_pixel_extents()
+        if self._layout_value is None: self._layout_value = self.widget.create_pango_layout("")
+        self._layout_value.set_font_description(Pango.FontDescription.from_string(self.config.get("gauge_value_font", "Sans Bold 48"))); self._layout_value.set_text(self.display_value_text, -1); _, log_v = self._layout_value.get_pixel_extents()
 
-        if self._layout_unit is None:
-            self._layout_unit = self.widget.create_pango_layout("")
-        self._layout_unit.set_font_description(Pango.FontDescription.from_string(self.config.get("gauge_unit_font", "Sans 24")))
-        self._layout_unit.set_text(self.unit_text, -1)
-        _, log_u = self._layout_unit.get_pixel_extents()
+        if self._layout_unit is None: self._layout_unit = self.widget.create_pango_layout("")
+        self._layout_unit.set_font_description(Pango.FontDescription.from_string(self.config.get("gauge_unit_font", "Sans 24"))); self._layout_unit.set_text(self.unit_text, -1); _, log_u = self._layout_unit.get_pixel_extents()
+
+        if self._layout_caption is None: self._layout_caption = self.widget.create_pango_layout("")
+        self._layout_caption.set_font_description(Pango.FontDescription.from_string(self.config.get("gauge_caption_font", "Sans 12"))); self._layout_caption.set_text(self.caption_text, -1); _, log_c = self._layout_caption.get_pixel_extents()
 
         spacing = float(self.config.get("gauge_text_spacing", "5"))
         v_off = float(self.config.get("gauge_text_vertical_offset", "0"))
-        total_h = log_v.height + spacing + log_u.height
+        
+        total_h = 0
+        show_caption = str(self.config.get("gauge_show_caption", "True")).lower() == 'true' and bool(self.caption_text)
+        show_val = True 
+        show_unit = bool(self.unit_text)
+        
+        if show_caption: total_h += log_c.height
+        if show_val: total_h += log_v.height
+        if show_unit: total_h += log_u.height
+        
+        active_elements = sum([show_caption, show_val, show_unit])
+        if active_elements > 1: total_h += (active_elements - 1) * spacing
+        
         start_y = (cy - (total_h / 2)) + v_off
 
-        val_c = Gdk.RGBA(); val_c.parse(self.config.get("gauge_value_color", "rgba(255,255,255,1)"))
-        ctx.set_source_rgba(val_c.red, val_c.green, val_c.blue, val_c.alpha)
-        ctx.move_to(cx - log_v.width / 2, start_y)
-        PangoCairo.show_layout(ctx, self._layout_value)
+        if show_caption:
+            cap_c = Gdk.RGBA(); cap_c.parse(self.config.get("gauge_caption_color")); ctx.set_source_rgba(cap_c.red, cap_c.green, cap_c.blue, cap_c.alpha)
+            ctx.move_to(cx - log_c.width / 2, start_y); PangoCairo.show_layout(ctx, self._layout_caption); start_y += log_c.height + spacing
 
-        unit_c = Gdk.RGBA(); unit_c.parse(self.config.get("gauge_unit_color", "rgba(200,200,200,1)"))
-        ctx.set_source_rgba(unit_c.red, unit_c.green, unit_c.blue, unit_c.alpha)
-        ctx.move_to(cx - log_u.width / 2, start_y + log_v.height + spacing)
-        PangoCairo.show_layout(ctx, self._layout_unit)
+        val_c = Gdk.RGBA(); val_c.parse(self.config.get("gauge_value_color")); ctx.set_source_rgba(val_c.red, val_c.green, val_c.blue, val_c.alpha)
+        ctx.move_to(cx - log_v.width / 2, start_y); PangoCairo.show_layout(ctx, self._layout_value); start_y += log_v.height + spacing
+
+        if show_unit:
+            unit_c = Gdk.RGBA(); unit_c.parse(self.config.get("gauge_unit_color")); ctx.set_source_rgba(unit_c.red, unit_c.green, unit_c.blue, unit_c.alpha)
+            ctx.move_to(cx - log_u.width / 2, start_y); PangoCairo.show_layout(ctx, self._layout_unit)
 
     def close(self):
         self._stop_animation_timer()

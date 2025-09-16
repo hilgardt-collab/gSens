@@ -36,8 +36,11 @@ class DiskUsageDataSource(DataSource):
         return f"{data['percent']:.1f}%"
     
     def get_tooltip_string(self, data):
-        if not isinstance(data, dict) or data.get("error"): return f"Mount: {self.config.get('mount_path', '/')}\\nError: {data.get('error', 'N/A')}"
-        return f"Mount: {data['path']}\\nUsed: {data['used_gb']:.1f} GB ({data['percent']:.1f}%)\\nFree: {data['free_gb']:.1f} GB\\nTotal: {data['total_gb']:.1f} GB"
+        if data is None or not isinstance(data, dict) or data.get("error"): 
+            mount_path = self.config.get('mount_path', '/')
+            error_msg = data.get('error', 'No data') if isinstance(data, dict) else 'No data'
+            return f"Mount: {mount_path}\nError: {error_msg}"
+        return f"Mount: {data['path']}\nUsed: {data['used_gb']:.1f} GB ({data['percent']:.1f}%)\nFree: {data['free_gb']:.1f} GB\nTotal: {data['total_gb']:.1f} GB"
 
     def get_primary_label_string(self, data):
         """Returns the disk mount path for the primary label."""
@@ -66,7 +69,6 @@ class DiskUsageDataSource(DataSource):
     def get_configure_callback(self):
         """Callback to replace the standard mount_path entry with a custom chooser."""
         def add_disk_chooser(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
-            # --- FIX: Construct prefixed keys for all widgets ---
             opt_prefix = f"{prefix}opt_" if prefix else ""
             mount_path_key = f"{opt_prefix}mount_path"
             title_format_key = f"{opt_prefix}disk_title_format"
@@ -84,7 +86,6 @@ class DiskUsageDataSource(DataSource):
             if parent_box:
                 parent_box.insert_child_after(custom_row, original_row)
             else:
-                # Fallback if parent isn't found (shouldn't happen in normal flow)
                 content_box.append(custom_row)
 
             custom_row.append(Gtk.Label(label="Monitoring Path:", xalign=0))
@@ -166,8 +167,9 @@ class DiskUsageDataSource(DataSource):
                     
                     panel_config[mount_path_key] = selected_path
                     
-                    # Trigger title update via a separate idle_add to ensure widgets exist
-                    GLib.idle_add(btn.get_ancestor(Gtk.Window).get_application().emit, "activate")
+                    # BUG FIX: Use the correct variable 'parent_dlg' to reference the main config dialog
+                    if hasattr(parent_dlg, 'apply_button') and parent_dlg.apply_button:
+                        parent_dlg.apply_button.emit("clicked")
                     break
         dlg.destroy()
 

@@ -85,15 +85,16 @@ class LevelBarDisplayer(DataDisplayer):
             
         return GLib.SOURCE_CONTINUE
 
-    def update_display(self, value):
-        if self.panel_ref is None: return
+    def update_display(self, value, **kwargs):
+        source = kwargs.get('source_override', self.panel_ref.data_source if self.panel_ref else None)
+        if source is None: return
 
         self._sync_state_with_config()
 
-        self.current_value = self.panel_ref.data_source.get_numerical_value(value) or 0.0
+        self.current_value = source.get_numerical_value(value) or 0.0
         
-        self.primary_text = self.panel_ref.data_source.get_primary_label_string(value)
-        self.secondary_text = self.panel_ref.data_source.get_display_string(value)
+        self.primary_text = kwargs.get('caption', source.get_primary_label_string(value))
+        self.secondary_text = source.get_display_string(value)
 
         num_segments = int(self.config.get("level_bar_segment_count", 30))
         min_v, max_v = float(self.config.get("level_min_value", 0)), float(self.config.get("level_max_value", 100))
@@ -106,7 +107,8 @@ class LevelBarDisplayer(DataDisplayer):
                     self.segment_states[i]['is_on'] = False
                     self.segment_states[i]['off_timestamp'] = now
         
-        self.panel_ref.set_tooltip_text(self.panel_ref.data_source.get_tooltip_string(value))
+        if self.panel_ref:
+            self.panel_ref.set_tooltip_text(source.get_tooltip_string(value))
 
     @staticmethod
     def get_config_model():
@@ -159,7 +161,6 @@ class LevelBarDisplayer(DataDisplayer):
         return model
 
     def get_configure_callback(self):
-        """A custom callback to dynamically show/hide effect-specific and layout-specific options."""
         def setup_dynamic_options(dialog, content_box, widgets, available_sources, panel_config):
             try:
                 grad_switch = widgets["level_bar_on_gradient_enabled"]
@@ -194,7 +195,6 @@ class LevelBarDisplayer(DataDisplayer):
         return setup_dynamic_options
 
     def _sync_state_with_config(self):
-        """Ensures internal state like segment_states matches the current config."""
         num_segments = int(self.config.get("level_bar_segment_count", 30))
         if self._last_segment_count != num_segments:
             self.segment_states = [{'is_on': False, 'off_timestamp': 0} for _ in range(num_segments)]
@@ -203,12 +203,9 @@ class LevelBarDisplayer(DataDisplayer):
     def apply_styles(self):
         super().apply_styles()
         self._sync_state_with_config()
-        
-        # Invalidate the cache whenever styles change to apply new geometry/colors
         self._static_surface = None
         self._layout_primary = None
         self._layout_secondary = None
-        
         if self.widget.get_realized(): self._start_animation_timer()
         self.widget.queue_draw()
 
@@ -242,8 +239,7 @@ class LevelBarDisplayer(DataDisplayer):
             spacing = 4
             
             if layout in ["top", "bottom"]:
-                text_h = (height * ratio) - (spacing / 2)
-                bar_h = height * (1 - ratio) - (spacing / 2)
+                text_h, bar_h = (height * ratio) - (spacing / 2), height * (1 - ratio) - (spacing / 2)
                 text_w, bar_w = width, width
                 bar_x, text_x = 0, 0
                 if layout == "top":
@@ -251,8 +247,7 @@ class LevelBarDisplayer(DataDisplayer):
                 else: # bottom
                     bar_y, text_y = 0, bar_h + spacing
             else: # left, right
-                text_w = (width * ratio) - (spacing / 2)
-                bar_w = width * (1 - ratio) - (spacing / 2)
+                text_w, bar_w = (width * ratio) - (spacing / 2), width * (1 - ratio) - (spacing / 2)
                 text_h, bar_h = height, height
                 bar_y, text_y = 0, 0
                 if layout == "left":
@@ -278,7 +273,6 @@ class LevelBarDisplayer(DataDisplayer):
                 self._layout_secondary.set_text(self.secondary_text or "", -1)
             
             self._draw_label_set(ctx, text_x, text_y, text_w, text_h, self._layout_primary, self._layout_secondary)
-
 
     def _draw_superimposed_text(self, ctx, bar_x, bar_y, bar_width, bar_height, layout_p, layout_s):
         align = self.config.get("level_bar_superimposed_align", "middle_center")
@@ -311,9 +305,10 @@ class LevelBarDisplayer(DataDisplayer):
         spacing = 6
 
         if orientation == "vertical":
-            current_y = area_y + (area_height - ( (layout_p.get_pixel_extents()[1].height if show_primary else 0) + 
-                                                   (layout_s.get_pixel_extents()[1].height if show_secondary else 0) + 
-                                                   (spacing if show_primary and show_secondary else 0) )) / 2
+            p_h = layout_p.get_pixel_extents()[1].height if show_primary else 0
+            s_h = layout_s.get_pixel_extents()[1].height if show_secondary else 0
+            total_h = p_h + s_h + (spacing if show_primary and show_secondary else 0)
+            current_y = area_y + (area_height - total_h) / 2
             
             if show_primary:
                 align_str = self.config.get("level_bar_primary_align", "center")
@@ -321,7 +316,7 @@ class LevelBarDisplayer(DataDisplayer):
                 color_p = Gdk.RGBA(); color_p.parse(self.config.get("level_bar_primary_color"))
                 ctx.set_source_rgba(color_p.red, color_p.green, color_p.blue, color_p.alpha)
                 ctx.move_to(area_x, current_y); PangoCairo.show_layout(ctx, layout_p)
-                current_y += layout_p.get_pixel_extents()[1].height + spacing
+                current_y += p_h + spacing
 
             if show_secondary:
                 align_str = self.config.get("level_bar_secondary_align", "center")
@@ -331,9 +326,9 @@ class LevelBarDisplayer(DataDisplayer):
                 ctx.move_to(area_x, current_y); PangoCairo.show_layout(ctx, layout_s)
         else: # Horizontal
             p_width, p_height = (layout_p.get_pixel_extents()[1].width, layout_p.get_pixel_extents()[1].height) if show_primary else (0,0)
-            s_height = layout_s.get_pixel_extents()[1].height if show_secondary else 0
+            s_width, s_height = (layout_s.get_pixel_extents()[1].width, layout_s.get_pixel_extents()[1].height) if show_secondary else (0,0)
             
-            total_text_width = p_width + (layout_s.get_pixel_extents()[1].width if show_secondary else 0) + (spacing if show_primary and show_secondary else 0)
+            total_text_width = p_width + s_width + (spacing if show_primary and show_secondary else 0)
             current_x = area_x + (area_width - total_text_width) / 2
 
             if show_primary:
@@ -350,27 +345,20 @@ class LevelBarDisplayer(DataDisplayer):
                 ctx.move_to(current_x, s_y); PangoCairo.show_layout(ctx, layout_s)
 
     def draw_bar(self, ctx, bar_x, bar_y, bar_width, bar_height):
-        """Draws the main bar, accounting for slant and using a static cache."""
         if bar_width <= 0 or bar_height <= 0: return
 
-        # Check if cache is invalid (size changed or style changed)
         if not self._static_surface or self._last_draw_width != bar_width or self._last_draw_height != bar_height:
-            # Create a new surface for the static parts
             self._static_surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, int(bar_width), int(bar_height))
             static_ctx = cairo.Context(self._static_surface)
-            # Draw the static elements (background, all 'off' segments) onto the cache
             self._draw_static_bar_elements(static_ctx, bar_width, bar_height, self.config)
-            # Update cache dimensions
             self._last_draw_width, self._last_draw_height = bar_width, bar_height
 
-        # Paint the cached static background onto the main context
         ctx.save()
         ctx.translate(bar_x, bar_y)
         ctx.set_source_surface(self._static_surface, 0, 0)
         ctx.paint()
         ctx.restore()
         
-        # Draw only the dynamic elements (on/fading segments) on the main context
         ctx.save()
         ctx.translate(bar_x, bar_y)
         self._draw_dynamic_bar_elements(ctx, bar_width, bar_height, self.config, self.current_on_level, self.segment_states)
@@ -378,13 +366,11 @@ class LevelBarDisplayer(DataDisplayer):
 
     @staticmethod
     def _draw_static_bar_elements(ctx, bar_width, bar_height, config):
-        """Draws elements that don't change frame-to-frame onto a surface."""
         slant = float(config.get("level_bar_slant_px", 0))
         orientation = config.get("level_bar_orientation", "vertical")
         
         ctx.save()
 
-        # Apply transformations to handle slant without clipping
         if orientation == "vertical":
             rect_width, rect_height = bar_width - abs(slant), bar_height
             if rect_width <= 0: ctx.restore(); return
@@ -400,17 +386,16 @@ class LevelBarDisplayer(DataDisplayer):
             tan_angle = slant / rect_width if rect_width > 0 else 0
             ctx.transform(cairo.Matrix(1, tan_angle, 0, 1, 0, 0))
 
-        # Draw main background
         bg_rgba = Gdk.RGBA(); bg_rgba.parse(config.get("level_bar_background_color"))
         ctx.set_source_rgba(bg_rgba.red, bg_rgba.green, bg_rgba.blue, bg_rgba.alpha)
         ctx.rectangle(0, 0, rect_width, rect_height); ctx.fill()
 
-        # Draw all segments in their OFF state
         num_segments = int(config.get("level_bar_segment_count", 30))
         spacing = float(config.get("level_bar_spacing", 2))
         off_color = Gdk.RGBA(); off_color.parse(config.get("level_bar_off_color"))
         ctx.set_source_rgba(off_color.red, off_color.green, off_color.blue, off_color.alpha)
 
+        segment_height, segment_width = 0, 0
         if orientation == "vertical":
             segment_height = (rect_height - (num_segments - 1) * spacing) / num_segments if num_segments > 0 else 0
             if segment_height <= 0: ctx.restore(); return
@@ -431,13 +416,11 @@ class LevelBarDisplayer(DataDisplayer):
 
     @staticmethod
     def _draw_dynamic_bar_elements(ctx, bar_width, bar_height, config, current_on_level, segment_states):
-        """Draws elements that change frame-to-frame (on, fading, pulsing)."""
         slant = float(config.get("level_bar_slant_px", 0))
         orientation = config.get("level_bar_orientation", "vertical")
         
         ctx.save()
 
-        # Apply the same transformations as the static part
         if orientation == "vertical":
             rect_width, rect_height = bar_width - abs(slant), bar_height
             if rect_width <= 0: ctx.restore(); return
@@ -528,3 +511,4 @@ class LevelBarDisplayer(DataDisplayer):
 
     def close(self):
         self._stop_animation_timer(); super().close()
+

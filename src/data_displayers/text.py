@@ -1,4 +1,3 @@
-
 # data_displayers/text.py
 import gi
 import math
@@ -48,18 +47,16 @@ class TextDisplayer(DataDisplayer):
         self._text_lines = [""] * line_count
         self._layout_cache = [None] * line_count
 
-    def update_display(self, data):
+    def update_display(self, data, **kwargs):
         """Updates the text content for each line and queues a redraw."""
-        if not self.panel_ref: return
+        source = kwargs.get('source_override', self.panel_ref.data_source if self.panel_ref else None)
+        if source is None: return
 
-        # Cache the last valid data packet
         if data is not None:
             self._last_data = data
         
-        # Determine which data to use for this draw cycle
         data_to_use = data if data is not None else self._last_data
         
-        # Ensure our internal state matches the config before proceeding
         line_count = int(self.config.get("text_line_count", "2"))
         if len(self._text_lines) != line_count:
             self._initialize_text_lines()
@@ -71,20 +68,20 @@ class TextDisplayer(DataDisplayer):
             text = "N/A"
             if data_to_use is not None:
                 if source_key == "primary_label":
-                    text = self.panel_ref.data_source.get_primary_label_string(data_to_use)
+                    text = kwargs.get('caption', source.get_primary_label_string(data_to_use))
                 elif source_key == "secondary_label":
-                    text = self.panel_ref.data_source.get_secondary_display_string(data_to_use)
+                    text = source.get_secondary_display_string(data_to_use)
                 elif source_key == "tooltip_string":
-                    text = self.panel_ref.data_source.get_tooltip_string(data_to_use)
+                    text = source.get_tooltip_string(data_to_use)
                 elif source_key == "custom_text":
                     text = self.config.get(f"line{line_num}_custom_text", "")
                 else: # display_string
-                    text = self.panel_ref.data_source.get_display_string(data_to_use)
+                    text = source.get_display_string(data_to_use)
             
             self._text_lines[i] = text or ""
         
-        if data_to_use is not None:
-            self.panel_ref.set_tooltip_text(self.panel_ref.data_source.get_tooltip_string(data_to_use))
+        if self.panel_ref and data_to_use is not None:
+            self.panel_ref.set_tooltip_text(source.get_tooltip_string(data_to_use))
         
         self.widget.queue_draw()
 
@@ -162,9 +159,6 @@ class TextDisplayer(DataDisplayer):
         """Forces a redraw when styles change and ensures text line buffer is correct."""
         super().apply_styles()
         
-        # By calling update_display with None, we trigger a refresh using the
-        # last known data. This will correctly resize and repopulate the text
-        # lines if the number of lines has changed in the config.
         self.update_display(None)
 
     def on_draw(self, area, ctx, width, height):

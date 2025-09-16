@@ -29,17 +29,17 @@ class BarDisplayer(DataDisplayer):
         drawing_area.set_draw_func(self.on_draw)
         return drawing_area
 
-    def update_display(self, data):
+    def update_display(self, data, **kwargs):
         """Updates the labels and bar percentage based on new data."""
-        if not self.panel_ref: return
+        source = kwargs.get('source_override', self.panel_ref.data_source if self.panel_ref else None)
+        if source is None: return
 
         if data is None:
             self.current_percent = 0.0
             self.primary_text = ""
             self.secondary_text = "N/A"
         else:
-            # --- FIX: Calculate percentage based on graph range from config ---
-            num_val = self.panel_ref.data_source.get_numerical_value(data)
+            num_val = source.get_numerical_value(data)
             
             try:
                 min_v = float(self.config.get("graph_min_value", 0.0))
@@ -55,10 +55,11 @@ class BarDisplayer(DataDisplayer):
             else:
                 self.current_percent = 0.0
 
-            self.primary_text = self.panel_ref.data_source.get_primary_label_string(data)
-            self.secondary_text = self.panel_ref.data_source.get_display_string(data)
+            self.primary_text = kwargs.get('caption', source.get_primary_label_string(data))
+            self.secondary_text = source.get_display_string(data)
         
-        self.panel_ref.set_tooltip_text(self.panel_ref.data_source.get_tooltip_string(data))
+        if self.panel_ref:
+            self.panel_ref.set_tooltip_text(source.get_tooltip_string(data))
         self.widget.queue_draw()
     
     @staticmethod
@@ -316,3 +317,4 @@ class BarDisplayer(DataDisplayer):
         
         ctx.move_to(draw_x, y)
         PangoCairo.show_layout(ctx, layout)
+

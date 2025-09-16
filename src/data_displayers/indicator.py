@@ -38,7 +38,7 @@ class IndicatorDisplayer(DataDisplayer):
 
         self.current_value = source.get_numerical_value(value) or 0.0
         
-        self.primary_text = source.get_primary_label_string(value)
+        self.primary_text = kwargs.get('caption', source.get_primary_label_string(value))
         self.main_text = source.get_display_string(value)
         self.secondary_text = source.get_secondary_display_string(value)
 
@@ -247,7 +247,6 @@ class IndicatorDisplayer(DataDisplayer):
         
         total_text_height = 0
         
-        # This loop now just measures, it doesn't create layouts repeatedly
         for element in text_elements:
             layout_cache_attr = f"_layout_{element['type']}"
             layout = getattr(self, layout_cache_attr, None)
