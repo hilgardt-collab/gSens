@@ -119,7 +119,6 @@ class CPUDataSource(DataSource):
 
     def get_numerical_value(self, data):
         """Extracts the specific numerical value based on the panel's configuration."""
-        # --- FIX: Handle the case where data might be None on initial draw ---
         if data is None:
             return None
             
@@ -265,7 +264,7 @@ class CPUDataSource(DataSource):
         
         model["Graph Range"] = [
             ConfigOption("graph_min_value", "spinner", "Graph Min Value:", "0.0", 0.0, 10000.0, 1.0, 0),
-            ConfigOption("graph_max_value", "spinner", "Graph Max Value:", "5000.0", 0.0, 10000.0, 1.0, 0)
+            ConfigOption("graph_max_value", "spinner", "Graph Max Value:", "100.0", 0.0, 10000.0, 1.0, 0)
         ]
         model["Alarm"][1] = ConfigOption("data_alarm_high_value", "scale", "Alarm High Value:", "90.0", 0.0, 10000.0, 1.0, 1)
         
@@ -275,12 +274,36 @@ class CPUDataSource(DataSource):
         """Provides a callback to dynamically show/hide UI sections in the config dialog."""
         def setup_dynamic_options(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
             
-            # --- FIX: Construct prefixed keys for all widgets ---
             key_prefix = f"{prefix}opt_" if prefix else ""
             
             metric_combo_key = f"{key_prefix}cpu_metric_to_display"
             metric_combo = widgets.get(metric_combo_key)
             if not metric_combo: return
+
+            min_widget = widgets.get(f"{key_prefix}graph_min_value")
+            max_widget = widgets.get(f"{key_prefix}graph_max_value")
+            alarm_widget = widgets.get(f"{key_prefix}data_alarm_high_value")
+            
+            all_children = list(content_box)
+            alarm_label = None
+
+            if alarm_widget:
+                try:
+                    alarm_row_container = alarm_widget.get_parent().get_parent()
+                    idx = all_children.index(alarm_row_container)
+                    for i in range(idx - 1, -1, -1):
+                        if isinstance(all_children[i], Gtk.Label):
+                            alarm_label = all_children[i]
+                            break
+                except (ValueError, AttributeError):
+                    pass
+
+            min_label = min_widget.get_parent().get_first_child() if min_widget else None
+            max_label = max_widget.get_parent().get_first_child() if max_widget else None
+
+            if min_label and not hasattr(min_label, 'original_text'): min_label.original_text = min_label.get_label()
+            if max_label and not hasattr(max_label, 'original_text'): max_label.original_text = max_label.get_label()
+            if alarm_label and not hasattr(alarm_label, 'original_text'): alarm_label.original_text = alarm_label.get_label()
 
             full_model = self.get_config_model()
             section_widgets = {}
@@ -288,12 +311,10 @@ class CPUDataSource(DataSource):
                 if section_title.endswith(" Settings"):
                     section_widgets[section_title] = []
                     for opt in options:
-                        # --- FIX: Use prefixed keys to find the correct widgets ---
                         widget = widgets.get(f"{key_prefix}{opt.key}")
                         if widget and widget.get_parent():
                             section_widgets[section_title].append(widget.get_parent())
 
-            all_children = list(content_box)
             for section_title, s_widgets in section_widgets.items():
                 if s_widgets:
                     first_row = s_widgets[0]
@@ -311,8 +332,34 @@ class CPUDataSource(DataSource):
                 for w_list in section_widgets.get("Usage Settings", []): w_list.set_visible(active_metric == "usage")
                 for w_list in section_widgets.get("Temperature Settings", []): w_list.set_visible(active_metric == "temperature")
                 for w_list in section_widgets.get("Frequency Settings", []): w_list.set_visible(active_metric == "frequency")
+                
+                if not all([min_widget, max_widget, alarm_widget, min_label, max_label, alarm_label]):
+                    return
+                
+                if active_metric == "usage":
+                    min_widget.get_adjustment().configure(0.0, 0.0, 100.0, 1.0, 10.0, 0)
+                    max_widget.get_adjustment().configure(100.0, 0.0, 100.0, 1.0, 10.0, 0)
+                    alarm_widget.get_adjustment().configure(90.0, 0.0, 100.0, 1.0, 10.0, 0)
+                    min_label.set_text(min_label.original_text.replace(":", " (%):"))
+                    max_label.set_text(max_label.original_text.replace(":", " (%):"))
+                    alarm_label.set_text(alarm_label.original_text.replace(":", " (%):"))
+                elif active_metric == "temperature":
+                    min_widget.get_adjustment().configure(0.0, 0.0, 200.0, 1.0, 10.0, 0)
+                    max_widget.get_adjustment().configure(120.0, 0.0, 200.0, 1.0, 10.0, 0)
+                    alarm_widget.get_adjustment().configure(95.0, 0.0, 200.0, 1.0, 10.0, 0)
+                    min_label.set_text(min_label.original_text.replace(":", " (°C):"))
+                    max_label.set_text(max_label.original_text.replace(":", " (°C):"))
+                    alarm_label.set_text(alarm_label.original_text.replace(":", " (°C):"))
+                elif active_metric == "frequency":
+                    min_widget.get_adjustment().configure(0.0, 0.0, 10000.0, 100.0, 1000.0, 0)
+                    max_widget.get_adjustment().configure(5000.0, 0.0, 10000.0, 100.0, 1000.0, 0)
+                    alarm_widget.get_adjustment().configure(5500.0, 0.0, 10000.0, 100.0, 1000.0, 0)
+                    min_label.set_text(min_label.original_text.replace(":", " (MHz):"))
+                    max_label.set_text(max_label.original_text.replace(":", " (MHz):"))
+                    alarm_label.set_text(alarm_label.original_text.replace(":", " (MHz):"))
             
             metric_combo.connect("changed", on_metric_changed)
             GLib.idle_add(on_metric_changed, metric_combo)
 
         return setup_dynamic_options
+

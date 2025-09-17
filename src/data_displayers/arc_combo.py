@@ -7,7 +7,7 @@ import os
 from .combo_base import ComboBase
 from config_dialog import ConfigOption, build_ui_from_model, get_config_from_widgets
 from utils import populate_defaults_from_model
-from ui_helpers import build_background_config_ui, draw_cairo_background
+from ui_helpers import build_background_config_ui
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Pango", "1.0")
@@ -29,6 +29,7 @@ class ArcComboDisplayer(ComboBase):
         # Caching state
         self._static_surface = None
         self._last_draw_width, self._last_draw_height = -1, -1
+        self._ring_layout = [] # Add instance variable for cached layout
 
         super().__init__(panel_ref, config)
         populate_defaults_from_model(self.config, self._get_full_config_model())
@@ -229,35 +230,8 @@ class ArcComboDisplayer(ComboBase):
                 arc_model = {f"Arc {i} Style": full_model[f"Arc {i} Style"]}
                 build_ui_from_model(tab_box, panel_config, arc_model, widgets)
 
-            # --- BUG FIX: Refactored to remove recursion and establish a single source of truth ---
-            def on_arc_count_changed(spinner):
-                """
-                This function is the single source of truth for UI changes related to the number of arcs.
-                It updates tab visibility and repopulates all dependent widgets directly.
-                """
-                count = spinner.get_value_as_int()
-                
-                # 1. Update visibility of style tabs
-                for i, content_widget in enumerate(arc_tabs_content):
-                    content_widget.set_visible(i < count)
-
-                # 2. Repopulate all relevant combo boxes
-                source_arc_combo.remove_all(); grad_start_arc_combo.remove_all(); grad_end_arc_combo.remove_all()
-                for i in range(1, count + 1):
-                    source_arc_combo.append(id=str(i), text=f"Arc {i}")
-                    grad_start_arc_combo.append(id=str(i), text=f"Arc {i}")
-                    grad_end_arc_combo.append(id=str(i), text=f"Arc {i}")
-                source_arc_combo.set_active(0); grad_start_arc_combo.set_active(0)
-                if count > 0: grad_end_arc_combo.set_active(count - 1)
-
-                # 3. Rebuild the destination checkboxes based on the new count and source selection
-                update_destination_checkboxes()
-
-            def update_destination_checkboxes(*args):
-                """
-                Updates the 'Apply to' checkbox list. This is now only called by on_arc_count_changed
-                or when the source combo changes, preventing loops.
-                """
+            # --- BUG FIX: Refactored to remove recursion ---
+            def update_destination_checkboxes():
                 count = widgets["combo_arc_count"].get_value_as_int()
                 dest_arc_checkboxes.clear()
                 child = dest_flowbox.get_first_child()
@@ -272,13 +246,26 @@ class ArcComboDisplayer(ComboBase):
                     dest_flowbox.append(chk)
                     dest_arc_checkboxes[i] = chk
 
+            def on_arc_count_changed(spinner):
+                count = spinner.get_value_as_int()
+                
+                source_arc_combo.remove_all(); grad_start_arc_combo.remove_all(); grad_end_arc_combo.remove_all()
+                for i in range(1, count + 1):
+                    source_arc_combo.append(id=str(i), text=f"Arc {i}")
+                    grad_start_arc_combo.append(id=str(i), text=f"Arc {i}")
+                    grad_end_arc_combo.append(id=str(i), text=f"Arc {i}")
+                source_arc_combo.set_active(0); grad_start_arc_combo.set_active(0)
+                if count > 0: grad_end_arc_combo.set_active(count-1)
+                
+                for i, content_widget in enumerate(arc_tabs_content):
+                    content_widget.set_visible(i < count)
+
+                update_destination_checkboxes()
+
             arc_count_spinner = widgets.get("combo_arc_count")
-            if arc_count_spinner:
-                # The spinner's signal is the primary driver of UI changes.
+            if arc_count_spinner: 
                 arc_count_spinner.connect("value-changed", on_arc_count_changed)
-                # The source combo now ONLY updates the destination list, which is a safe, terminal action.
-                source_arc_combo.connect("changed", update_destination_checkboxes)
-                # Initial population
+                source_arc_combo.connect("changed", lambda c: update_destination_checkboxes())
                 GLib.idle_add(on_arc_count_changed, arc_count_spinner)
             # --- END BUG FIX ---
 
@@ -291,6 +278,7 @@ class ArcComboDisplayer(ComboBase):
             self._cached_image_path = image_path
             self._cached_center_pixbuf = GdkPixbuf.Pixbuf.new_from_file(image_path) if image_path and os.path.exists(image_path) else None
         self._static_surface = None
+        self._calculate_ring_layout() # Recalculate layout only when styles change
         self.widget.queue_draw()
 
     def _start_animation_timer(self, widget=None):
@@ -319,6 +307,48 @@ class ArcComboDisplayer(ComboBase):
         if needs_redraw: self.widget.queue_draw()
         return GLib.SOURCE_CONTINUE
 
+    def _calculate_ring_layout(self):
+        """
+        Calculates the arrangement of arcs into concentric rings to prevent overlap.
+        This is a performance-intensive operation and should only be called when
+        the arc configuration changes.
+        """
+        rings = []
+        all_arc_data = []
+        num_arcs = int(self.config.get("combo_arc_count", 5))
+
+        # Gather start/end data for all configured arcs
+        for i in range(1, num_arcs + 1):
+            all_arc_data.append({
+                "index": i,
+                "start": float(self.config.get(f"arc{i}_start_angle", -225)),
+                "end": float(self.config.get(f"arc{i}_end_angle", 45))
+            })
+
+        # Arrange arcs into non-overlapping rings
+        for arc_data in all_arc_data:
+            placed = False
+            for ring in rings:
+                is_overlapping = False
+                for existing_arc in ring:
+                    # Normalize angles to a consistent range for comparison
+                    s1, e1 = (existing_arc["start"] % 360), (existing_arc["end"] % 360)
+                    s2, e2 = (arc_data["start"] % 360), (arc_data["end"] % 360)
+                    if s1 > e1: e1 += 360
+                    if s2 > e2: e2 += 360
+                    # Check for overlap
+                    if max(s1, s2) < min(e1, e2):
+                        is_overlapping = True
+                        break
+                if not is_overlapping:
+                    ring.append(arc_data)
+                    placed = True
+                    break
+            if not placed:
+                rings.append([arc_data])
+        
+        self._ring_layout = rings
+
     def on_draw(self, area, ctx, width, height):
         if width <= 0 or height <= 0: return
 
@@ -328,22 +358,7 @@ class ArcComboDisplayer(ComboBase):
         max_radius = ((min(width, height) / 2) * 0.90) * scale_factor
         if max_radius <= 0: return
 
-        rings = []; all_arc_data = []
-        num_arcs = int(self.config.get("combo_arc_count", 5))
-        for i in range(1, num_arcs + 1):
-            all_arc_data.append({ "index": i, "start": float(self.config.get(f"arc{i}_start_angle", -225)), "end": float(self.config.get(f"arc{i}_end_angle", 45)) })
-        for arc_data in all_arc_data:
-            placed = False
-            for ring in rings:
-                is_overlapping = False
-                for existing_arc in ring:
-                    s1, e1 = (existing_arc["start"] % 360), (existing_arc["end"] % 360)
-                    s2, e2 = (arc_data["start"] % 360), (arc_data["end"] % 360)
-                    if s1 > e1: e1 += 360
-                    if s2 > e2: e2 += 360
-                    if max(s1, s2) < min(e1, e2): is_overlapping = True; break
-                if not is_overlapping: ring.append(arc_data); placed = True; break
-            if not placed: rings.append([arc_data])
+        rings = self._ring_layout
 
         if not self._static_surface or self._last_draw_width != width or self._last_draw_height != height:
             self._static_surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, width, height)
@@ -402,21 +417,27 @@ class ArcComboDisplayer(ComboBase):
         if radius <= 0: return
 
         if not dynamic_only:
-            ctx.save()
-            ctx.arc(cx, cy, radius, 0, 2 * math.pi)
-            ctx.clip()
-            
-            # --- BUG FIX: Translate context before drawing the background ---
-            ctx.save()
-            ctx.translate(cx - radius, cy - radius)
-            
-            shape_info = {'type': 'circle', 'cx': radius, 'cy': radius, 'radius': radius}
-            draw_cairo_background(ctx, 2*radius, 2*radius, self.config, "center_",
-                                  self._cached_center_pixbuf, shape_info)
-            
-            ctx.restore() # Restore translation
-            ctx.restore() # Restore clip
-            
+            ctx.save(); ctx.arc(cx, cy, radius, 0, 2 * math.pi); ctx.clip()
+            bg_type = self.config.get("center_bg_type", "solid")
+            if bg_type == "image" and self._cached_center_pixbuf:
+                img_w, img_h = self._cached_center_pixbuf.get_width(), self._cached_center_pixbuf.get_height()
+                scale = max((2*radius)/img_w, (2*radius)/img_h); ctx.save()
+                ctx.translate(cx, cy); ctx.scale(scale, scale); ctx.translate(-img_w/2, -img_h/2)
+                Gdk.cairo_set_source_pixbuf(ctx, self._cached_center_pixbuf, 0, 0)
+                ctx.paint_with_alpha(float(self.config.get("center_background_image_alpha", 1.0))); ctx.restore()
+            elif bg_type == "gradient_linear":
+                c1=Gdk.RGBA(); c1.parse(self.config.get("center_gradient_linear_color1")); c2=Gdk.RGBA(); c2.parse(self.config.get("center_gradient_linear_color2"))
+                angle = float(self.config.get("center_gradient_linear_angle_deg", 90.0)); angle_rad = angle * math.pi / 180
+                x1, y1, x2, y2 = cx - radius * math.cos(angle_rad), cy - radius * math.sin(angle_rad), cx + radius * math.cos(angle_rad), cy + radius * math.sin(angle_rad)
+                pat = cairo.LinearGradient(x1, y1, x2, y2); pat.add_color_stop_rgba(0, c1.red,c1.green,c1.blue,c1.alpha); pat.add_color_stop_rgba(1, c2.red,c2.green,c2.blue,c2.alpha)
+                ctx.set_source(pat); ctx.paint()
+            elif bg_type == "gradient_radial":
+                c1=Gdk.RGBA(); c1.parse(self.config.get("center_gradient_radial_color1")); c2=Gdk.RGBA(); c2.parse(self.config.get("center_gradient_radial_color2"))
+                pat = cairo.RadialGradient(cx, cy, 0, cx, cy, radius); pat.add_color_stop_rgba(0, c1.red,c1.green,c1.blue,c1.alpha); pat.add_color_stop_rgba(1, c2.red,c2.green,c2.blue,c2.alpha)
+                ctx.set_source(pat); ctx.paint()
+            else:
+                bg_color = Gdk.RGBA(); bg_color.parse(self.config.get("center_bg_color", "rgba(40,40,40,1)")); ctx.set_source_rgba(bg_color.red, bg_color.green, bg_color.blue, bg_color.alpha); ctx.paint()
+            ctx.restore()
             self._draw_center_caption(ctx, cx, cy, radius)
 
         if not static_only:
@@ -475,7 +496,6 @@ class ArcComboDisplayer(ComboBase):
                 ctx.rotate(-math.pi / 2)
             else:
                 ctx.rotate(math.pi / 2)
-
             ctx.move_to(-log.width / 2.0, -log.height / 2.0); PangoCairo.show_layout(ctx, layout); ctx.restore()
             text_angle += char_angle * char_angle_step
         ctx.restore()

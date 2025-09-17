@@ -226,30 +226,24 @@ class DashboardComboDisplayer(ComboBase):
 
             instance_config = {}
             
+            # Populate with drawer's own model defaults first
             drawer_model = drawer.get_config_model()
             populate_defaults_from_model(instance_config, drawer_model)
             
+            # Populate with background model defaults
             bg_prefixes = drawer.get_config_key_prefixes()
             if bg_prefixes:
-                full_bg_prefix = f"{prefix}_{bg_prefixes[0]}"
-                bg_model = get_background_config_model(full_bg_prefix)
-                populate_defaults_from_model(instance_config, bg_model)
+                # Use the drawer's unprefixed key for its own background model
+                populate_defaults_from_model(instance_config, get_background_config_model(bg_prefixes[0]))
 
-            for section in drawer_model.values():
-                for option in section:
-                    prefixed_key = f"{prefix}_{option.key}"
-                    if prefixed_key in self.config:
-                        instance_config[option.key] = self.config[prefixed_key]
-            
-            if bg_prefixes:
-                full_bg_prefix = f"{prefix}_{bg_prefixes[0]}"
-                bg_model = get_background_config_model(full_bg_prefix)
-                for section in bg_model.values():
-                    for option in section:
-                        if option.key in self.config:
-                            instance_config[option.key] = self.config[option.key]
+            # Override with values from the main panel config, un-prefixing keys
+            for key, value in self.config.items():
+                if key.startswith(f"{prefix}_"):
+                    unprefixed_key = key[len(prefix) + 1:]
+                    instance_config[unprefixed_key] = value
             
             self._drawer_configs[prefix] = instance_config
+
 
     def apply_styles(self):
         super().apply_styles()
@@ -434,4 +428,3 @@ class DashboardComboDisplayer(ComboBase):
                 drawer.close()
         self._drawers.clear()
         super().close()
-

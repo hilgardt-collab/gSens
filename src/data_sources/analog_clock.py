@@ -47,16 +47,14 @@ class AnalogClockDataSource(DataSource):
             for part in alarms_str.split(';'):
                 if ',' in part:
                     time_part, enabled_part = part.split(',', 1)
-                    alarms.append({'time': time_part, 'enabled': enabled_part.lower() == 'true'})
+                    if re.match(r'^\d{2}:\d{2}$', time_part):
+                        alarms.append({
+                            "time": time_part,
+                            "enabled": enabled_part.lower() == 'true'
+                        })
         except Exception as e:
             print(f"Error parsing alarms string '{alarms_str}': {e}")
         return alarms
-
-    def get_active_alarms(self):
-        return [a for a in self._parse_alarms_from_config() if a.get('enabled')]
-
-    def force_update(self):
-        self.get_data()
 
     def get_data(self):
         try:
@@ -65,20 +63,14 @@ class AnalogClockDataSource(DataSource):
         except pytz.UnknownTimeZoneError:
             tz = pytz.timezone("UTC")
             now = datetime.datetime.now(tz)
+            self.config["timezone"] = "UTC"
 
-        current_time_hm = now.strftime("%H:%M")
         active_alarms = self.get_active_alarms()
         
-        is_ringing = False
-        for alarm in active_alarms:
-            if alarm['time'] == current_time_hm:
-                is_ringing = True
-                self._ringing_alarms.add(alarm['time'])
-        
-        if not is_ringing and current_time_hm in self._ringing_alarms:
-             self._ringing_alarms.remove(current_time_hm)
+        current_time_hm = now.strftime("%H:%M")
+        is_ringing = any(a['time'] == current_time_hm for a in active_alarms)
+        if is_ringing: self._ringing_alarms.add(current_time_hm)
 
-        # Timer logic
         timer_remaining = None
         if self._timer_is_running and self._timer_end_time:
             remaining = self._timer_end_time - time.monotonic()
@@ -88,115 +80,123 @@ class AnalogClockDataSource(DataSource):
                 timer_remaining = 0
             else:
                 timer_remaining = remaining
-        
+        elif self._timer_is_ringing:
+            timer_remaining = 0
+
+
         return {
             "datetime": now,
+            "active_alarms": active_alarms,
             "is_alarm_ringing": bool(self._ringing_alarms),
+            "timer_remaining_seconds": timer_remaining,
             "is_timer_running": self._timer_is_running,
-            "is_timer_ringing": self._timer_is_ringing,
-            "timer_remaining_seconds": timer_remaining
+            "is_timer_ringing": self._timer_is_ringing
         }
-    
-    def stop_ringing_alarms(self):
-        self._ringing_alarms.clear()
 
     def get_display_string(self, data):
-        """Returns the formatted time string for text displays."""
-        if data and data.get("datetime"):
-            now = data["datetime"]
-            hour_format = self.config.get("hour_format", "24")
-            show_seconds = str(self.config.get("show_seconds", "True")).lower() == 'true'
+        if not data or not data.get("datetime"): return "N/A"
+        now = data["datetime"]
+        
+        h_format = self.config.get("hour_format", "24")
+        show_secs = str(self.config.get("show_seconds", "True")).lower() == 'true'
+        
+        time_format = "%H:%M"
+        if h_format == "12":
+            time_format = "%I:%M %p"
+        if show_secs:
+            time_format = time_format.replace("%M", "%M:%S")
             
-            if hour_format == "12":
-                format_str = "%I:%M:%S %p" if show_seconds else "%I:%M %p"
-            else:
-                format_str = "%H:%M:%S" if show_seconds else "%H:%M"
-            
-            return now.strftime(format_str)
-        return "..."
+        return now.strftime(time_format)
 
     def get_primary_label_string(self, data):
-        if data and data.get("datetime"):
-            return data["datetime"].strftime(self.config.get("date_format", "%Y-%m-%d"))
-        return "N/A"
+        if not data or not data.get("datetime"): return ""
+        return data["datetime"].strftime(self.config.get("date_format", "%Y-%m-%d"))
 
     def get_secondary_display_string(self, data):
-        if data and data.get("datetime"):
-            return data["datetime"].strftime("%Z %z")
-        return ""
+        if not data or not data.get("datetime"): return ""
+        return data["datetime"].strftime("%Z")
+        
+    def force_update(self):
+        self._parse_alarms_from_config()
+
+    def get_active_alarms(self):
+        return [a for a in self._parse_alarms_from_config() if a['enabled']]
+
+    def stop_ringing_alarms(self):
+        self._ringing_alarms.clear()
 
     @staticmethod
     def get_config_model():
         model = DataSource.get_config_model()
-        model["Clock Settings"] = [
+        model.pop("Alarm", None)
+        model["Time & Date"] = [
             ConfigOption("timezone", "timezone_selector", "Timezone:", "UTC"),
-            ConfigOption("date_format", "string", "Date Format:", "%Y-%m-%d", tooltip="Python strftime format codes."),
+            ConfigOption("date_format", "string", "Date Format:", "%Y-%m-%d", tooltip="Python strftime format codes"),
             ConfigOption("hour_format", "dropdown", "Hour Format:", "24", options_dict={"24-hour": "24", "12-hour": "12"}),
             ConfigOption("show_seconds", "bool", "Show Seconds Hand:", "True"),
         ]
-        model.pop("Alarm", None)
-        model["Data Source & Update"] = []
         return model
-
+        
     def get_configure_callback(self):
+        """Callback to provide a custom timezone selection dialog."""
         def setup_timezone_selector(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
-            tz_entry = widgets.get("timezone")
-            tz_button = widgets.get("timezone_button")
-            if not tz_entry or not tz_button: return
+            key_prefix = f"{prefix}opt_" if prefix else ""
+            
+            tz_entry_key = f"{key_prefix}timezone"
+            tz_button_key = f"{key_prefix}timezone_button"
+            
+            tz_entry = widgets.get(tz_entry_key)
+            tz_button = widgets.get(tz_button_key)
+            
+            if not tz_entry or not tz_button:
+                print(f"Warning: Could not find timezone widgets ('{tz_entry_key}', '{tz_button_key}')")
+                return
 
-            def on_choose_timezone_clicked(btn):
+            def on_choose_timezone_clicked(button):
+                # BUG FIX: Make the timezone dialog modal to the main config dialog
                 tz_dialog = CustomDialog(parent=dialog, title="Select Timezone", modal=True)
                 tz_dialog.set_default_size(400, 600)
                 
-                vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
-                tz_dialog.get_content_area().append(vbox)
-                
-                search_entry = Gtk.SearchEntry(placeholder_text="Search timezones...")
-                vbox.append(search_entry)
-                
-                scrolled_window = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
-                vbox.append(scrolled_window)
-                
-                store = Gio.ListStore.new(Gtk.StringObject)
-                for tz_name in sorted(pytz.all_timezones):
-                    store.append(Gtk.StringObject.new(tz_name))
-                
-                def filter_func(item):
-                    search_text = search_entry.get_text().lower()
-                    if not search_text:
-                        return True
-                    tz_name = item.get_string()
-                    return search_text in tz_name.lower().replace("_", " ")
-
-                search_filter = Gtk.CustomFilter.new(filter_func)
-                filter_model = Gtk.FilterListModel.new(store, search_filter)
+                scrolled = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
+                tz_dialog.get_content_area().append(scrolled)
                 
                 list_box = Gtk.ListBox()
-                list_box.bind_model(filter_model, self._create_tz_row)
-                scrolled_window.set_child(list_box)
-
-                def on_search_changed(entry):
-                    search_filter.changed(Gtk.FilterChange.DIFFERENT)
+                list_box.set_selection_mode(Gtk.SelectionMode.SINGLE)
                 
-                search_entry.connect("search-changed", on_search_changed)
+                all_timezones = sorted(pytz.all_timezones, key=str.lower)
+                
+                string_list = Gio.ListStore.new(Gtk.StringObject)
+                for tz in all_timezones:
+                    string_list.append(Gtk.StringObject.new(tz))
+                
+                filter_model = Gtk.FilterListModel.new(string_list, None)
+                list_box.bind_model(filter_model, self._create_tz_row)
+                
+                search_entry = Gtk.SearchEntry(margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
+                tz_dialog.get_content_area().prepend(search_entry)
 
-                def on_row_activated(lb, row):
-                    if row: tz_dialog.respond(Gtk.ResponseType.ACCEPT)
-                list_box.connect("row-activated", on_row_activated)
-
+                def on_filter_changed(entry):
+                    query = entry.get_text().lower()
+                    if not query:
+                        filter_model.set_filter(None)
+                    else:
+                        custom_filter = Gtk.CustomFilter.new(lambda item, q=query: q in item.get_string().lower())
+                        filter_model.set_filter(custom_filter)
+                search_entry.connect("search-changed", on_filter_changed)
+                scrolled.set_child(list_box)
+                
                 tz_dialog.add_styled_button("_Cancel", Gtk.ResponseType.CANCEL)
-                select_button = tz_dialog.add_styled_button("_Select", Gtk.ResponseType.ACCEPT, "suggested-action", is_default=True)
-                select_button.set_sensitive(list_box.get_selected_row() is not None)
+                accept_btn = tz_dialog.add_styled_button("_Accept", Gtk.ResponseType.ACCEPT, "suggested-action", True)
+                accept_btn.set_sensitive(False)
 
                 def on_selection_changed(lb, row):
-                    select_button.set_sensitive(row is not None)
+                    accept_btn.set_sensitive(lb.get_selected_row() is not None)
                 list_box.connect("row-selected", on_selection_changed)
 
                 response = tz_dialog.run()
                 if response == Gtk.ResponseType.ACCEPT:
                     selected_row = list_box.get_selected_row()
                     if selected_row:
-                        # BUG FIX: Retrieve the timezone name from the row's custom attribute
                         tz_entry.set_text(selected_row.tz_name)
                 tz_dialog.destroy()
 
@@ -210,7 +210,6 @@ class AnalogClockDataSource(DataSource):
         label = Gtk.Label(label=tz_name, xalign=0, margin_start=5, margin_end=5)
         row = Gtk.ListBoxRow()
         row.set_child(label)
-        # BUG FIX: Attach the raw timezone name directly to the row widget
         row.tz_name = tz_name
         return row
 
@@ -229,4 +228,3 @@ class AnalogClockDataSource(DataSource):
         self._timer_end_time = None
         self._timer_is_running = False
         self._timer_is_ringing = False
-
