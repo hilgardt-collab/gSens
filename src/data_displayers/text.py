@@ -100,8 +100,9 @@ class TextDisplayer(DataDisplayer):
 
     def get_configure_callback(self):
         """A custom callback to dynamically build the UI for each text line."""
-        def build_dynamic_line_configs(dialog, content_box, widgets, available_sources, panel_config):
-            line_count_spinner = widgets.get("text_line_count")
+        def build_dynamic_line_configs(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
+            prefix_ = f"{prefix}_" if prefix else ""
+            line_count_spinner = widgets.get(f"{prefix_}text_line_count")
             if not line_count_spinner: return
 
             lines_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
@@ -111,10 +112,10 @@ class TextDisplayer(DataDisplayer):
                 child = lines_container.get_first_child()
                 while child: lines_container.remove(child); child = lines_container.get_first_child()
                 
-                keys_to_remove = [k for k in widgets if k.startswith("line")]
+                keys_to_remove = [k for k in widgets if k.startswith(f"{prefix_}line")]
                 for k in keys_to_remove: widgets.pop(k, None)
                 
-                dialog.dynamic_models = [m for m in dialog.dynamic_models if not any(opt.key.startswith("line") for s in m.values() for opt in s)]
+                dialog.dynamic_models = [m for m in dialog.dynamic_models if not any(opt.key.startswith(f"{prefix_}line") for s in m.values() for opt in s)]
 
                 count = spinner.get_value_as_int()
                 for i in range(1, count + 1):
@@ -129,20 +130,20 @@ class TextDisplayer(DataDisplayer):
                     align_opts = {"Left": "left", "Center": "center", "Right": "right"}
 
                     line_model = {"": [
-                        ConfigOption(f"line{i}_source", "dropdown", "Text Source:", "display_string", options_dict=source_opts),
-                        ConfigOption(f"line{i}_custom_text", "string", "Custom Text:", ""),
-                        ConfigOption(f"line{i}_align", "dropdown", "Align:", "center", options_dict=align_opts),
-                        ConfigOption(f"line{i}_font", "font", "Font:", "Sans 12"),
-                        ConfigOption(f"line{i}_color", "color", "Color:", "rgba(220,220,220,1)"),
-                        ConfigOption(f"line{i}_slant", "spinner", "Slant (deg):", 0, -45, 45, 1, 0),
-                        ConfigOption(f"line{i}_rotation", "spinner", "Rotation (deg):", 0, -180, 180, 5, 0),
+                        ConfigOption(f"{prefix_}line{i}_source", "dropdown", "Text Source:", "display_string", options_dict=source_opts),
+                        ConfigOption(f"{prefix_}line{i}_custom_text", "string", "Custom Text:", ""),
+                        ConfigOption(f"{prefix_}line{i}_align", "dropdown", "Align:", "center", options_dict=align_opts),
+                        ConfigOption(f"{prefix_}line{i}_font", "font", "Font:", "Sans 12"),
+                        ConfigOption(f"{prefix_}line{i}_color", "color", "Color:", "rgba(220,220,220,1)"),
+                        ConfigOption(f"{prefix_}line{i}_slant", "spinner", "Slant (deg):", 0, -45, 45, 1, 0),
+                        ConfigOption(f"{prefix_}line{i}_rotation", "spinner", "Rotation (deg):", 0, -180, 180, 5, 0),
                     ]}
                     
                     build_ui_from_model(line_box, panel_config, line_model, widgets)
                     dialog.dynamic_models.append(line_model)
                     
-                    source_combo = widgets[f"line{i}_source"]
-                    custom_text_row = widgets[f"line{i}_custom_text"].get_parent()
+                    source_combo = widgets[f"{prefix_}line{i}_source"]
+                    custom_text_row = widgets[f"{prefix_}line{i}_custom_text"].get_parent()
                     
                     def on_source_changed(combo, row):
                         row.set_visible(combo.get_active_id() == "custom_text")
@@ -235,4 +236,3 @@ class TextDisplayer(DataDisplayer):
             ctx.restore()
             
             current_y += text_height + spacing
-

@@ -132,8 +132,9 @@ class ArcGaugeDisplayer(DataDisplayer):
         return ["gauge_"]
 
     def get_configure_callback(self):
-        def build_gauge_config(dialog, content_box, widgets, available_sources, panel_config):
-            build_background_config_ui(content_box, panel_config, widgets, dialog, prefix="gauge_", title="Gauge Dial Background")
+        def build_gauge_config(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
+            if prefix is None:
+                build_background_config_ui(content_box, panel_config, widgets, dialog, prefix="gauge_", title="Gauge Dial Background")
         return build_gauge_config
 
     def apply_styles(self):
@@ -331,4 +332,3 @@ class ArcGaugeDisplayer(DataDisplayer):
     def close(self):
         self._stop_animation_timer()
         super().close()
-

@@ -112,7 +112,7 @@ class BarDisplayer(DataDisplayer):
 
     def get_configure_callback(self):
         """Dynamically show/hide options based on other settings."""
-        def setup_dynamic_options(dialog, content_box, widgets, available_sources, panel_config):
+        def setup_dynamic_options(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
             bg_grad_switch = widgets.get("bar_bg_gradient")
             fg_grad_switch = widgets.get("bar_fg_gradient")
             layout_combo = widgets.get("bar_text_layout")
@@ -317,4 +317,3 @@ class BarDisplayer(DataDisplayer):
         
         ctx.move_to(draw_x, y)
         PangoCairo.show_layout(ctx, layout)
-

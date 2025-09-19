@@ -119,24 +119,28 @@ class DashboardComboDisplayer(ComboBase):
                 if not display_type_combo: return
 
                 style_sections = {}
-                for key, drawer_class in self._drawers.items():
-                    section_title = f"Style for {key.replace('_', ' ').title()}"
-                    style_sections[key] = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+                for key, drawer_instance in self._drawers.items():
+                    section_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+                    style_sections[key] = section_box
                     
                     sub_model = {}
-                    for s_title, s_opts in drawer_class.get_config_model().items():
+                    for s_title, s_opts in drawer_instance.get_config_model().items():
                         prefixed_opts = [ConfigOption(f"{prefix}_{opt.key}", opt.type, opt.label, opt.default, opt.min_val, opt.max_val, opt.step, opt.digits, opt.options_dict, opt.tooltip, opt.file_filters) for opt in s_opts]
                         sub_model[s_title] = prefixed_opts
 
-                    build_ui_from_model(style_sections[key], panel_config, sub_model, widgets)
+                    build_ui_from_model(section_box, panel_config, sub_model, widgets)
                     
-                    bg_prefixes = drawer_class.get_config_key_prefixes()
+                    bg_prefixes = drawer_instance.get_config_key_prefixes()
                     if bg_prefixes:
                         full_bg_prefix = f"{prefix}_{bg_prefixes[0]}"
-                        build_background_config_ui(style_sections[key], panel_config, widgets, dialog, prefix=full_bg_prefix, title=f"{key.replace('_',' ').title()} Background")
+                        build_background_config_ui(section_box, panel_config, widgets, dialog, prefix=full_bg_prefix, title=f"{key.replace('_',' ').title()} Background")
                     
+                    custom_builder = drawer_instance.get_configure_callback()
+                    if custom_builder:
+                        custom_builder(dialog, section_box, widgets, available_sources, panel_config, prefix=prefix)
+
                     dialog.dynamic_models.append(sub_model)
-                    parent_box.append(style_sections[key])
+                    parent_box.append(section_box)
 
                 lb_width_widget = widgets.get(f"{prefix}_level_bar_width")
                 lb_height_widget = widgets.get(f"{prefix}_level_bar_height")
@@ -226,24 +230,19 @@ class DashboardComboDisplayer(ComboBase):
 
             instance_config = {}
             
-            # Populate with drawer's own model defaults first
             drawer_model = drawer.get_config_model()
             populate_defaults_from_model(instance_config, drawer_model)
             
-            # Populate with background model defaults
             bg_prefixes = drawer.get_config_key_prefixes()
             if bg_prefixes:
-                # Use the drawer's unprefixed key for its own background model
                 populate_defaults_from_model(instance_config, get_background_config_model(bg_prefixes[0]))
 
-            # Override with values from the main panel config, un-prefixing keys
             for key, value in self.config.items():
                 if key.startswith(f"{prefix}_"):
                     unprefixed_key = key[len(prefix) + 1:]
                     instance_config[unprefixed_key] = value
             
             self._drawer_configs[prefix] = instance_config
-
 
     def apply_styles(self):
         super().apply_styles()
@@ -428,3 +427,4 @@ class DashboardComboDisplayer(ComboBase):
                 drawer.close()
         self._drawers.clear()
         super().close()
+

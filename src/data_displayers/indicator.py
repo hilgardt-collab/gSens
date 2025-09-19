@@ -1,3 +1,4 @@
+# data_displayers/indicator.py
 import gi
 import math
 import cairo
@@ -103,7 +104,7 @@ class IndicatorDisplayer(DataDisplayer):
 
     def get_configure_callback(self):
         """A custom callback to dynamically show/hide shape and color stop widgets."""
-        def setup_dynamic_options(dialog, content_box, widgets, available_sources, panel_config):
+        def setup_dynamic_options(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
             # --- Color Stop Logic ---
             color_count_spinner = widgets.get("indicator_color_count")
             if color_count_spinner:
@@ -288,4 +289,3 @@ class IndicatorDisplayer(DataDisplayer):
             PangoCairo.show_layout(ctx, layout)
             
             current_y += element['height'] + spacing
-

@@ -92,8 +92,11 @@ class GraphDisplayer(DataDisplayer):
         return ["graph_"]
 
     def get_configure_callback(self):
-        def setup_dynamic_options(dialog, content_box, widgets, available_sources, panel_config):
-            build_background_config_ui(content_box, panel_config, widgets, dialog, prefix="graph_", title="Graph Background")
+        def setup_dynamic_options(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
+            # If a prefix is passed, it means we are a child of a combo.
+            # The combo builder will handle the background UI with the correct full prefix.
+            if prefix is None:
+                build_background_config_ui(content_box, panel_config, widgets, dialog, prefix="graph_", title="Graph Background")
             
             graph_type_combo = widgets.get("graph_type")
             line_style_widget = widgets.get("graph_line_style")
@@ -229,4 +232,3 @@ class GraphDisplayer(DataDisplayer):
             text_rgba = Gdk.RGBA(); text_rgba.parse(self.config.get("overlay_text_color"))
             ctx.set_source_rgba(text_rgba.red, text_rgba.green, text_rgba.blue, text_rgba.alpha)
             ctx.move_to(text_x, text_y); PangoCairo.show_layout(ctx, self._layout_overlay)
-

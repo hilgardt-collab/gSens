@@ -123,8 +123,9 @@ class SpeedometerDisplayer(DataDisplayer):
         return ["speedo_"]
 
     def get_configure_callback(self):
-        def build_dial_config(dialog, content_box, widgets, available_sources, panel_config):
-            build_background_config_ui(content_box, panel_config, widgets, dialog, prefix="speedo_", title="Dial Background")
+        def build_dial_config(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
+            if prefix is None:
+                build_background_config_ui(content_box, panel_config, widgets, dialog, prefix="speedo_", title="Dial Background")
         return build_dial_config
 
     def apply_styles(self):
@@ -303,4 +304,3 @@ class SpeedometerDisplayer(DataDisplayer):
     def close(self):
         self._stop_animation_timer()
         super().close()
-

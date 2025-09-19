@@ -161,7 +161,7 @@ class LevelBarDisplayer(DataDisplayer):
         return model
 
     def get_configure_callback(self):
-        def setup_dynamic_options(dialog, content_box, widgets, available_sources, panel_config):
+        def setup_dynamic_options(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
             try:
                 grad_switch = widgets["level_bar_on_gradient_enabled"]
                 pulse_switch = widgets["level_bar_on_pulse_enabled"]
@@ -511,4 +511,3 @@ class LevelBarDisplayer(DataDisplayer):
 
     def close(self):
         self._stop_animation_timer(); super().close()
-
