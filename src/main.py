@@ -74,7 +74,6 @@ class MainWindow(Gtk.ApplicationWindow):
         self.set_child(main_overlay)
         
         self.build_header_bar_and_actions()
-        self.grid_manager.load_panels_from_config()
         
         if hasattr(self.grid_manager, '_load_and_apply_grid_config'):
             self.grid_manager._load_and_apply_grid_config()
@@ -94,6 +93,8 @@ class MainWindow(Gtk.ApplicationWindow):
 
     def _on_sensors_ready(self):
         """Called when the background sensor discovery is complete."""
+        # Now that sensors are discovered, we can safely load the panels.
+        self.grid_manager.load_panels_from_config()
         self.add_panel_button.set_sensitive(True)
         return GLib.SOURCE_REMOVE
 
@@ -128,8 +129,18 @@ class MainWindow(Gtk.ApplicationWindow):
         return GLib.SOURCE_REMOVE
 
     def _on_fullscreen_changed(self, window, pspec):
-        if self.grid_manager and hasattr(self.grid_manager, '_update_fullscreen_menu_item_label'):
-            self.grid_manager._update_fullscreen_menu_item_label(self)
+        is_fullscreen = self.is_fullscreen()
+        
+        if self.grid_manager:
+            if hasattr(self.grid_manager, '_update_fullscreen_menu_item_label'):
+                self.grid_manager._update_fullscreen_menu_item_label(self)
+            
+            if is_fullscreen:
+                if hasattr(self.grid_manager, 'start_auto_scrolling'):
+                    self.grid_manager.start_auto_scrolling()
+            else:
+                if hasattr(self.grid_manager, 'stop_auto_scrolling'):
+                    self.grid_manager.stop_auto_scrolling()
 
     def toggle_fullscreen_mode(self, action=None, parameter=None):
         if self.is_fullscreen(): self.unfullscreen()
@@ -260,10 +271,6 @@ class SystemMonitorApp(Gtk.Application):
     def do_startup(self):
         Gtk.Application.do_startup(self)
         
-        # Set the application icon using the Freedesktop Icon Theme Specification.
-        # This is the standard way for distributable Linux applications.
-        # For this to work, the icon (e.g., gSens.png) must be installed to a directory like:
-        # /usr/share/icons/hicolor/256x256/apps/com.example.gtk-system-monitor.png
         try:
             icon_name = self.get_application_id()
             if icon_name:
@@ -327,4 +334,3 @@ class SystemMonitorApp(Gtk.Application):
 if __name__ == "__main__":
     app = SystemMonitorApp()
     sys.exit(app.run(sys.argv))
-

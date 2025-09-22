@@ -4,8 +4,8 @@
 import threading
 import time
 from gi.repository import GLib
-# --- PERF OPT 1: Import the unified GPU manager ---
 from gpu_managers import gpu_manager
+from utils import safe_subprocess
 
 class UpdateManager:
     """
@@ -29,6 +29,11 @@ class UpdateManager:
         self._panels = {}  # {panel_id: panel_instance}
         self._last_update_times = {}  # {panel_id: timestamp}
         self._lock = threading.Lock()
+        
+        # Cache for sensor command output, cleared each update cycle
+        self._sensor_data_cache = {}
+        self._sensor_cache_lock = threading.Lock()
+
         self._worker_thread = None
         self._stop_event = threading.Event()
         self._initialized = True
@@ -68,18 +73,33 @@ class UpdateManager:
                 self._panels.pop(panel_id, None)
                 self._last_update_times.pop(panel_id, None)
 
+    def get_sensor_adapter_data(self, adapter):
+        """
+        Retrieves raw text output from 'sensors -u <adapter>'.
+        The result is cached for the duration of a single update cycle to
+        prevent redundant subprocess calls.
+        """
+        with self._sensor_cache_lock:
+            if adapter in self._sensor_data_cache:
+                return self._sensor_data_cache[adapter]
+            
+            output = safe_subprocess(["sensors", "-u", adapter], timeout=3)
+            self._sensor_data_cache[adapter] = output
+            return output
+
     def _update_loop(self):
         """The main loop for the worker thread."""
         while not self._stop_event.is_set():
             now = time.monotonic()
             panels_to_update = []
             
-            # --- PERF OPT 1: Perform a single bulk update for all GPUs ---
-            # This populates the caches in amd_manager and intel_manager.
+            # Clear the sensor cache at the start of each cycle
+            with self._sensor_cache_lock:
+                self._sensor_data_cache.clear()
+
             gpu_manager.update()
             
             with self._lock:
-                # --- FIX: Corrected typo from self.panels to self._panels ---
                 for panel_id, panel in list(self._panels.items()):
                     try:
                         interval = float(panel.config.get("update_interval_seconds", 2.0))

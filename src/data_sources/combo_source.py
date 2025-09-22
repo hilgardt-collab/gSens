@@ -13,16 +13,12 @@ from gi.repository import Gtk, GLib
 class ComboDataSource(DataSource):
     """
     A unified container data source for panels that display multiple child sources.
-    It now acts as an intelligent scheduler, respecting the individual update
-    intervals of its child sources.
+    It fetches fresh data from all its children whenever it is polled by the UpdateManager.
     """
     def __init__(self, config):
         super().__init__(config)
         self.child_sources = {}
         self.lock = threading.Lock()
-        
-        self._child_data_cache = {}
-        self._child_last_update_times = {}
 
     @property
     def is_clock_source(self):
@@ -36,12 +32,10 @@ class ComboDataSource(DataSource):
 
     def setup_child_sources(self, available_sources):
         """
-        Initializes child sources and their associated caching/timing states.
+        Initializes child sources based on the panel's configuration.
         """
         with self.lock:
             self.child_sources.clear()
-            self._child_data_cache.clear()
-            self._child_last_update_times.clear()
             
             sources_iterable = available_sources.values() if isinstance(available_sources, dict) else available_sources
             source_map = {info['key']: info['class'] for info in sources_iterable}
@@ -68,7 +62,6 @@ class ComboDataSource(DataSource):
                         child_instance = SourceClass(config=child_config.copy())
                         instance_key = f"{slot_prefix}source"
                         self.child_sources[instance_key] = child_instance
-                        self._child_last_update_times[instance_key] = 0
 
             if mode == 'level_bar':
                 num_bars = int(self.config.get("number_of_bars", 3))
@@ -89,27 +82,15 @@ class ComboDataSource(DataSource):
 
     def get_data(self):
         """
-        Fetches data from child sources only when their individual update interval
-        has passed, returning cached data otherwise.
+        Fetches fresh data from all configured child sources and bundles it.
         """
         data_bundle = {}
         with self.lock:
             if not self.child_sources:
                 return {}
             
-            now = time.monotonic()
             for key, source in self.child_sources.items():
-                last_update = self._child_last_update_times.get(key, 0)
-                try:
-                    interval = float(source.config.get("update_interval_seconds", 2.0))
-                except (ValueError, TypeError):
-                    interval = 2.0
-                
-                if (now - last_update) >= interval:
-                    self._child_data_cache[key] = source.get_data()
-                    self._child_last_update_times[key] = now
-
-                raw_data = self._child_data_cache.get(key)
+                raw_data = source.get_data()
                 min_val = float(source.config.get("graph_min_value", 0.0))
                 max_val = float(source.config.get("graph_max_value", 100.0))
                 override = source.config.get('caption_override', '')
@@ -249,7 +230,7 @@ class ComboDataSource(DataSource):
             build_ui_from_model(content_box, panel_config, primary_model, widgets); dialog.dynamic_models.append(primary_model)
             primary_sub_config_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=20); content_box.append(primary_sub_config_box)
             
-            sec_count_model = {"": [ConfigOption("number_of_secondary_sources", "spinner", "Secondary Items:", 4, 1, 10, 1, 0)]}
+            sec_count_model = {"": [ConfigOption("number_of_secondary_sources", "spinner", "Secondary Items:", 4, 1, 16, 1, 0)]}
             build_ui_from_model(content_box, panel_config, sec_count_model, widgets); dialog.dynamic_models.append(sec_count_model)
 
             content_box.append(Gtk.Separator(margin_top=15, margin_bottom=5))
@@ -257,7 +238,7 @@ class ComboDataSource(DataSource):
             sec_notebook = Gtk.Notebook(); sec_notebook.set_scrollable(True); content_box.append(sec_notebook)
             
             secondary_tabs_content = []
-            for i in range(1, 11):
+            for i in range(1, 17):
                 scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True, min_content_height=300)
                 tab_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10); scroll.set_child(tab_box)
                 sec_notebook.append_page(scroll, Gtk.Label(label=f"Item {i}")); secondary_tabs_content.append(scroll)
@@ -353,4 +334,3 @@ class ComboDataSource(DataSource):
                 _build_arc_config_ui(dialog, content_box, widgets, available_sources, panel_config, source_opts)
 
         return build_main_config_ui
-

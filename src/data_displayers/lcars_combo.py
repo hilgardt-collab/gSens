@@ -117,21 +117,39 @@ class LCARSComboDisplayer(ComboBase):
             "Frame Style": [
                 ConfigOption("lcars_sidebar_extension_mode", "dropdown", "Sidebar Extension:", "top",
                              options_dict={"Top Only": "top", "Bottom Only": "bottom", "Top and Bottom": "both"}),
-                ConfigOption("lcars_top_extension_height", "spinner", "Top Extension Height (px):", 40, 0, 500, 5, 0),
-                ConfigOption("lcars_bottom_extension_height", "spinner", "Bottom Extension Height (px):", 40, 0, 500, 5, 0),
                 ConfigOption("lcars_top_bar_height", "spinner", "Top Bar Height (px):", 40, 10, 200, 2, 0),
+                ConfigOption("lcars_bottom_extension_height", "spinner", "Bottom Extension Height (px):", 40, 0, 500, 5, 0),
                 ConfigOption("lcars_sidebar_width", "spinner", "Side Bar Width (px):", 150, 20, 500, 5, 0),
                 ConfigOption("lcars_corner_radius", "spinner", "Corner Radius (px):", 60, 10, 500, 5, 0),
+                ConfigOption("lcars_extension_corner_style", "dropdown", "Extension Corner Style:", "square", options_dict={"Square": "square", "Round": "round"}),
+                ConfigOption("lcars_extension_corner_radius", "spinner", "Extension Corner Radius (px):", 20, 0, 100, 1, 0),
                 ConfigOption("lcars_frame_color", "color", "Frame Color:", "rgba(255,153,102,1)"), # Peach
                 ConfigOption("lcars_content_bg_color", "color", "Content BG Color:", "rgba(0,0,0,1)"),
                 ConfigOption("lcars_content_padding", "spinner", "Content Padding (px):", 5, 0, 100, 1, 0),
+                ConfigOption("lcars_secondary_spacing_mode", "dropdown", "Secondary Item Spacing:", "auto", options_dict={"Automatic": "auto", "Manual": "manual"}),
+                ConfigOption("lcars_secondary_spacing_value", "spinner", "Manual Spacing (px):", 5, 0, 50, 1, 0),
             ],
-            "Top Bar": [
-                ConfigOption("lcars_header_text", "string", "Header Text:", "U.S.S. ENTERPRISE"),
-                ConfigOption("lcars_header_font", "font", "Header Font:", "Swiss 911 Ultra Compressed 18"),
-                ConfigOption("lcars_header_color", "color", "Header Color:", "rgba(0,0,0,1)"),
-                ConfigOption("lcars_header_bg_color", "color", "Header BG Color:", "rgba(204,153,255,1)"), # Lilac
-                ConfigOption("lcars_header_padding", "spinner", "Header Padding (px):", 10, 0, 50, 1, 0),
+            "Header Bar (Top)": [
+                ConfigOption("lcars_top_header_position", "dropdown", "Header Position:", "top", options_dict={"Top Bar": "top", "None": "none"}),
+                ConfigOption("lcars_top_header_text", "string", "Header Text:", "U.S.S. ENTERPRISE"),
+                ConfigOption("lcars_top_header_font", "font", "Header Font:", "Swiss 911 Ultra Compressed 18"),
+                ConfigOption("lcars_top_header_color", "color", "Header Color:", "rgba(0,0,0,1)"),
+                ConfigOption("lcars_top_header_align", "dropdown", "Header Align:", "left", options_dict={"Left": "left", "Center": "center", "Right": "right"}),
+                ConfigOption("lcars_top_header_width_mode", "dropdown", "Header Width:", "full", options_dict={"Full Width": "full", "Fit to Text": "fit"}),
+                ConfigOption("lcars_top_header_shape", "dropdown", "Header Shape:", "pill", options_dict={"Pill": "pill", "Square": "square"}),
+                ConfigOption("lcars_top_header_bg_color", "color", "Header BG Color:", "rgba(204,153,255,1)"), # Lilac
+                ConfigOption("lcars_top_header_padding", "spinner", "Header Padding (px):", 10, 0, 50, 1, 0),
+            ],
+            "Header Bar (Bottom)": [
+                ConfigOption("lcars_bottom_header_position", "dropdown", "Header Position:", "none", options_dict={"Bottom Bar": "bottom", "None": "none"}),
+                ConfigOption("lcars_bottom_header_text", "string", "Header Text:", "LCARS"),
+                ConfigOption("lcars_bottom_header_font", "font", "Header Font:", "Swiss 911 Ultra Compressed 18"),
+                ConfigOption("lcars_bottom_header_color", "color", "Header Color:", "rgba(0,0,0,1)"),
+                ConfigOption("lcars_bottom_header_align", "dropdown", "Header Align:", "left", options_dict={"Left": "left", "Center": "center", "Right": "right"}),
+                ConfigOption("lcars_bottom_header_width_mode", "dropdown", "Header Width:", "full", options_dict={"Full Width": "full", "Fit to Text": "fit"}),
+                ConfigOption("lcars_bottom_header_shape", "dropdown", "Header Shape:", "pill", options_dict={"Pill": "pill", "Square": "square"}),
+                ConfigOption("lcars_bottom_header_bg_color", "color", "Header BG Color:", "rgba(204,153,255,1)"), # Lilac
+                ConfigOption("lcars_bottom_header_padding", "spinner", "Header Padding (px):", 10, 0, 50, 1, 0),
             ],
             "Animation": [
                 ConfigOption("lcars_animation_enabled", "bool", "Enable Bar Animation:", "True"),
@@ -144,12 +162,12 @@ class LCARSComboDisplayer(ComboBase):
         for section, options in primary_model.items():
             model[f"Primary {section}"] = options
 
-        for i in range(1, 13):
+        for i in range(1, 17):
             sec_model = cls._get_content_item_model(f"secondary{i}")
             for section, options in sec_model.items():
                 model[f"Secondary {i} {section}"] = options
         
-        for i in range(1, 13):
+        for i in range(1, 17):
             seg_model = cls._get_segment_model(i)
             for section, options in seg_model.items():
                 model[section] = options
@@ -169,31 +187,61 @@ class LCARSComboDisplayer(ComboBase):
             frame_scroll.set_child(frame_box)
             display_notebook.append_page(frame_scroll, Gtk.Label(label="Frame"))
             
+            full_model = self._get_full_config_model()
             frame_ui_model = {
-                "Frame Style": self._get_full_config_model()["Frame Style"],
-                "Top Bar": self._get_full_config_model()["Top Bar"],
-                "Animation": self._get_full_config_model()["Animation"]
+                "Frame Style": full_model["Frame Style"],
+                "Header Bar (Top)": full_model["Header Bar (Top)"],
+                "Header Bar (Bottom)": full_model["Header Bar (Bottom)"],
+                "Animation": full_model["Animation"]
             }
             build_ui_from_model(frame_box, panel_config, frame_ui_model, widgets)
             dialog.dynamic_models.append(frame_ui_model)
-
-            ext_mode_combo = widgets.get("lcars_sidebar_extension_mode")
-            top_ext_spinner = widgets.get("lcars_top_extension_height")
-            bottom_ext_spinner = widgets.get("lcars_bottom_extension_height")
-            if ext_mode_combo and top_ext_spinner and bottom_ext_spinner:
-                top_ext_row = top_ext_spinner.get_parent()
-                bottom_ext_row = bottom_ext_spinner.get_parent()
-                def on_ext_mode_changed(combo):
-                    mode = combo.get_active_id()
-                    top_ext_row.set_visible(mode in ["top", "both"])
-                    bottom_ext_row.set_visible(mode in ["bottom", "both"])
-                ext_mode_combo.connect("changed", on_ext_mode_changed)
-                GLib.idle_add(on_ext_mode_changed, ext_mode_combo)
             
+            # --- Dynamic UI for Headers ---
+            def setup_header_dynamics(prefix):
+                pos_combo = widgets.get(f"lcars_{prefix}_header_position")
+                if not pos_combo: return
+                
+                rows_to_toggle = []
+                header_section_key = f"Header Bar ({prefix.capitalize()})"
+                for opt in full_model.get(header_section_key, []):
+                    if opt.key != f"lcars_{prefix}_header_position":
+                        widget = widgets.get(opt.key)
+                        if widget and hasattr(widget, 'get_parent') and widget.get_parent():
+                            parent = widget.get_parent()
+                            while parent.get_parent() != frame_box and parent.get_parent() is not None:
+                                parent = parent.get_parent()
+                            if parent not in rows_to_toggle:
+                                rows_to_toggle.append(parent)
+
+                def on_pos_changed(combo):
+                    is_none = combo.get_active_id() == "none"
+                    for row in rows_to_toggle:
+                        row.set_visible(not is_none)
+                
+                pos_combo.connect("changed", on_pos_changed)
+                GLib.idle_add(on_pos_changed, pos_combo)
+
+            setup_header_dynamics("top")
+            setup_header_dynamics("bottom")
+
+            # --- Dynamic UI for Spacing ---
+            spacing_mode_combo = widgets.get("lcars_secondary_spacing_mode")
+            spacing_value_spinner = widgets.get("lcars_secondary_spacing_value")
+
+            if spacing_mode_combo and spacing_value_spinner:
+                spacing_value_row = spacing_value_spinner.get_parent()
+                def on_spacing_mode_changed(combo):
+                    is_manual = combo.get_active_id() == "manual"
+                    spacing_value_row.set_visible(is_manual)
+                
+                spacing_mode_combo.connect("changed", on_spacing_mode_changed)
+                GLib.idle_add(on_spacing_mode_changed, spacing_mode_combo)
+
             frame_box.append(Gtk.Separator(margin_top=15, margin_bottom=5))
             frame_box.append(Gtk.Label(label="<b>Side Bar Segments</b>", use_markup=True, xalign=0))
             
-            sidebar_model = {"": [ConfigOption("lcars_segment_count", "spinner", "Number of Segments:", 3, 0, 12, 1, 0)]}
+            sidebar_model = {"": [ConfigOption("lcars_segment_count", "spinner", "Number of Segments:", 3, 0, 16, 1, 0)]}
             build_ui_from_model(frame_box, panel_config, sidebar_model, widgets)
             dialog.dynamic_models.append(sidebar_model)
 
@@ -205,7 +253,7 @@ class LCARSComboDisplayer(ComboBase):
             frame_box.append(segment_scrolled)
             
             segment_tabs_content = []
-            for i in range(1, 13):
+            for i in range(1, 17):
                 tab_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
                 tab_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
                 tab_scroll.set_child(tab_box)
@@ -246,7 +294,7 @@ class LCARSComboDisplayer(ComboBase):
             dialog.dynamic_models.append(primary_model)
 
             secondary_tabs_content = []
-            for i in range(1, 13):
+            for i in range(1, 17):
                 prefix = f"secondary{i}"
                 tab_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
                 tab_scroll.set_min_content_height(300)
@@ -324,7 +372,7 @@ class LCARSComboDisplayer(ComboBase):
     def update_display(self, value):
         super().update_display(value) 
         
-        all_prefixes = ["primary"] + [f"secondary{i}" for i in range(1, 13)]
+        all_prefixes = ["primary"] + [f"secondary{i}" for i in range(1, 17)]
         for prefix in all_prefixes:
             source_key = f"{prefix}_source"
             bar_anim_key = f"{prefix}_bar"
@@ -392,13 +440,11 @@ class LCARSComboDisplayer(ComboBase):
         self._draw_frame_and_sidebar(ctx, width, height)
         self._draw_content_widgets(ctx, width, height)
 
-    def _create_pango_layout(self, ctx, text, font_str, color_str):
+    def _create_pango_layout(self, ctx, text, font_str):
         layout = PangoCairo.create_layout(ctx)
-        font_str = font_str or "Sans 12"; color_str = color_str or "rgba(255,255,255,1)"
+        font_str = font_str or "Sans 12"
         layout.set_font_description(Pango.FontDescription.from_string(font_str))
         layout.set_text(text, -1)
-        color = Gdk.RGBA(); color.parse(color_str)
-        ctx.set_source_rgba(color.red, color.green, color.blue, color.alpha)
         return layout
 
     def _draw_frame_and_sidebar(self, ctx, width, height):
@@ -406,64 +452,148 @@ class LCARSComboDisplayer(ComboBase):
         radius = float(self.config.get("lcars_corner_radius", 60))
         frame_color_str = self.config.get("lcars_frame_color", "rgba(255,153,102,1)")
         mode = self.config.get("lcars_sidebar_extension_mode", "top")
-        top_ext_h = float(self.config.get("lcars_top_extension_height", 40)) if mode in ["top", "both"] else 0
-        
-        top_bar_h = top_ext_h
+        ext_style = self.config.get("lcars_extension_corner_style", "square")
+        ext_radius = float(self.config.get("lcars_extension_corner_radius", 20))
 
+        top_bar_h = float(self.config.get("lcars_top_bar_height", 40))
+        bottom_ext_h = float(self.config.get("lcars_bottom_extension_height", 40))
+        
+        has_top_ext = mode in ["top", "both"]
+        has_bottom_ext = mode in ["bottom", "both"]
+        
+        # --- Outer Path (Clockwise) ---
         ctx.new_path()
-        ctx.move_to(0, radius)
+        ctx.move_to(0, radius) 
         ctx.arc(radius, radius, radius, math.pi, 1.5 * math.pi)
-        ctx.line_to(width, 0)
         
-        ctx.line_to(width, top_bar_h)
-        
-        ctx.line_to(sidebar_w + radius, top_bar_h)
-        ctx.arc_negative(sidebar_w + radius, top_bar_h + radius, radius, 1.5 * math.pi, math.pi)
-        
-        ctx.line_to(sidebar_w, height)
-        
-        ctx.line_to(0, height)
+        if ext_style == "round" and has_top_ext:
+            ctx.line_to(width - ext_radius, 0)
+            ctx.arc(width - ext_radius, ext_radius, ext_radius, 1.5 * math.pi, 2 * math.pi)
+        else:
+            ctx.line_to(width, 0)
+
+        if ext_style == "round" and has_bottom_ext:
+            ctx.line_to(width, height - ext_radius)
+            ctx.arc(width - ext_radius, height - ext_radius, ext_radius, 0, 0.5 * math.pi)
+        else:
+            ctx.line_to(width, height)
+
+        ctx.line_to(radius, height)
+        ctx.arc(radius, height - radius, radius, 0.5 * math.pi, math.pi)
         ctx.close_path()
+
+        # --- Inner Cutout Path (Counter-Clockwise) ---
+        content_y_start = top_bar_h if has_top_ext else 0
+        content_y_end = height - bottom_ext_h if has_bottom_ext else height
         
+        ctx.move_to(width, content_y_start)
+        
+        if has_top_ext:
+            ctx.line_to(sidebar_w + radius, content_y_start)
+            ctx.arc_negative(sidebar_w + radius, content_y_start + radius, radius, 1.5 * math.pi, math.pi)
+        else:
+            ctx.line_to(sidebar_w, content_y_start)
+
+        ctx.line_to(sidebar_w, content_y_end - (radius if has_bottom_ext else 0))
+
+        if has_bottom_ext:
+            ctx.arc_negative(sidebar_w + radius, content_y_end - radius, radius, math.pi, 0.5 * math.pi)
+            ctx.line_to(width, content_y_end)
+        else:
+            ctx.line_to(width, content_y_end)
+
+        ctx.close_path()
+
         frame_color = Gdk.RGBA(); frame_color.parse(frame_color_str)
         ctx.set_source_rgba(frame_color.red, frame_color.green, frame_color.blue, frame_color.alpha)
+        ctx.set_fill_rule(cairo.FILL_RULE_EVEN_ODD)
         ctx.fill()
+        ctx.set_fill_rule(cairo.FILL_RULE_WINDING)
         
-        self._draw_header(ctx, width, height)
+        top_header_pos = self.config.get("lcars_top_header_position", "top")
+        bottom_header_pos = self.config.get("lcars_bottom_header_position", "none")
+
+        if top_header_pos == "top" and has_top_ext:
+            self._draw_header_bar(ctx, width, height, is_top=True)
+        if bottom_header_pos == "bottom" and has_bottom_ext:
+            self._draw_header_bar(ctx, width, height, is_top=False)
+            
         self._draw_sidebar_segments(ctx, width, height)
 
-    def _draw_header(self, ctx, width, height):
-        top_bar_h = float(self.config.get("lcars_top_bar_height", 40))
+    def _draw_header_bar(self, ctx, width, height, is_top):
+        prefix = "top" if is_top else "bottom"
+        
+        bar_h_config_key = "lcars_top_bar_height" if is_top else "lcars_bottom_extension_height"
+        bar_h = float(self.config.get(bar_h_config_key, 40))
+
         sidebar_w = float(self.config.get("lcars_sidebar_width", 150))
         radius = float(self.config.get("lcars_corner_radius", 60))
-        padding = float(self.config.get("lcars_header_padding", 10))
-        pill_x, pill_y, pill_w, pill_h = sidebar_w + radius + padding, padding, width - (sidebar_w + radius + padding) - padding, top_bar_h - 2 * padding
-        pill_radius = pill_h / 2
-        if pill_w <= 0 or pill_h <= 0: return
+        padding = float(self.config.get(f"lcars_{prefix}_header_padding", 10))
+        shape = self.config.get(f"lcars_{prefix}_header_shape", "pill")
+        align = self.config.get(f"lcars_{prefix}_header_align", "left")
+        width_mode = self.config.get(f"lcars_{prefix}_header_width_mode", "full")
+        text = self.config.get(f"lcars_{prefix}_header_text", "").upper()
+        font_str = self.config.get(f"lcars_{prefix}_header_font")
+        color_str = self.config.get(f"lcars_{prefix}_header_color")
+        bg_color_str = self.config.get(f"lcars_{prefix}_header_bg_color")
+        
+        bar_content_h = bar_h - (2 * padding)
+        if bar_content_h <= 0: return
+        
+        layout = self._create_pango_layout(ctx, text, font_str)
+        _, log = layout.get_pixel_extents()
 
-        ctx.new_path(); ctx.arc(pill_x + pill_radius, pill_y + pill_radius, pill_radius, 0.5 * math.pi, 1.5 * math.pi)
-        ctx.arc(pill_x + pill_w - pill_radius, pill_y + pill_radius, pill_radius, 1.5 * math.pi, 0.5 * math.pi); ctx.close_path()
-        bg_color = Gdk.RGBA(); bg_color.parse(self.config.get("lcars_header_bg_color"))
+        if width_mode == "fit":
+            bar_w = log.width + (padding * 2) + (bar_content_h if shape == 'pill' else 0)
+        else: # full
+            bar_w = width - (sidebar_w + radius + padding) - padding
+
+        if bar_w <= 0: return
+        
+        bar_y = padding if is_top else height - bar_h + padding
+        if align == "right":
+            bar_x = width - padding - bar_w
+        elif align == "center":
+            available_space = width - (sidebar_w + radius + padding) - padding
+            bar_x = sidebar_w + radius + padding + (available_space - bar_w) / 2
+        else: # left
+            bar_x = sidebar_w + radius + padding
+            
+        bar_radius = bar_content_h / 2
+        
+        ctx.new_path()
+        if shape == "square":
+            ctx.rectangle(bar_x, bar_y, bar_w, bar_content_h)
+        else: # pill
+            ctx.arc(bar_x + bar_radius, bar_y + bar_radius, bar_radius, 0.5 * math.pi, 1.5 * math.pi)
+            ctx.arc(bar_x + bar_w - bar_radius, bar_y + bar_radius, bar_radius, 1.5 * math.pi, 0.5 * math.pi); 
+            ctx.close_path()
+        
+        bg_color = Gdk.RGBA(); bg_color.parse(bg_color_str)
         ctx.set_source_rgba(bg_color.red, bg_color.green, bg_color.blue, bg_color.alpha); ctx.fill()
         
-        header_text = self.config.get("lcars_header_text", "").upper()
-        font_str, color_str = self.config.get("lcars_header_font"), self.config.get("lcars_header_color")
-        layout = self._create_pango_layout(ctx, header_text, font_str, color_str)
-        _, log = layout.get_pixel_extents()
-        ctx.move_to(pill_x + pill_radius, pill_y + (pill_h - log.height) / 2); PangoCairo.show_layout(ctx, layout)
+        text_rgba = Gdk.RGBA(); text_rgba.parse(color_str)
+        ctx.set_source_rgba(text_rgba.red, text_rgba.green, text_rgba.blue, text_rgba.alpha)
+        
+        text_y = bar_y + (bar_content_h - log.height) / 2
+        text_x = bar_x + (bar_w - log.width) / 2 # Center text inside the bar
+        ctx.move_to(text_x, text_y); PangoCairo.show_layout(ctx, layout)
         
     def _draw_sidebar_segments(self, ctx, width, height):
         num_segments = int(self.config.get("lcars_segment_count", 3))
         if num_segments == 0: return
 
         sidebar_w = float(self.config.get("lcars_sidebar_width", 150))
-        
         mode = self.config.get("lcars_sidebar_extension_mode", "top")
-        top_ext_h = float(self.config.get("lcars_top_extension_height", 40)) if mode in ["top", "both"] else 0
-        bottom_ext_h = float(self.config.get("lcars_bottom_extension_height", 40)) if mode in ["bottom", "both"] else 0
         
-        start_y = top_ext_h
-        available_h = height - top_ext_h - bottom_ext_h
+        has_top_ext = mode in ["top", "both"]
+        has_bottom_ext = mode in ["bottom", "both"]
+
+        top_bar_h = float(self.config.get("lcars_top_bar_height", 40)) if has_top_ext else 0
+        bottom_ext_h = float(self.config.get("lcars_bottom_extension_height", 40)) if has_bottom_ext else 0
+        
+        start_y = top_bar_h
+        available_h = height - top_bar_h - bottom_ext_h
         
         total_weight = sum(float(self.config.get(f"segment_{i}_height_weight", 1)) for i in range(1, num_segments + 1)) or 1
         current_y = start_y
@@ -481,24 +611,32 @@ class LCARSComboDisplayer(ComboBase):
                 ctx.move_to(0, current_y + seg_h); ctx.line_to(sidebar_w, current_y + seg_h); ctx.stroke()
             
             label_text = self.config.get(f"segment_{i}_label", "").upper()
-            font_str, color_str = self.config.get(f"segment_{i}_font"), self.config.get(f"segment_{i}_label_color")
-            layout = self._create_pango_layout(ctx, label_text, font_str, color_str)
+            font_str = self.config.get(f"segment_{i}_font")
+            color_str = self.config.get(f"segment_{i}_label_color")
+            layout = self._create_pango_layout(ctx, label_text, font_str)
             _, log = layout.get_pixel_extents()
+            
+            text_rgba = Gdk.RGBA(); text_rgba.parse(color_str)
+            ctx.set_source_rgba(text_rgba.red, text_rgba.green, text_rgba.blue, text_rgba.alpha)
             ctx.move_to(sidebar_w - log.width - 5, current_y + seg_h - log.height - 5); PangoCairo.show_layout(ctx, layout)
             current_y += seg_h
 
     def _draw_content_widgets(self, ctx, width, height):
         mode = self.config.get("lcars_sidebar_extension_mode", "top")
-        top_ext_h = float(self.config.get("lcars_top_extension_height", 40)) if mode in ["top", "both"] else 0
-        bottom_ext_h = float(self.config.get("lcars_bottom_extension_height", 40)) if mode in ["bottom", "both"] else 0
+        
+        has_top_ext = mode in ["top", "both"]
+        has_bottom_ext = mode in ["bottom", "both"]
+        
+        top_bar_h = float(self.config.get("lcars_top_bar_height", 40)) if has_top_ext else 0
+        bottom_ext_h = float(self.config.get("lcars_bottom_extension_height", 40)) if has_bottom_ext else 0
         
         sidebar_w = float(self.config.get("lcars_sidebar_width", 150))
         padding = float(self.config.get("lcars_content_padding", 5))
         
         content_x = sidebar_w + padding
-        content_y = top_ext_h + padding
+        content_y = top_bar_h + padding
         content_w = width - content_x - padding
-        content_h = height - top_ext_h - bottom_ext_h - (2 * padding)
+        content_h = height - top_bar_h - bottom_ext_h - (2 * padding)
 
         if content_w <= 0 or content_h <= 0: return
         
@@ -513,13 +651,17 @@ class LCARSComboDisplayer(ComboBase):
         if primary_data:
             primary_h = float(self.config.get("primary_item_height", 60))
             self._draw_content_item(ctx, content_x, current_y, content_w, primary_h, "primary", primary_data)
-            current_y += primary_h + 5; content_h -= primary_h + 5
+            current_y += primary_h
+            content_h -= primary_h
             
         if num_secondary > 0 and content_h > 0:
             secondary_items = []
             total_weight = 0
             fixed_height_total = 0
 
+            spacing_mode = self.config.get("lcars_secondary_spacing_mode", "auto")
+            spacing_value = float(self.config.get("lcars_secondary_spacing_value", 5))
+            
             for i in range(1, num_secondary + 1):
                 prefix = f"secondary{i}"
                 display_as = self.config.get(f"{prefix}_display_as")
@@ -532,9 +674,16 @@ class LCARSComboDisplayer(ComboBase):
                     total_weight += 1
                 secondary_items.append(item)
             
-            remaining_h = content_h - fixed_height_total - ( (len(secondary_items) - 1) * 5)
-            
-            for item in secondary_items:
+            auto_spacing = 5
+            if spacing_mode == "manual":
+                total_spacing_needed = (num_secondary - 1) * spacing_value if num_secondary > 1 else 0
+                remaining_h = content_h - fixed_height_total - total_spacing_needed
+            else: # auto
+                total_spacing_needed = (num_secondary - 1) * auto_spacing if num_secondary > 1 else 0
+                remaining_h = content_h - fixed_height_total - total_spacing_needed
+                spacing_value = auto_spacing
+
+            for i, item in enumerate(secondary_items):
                 item_h = 0
                 if "height" in item:
                     item_h = item["height"]
@@ -543,7 +692,8 @@ class LCARSComboDisplayer(ComboBase):
                 
                 if item_h > 0:
                     self._draw_content_item(ctx, content_x, current_y, content_w, item_h, item["prefix"], item["data"])
-                    current_y += item_h + 5
+                    if i < len(secondary_items) - 1:
+                        current_y += item_h + spacing_value
         ctx.restore()
 
     def _draw_content_item(self, ctx, x, y, w, h, prefix, data):
@@ -586,7 +736,6 @@ class LCARSComboDisplayer(ComboBase):
         combined_text = f"{caption}: {value_str}" if caption and value_str else caption or value_str
         self._graph_drawer.secondary_text = combined_text
 
-        # --- FIX: Call the standardized on_draw method ---
         self._graph_drawer.on_draw(None, ctx, w-2*padding, h)
         ctx.restore()
 
@@ -627,15 +776,24 @@ class LCARSComboDisplayer(ComboBase):
         final_value = data.get("display_string", "-").upper()
         
         if show_label:
-            font_str, color_str = self.config.get(f"{prefix}_label_font"), self.config.get(f"{prefix}_label_color")
-            label_layout = self._create_pango_layout(ctx, final_label, font_str, color_str)
+            font_str = self.config.get(f"{prefix}_label_font")
+            color_str = self.config.get(f"{prefix}_label_color")
+            label_layout = self._create_pango_layout(ctx, final_label, font_str)
             _, log_label = label_layout.get_pixel_extents()
+            
+            text_rgba = Gdk.RGBA(); text_rgba.parse(color_str)
+            ctx.set_source_rgba(text_rgba.red, text_rgba.green, text_rgba.blue, text_rgba.alpha)
             ctx.move_to(x + text_padding, y + (h - log_label.height) / 2)
             PangoCairo.show_layout(ctx, label_layout)
+
         if show_value:
-            font_str, color_str = self.config.get(f"{prefix}_value_font"), self.config.get(f"{prefix}_value_color")
-            value_layout = self._create_pango_layout(ctx, final_value, font_str, color_str)
+            font_str = self.config.get(f"{prefix}_value_font")
+            color_str = self.config.get(f"{prefix}_value_color")
+            value_layout = self._create_pango_layout(ctx, final_value, font_str)
             _, log_value = value_layout.get_pixel_extents()
+
+            text_rgba = Gdk.RGBA(); text_rgba.parse(color_str)
+            ctx.set_source_rgba(text_rgba.red, text_rgba.green, text_rgba.blue, text_rgba.alpha)
             ctx.move_to(x + w - log_value.width - text_padding, y + (h - log_value.height) / 2)
             PangoCairo.show_layout(ctx, value_layout)
 

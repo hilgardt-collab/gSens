@@ -349,11 +349,20 @@ class BasePanel(Gtk.Frame, BasePanelABC, metaclass=BasePanelMeta):
     def on_close_clicked(self, button):
         self.popover.popdown()
         parent_grid = self.get_parent()
+        
+        # Ensure the panel that was right-clicked is part of the selection
         panel_id = self.config.get("id")
-        if panel_id and parent_grid and hasattr(parent_grid, 'remove_panel_widget_by_id'):
-            parent_grid.remove_panel_widget_by_id(panel_id)
+        if panel_id and parent_grid and hasattr(parent_grid, 'selected_panel_ids'):
+            if panel_id not in parent_grid.selected_panel_ids:
+                 parent_grid.selected_panel_ids = {panel_id}
+                 parent_grid._update_selected_panels_visuals()
+
+        # Call the grid manager's central deletion method
+        if parent_grid and hasattr(parent_grid, 'delete_selected_panels'):
+            parent_grid.delete_selected_panels()
         else:
-            print(f"Error: Could not request removal for panel {panel_id}. Parent or method not found.")
+            print(f"Error: Could not request removal. Parent grid or method not found.")
+
 
     def close_panel(self, widget=None):
         if self._config_dialog:
@@ -405,4 +414,3 @@ class BasePanel(Gtk.Frame, BasePanelABC, metaclass=BasePanelMeta):
 
     def configure(self, *args):
         pass
-

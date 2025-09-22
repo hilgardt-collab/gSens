@@ -9,6 +9,7 @@ import uuid
 from config_dialog import ConfigOption, build_ui_from_model, get_config_from_widgets
 from ui_helpers import build_background_config_ui, CustomDialog
 from data_panel import DataPanel
+import math
 
 CELL_SIZE = 16
 
@@ -66,6 +67,11 @@ class GridLayoutManager(Gtk.Fixed):
         self._h_adjustment = None
         self._v_adjustment = None
 
+        # Auto-scroll state
+        self._scroll_timer_id = None
+        self._scroll_animation_id = None
+        self._current_scroll_page = 0
+
         if not config_manager.config.has_section("GridLayout"):
             config_manager.config.add_section("GridLayout")
         
@@ -79,6 +85,8 @@ class GridLayoutManager(Gtk.Fixed):
         grid_layout_config.setdefault("selected_panel_border_color", "rgba(0, 120, 212, 0.9)")
         grid_layout_config.setdefault("launch_fullscreen", "False")
         grid_layout_config.setdefault("fullscreen_display_index", "-1") 
+        grid_layout_config.setdefault("fullscreen_auto_scroll", "False")
+        grid_layout_config.setdefault("fullscreen_scroll_interval", "5.0")
         grid_layout_config.setdefault("grid_bg_type", "solid")
         grid_layout_config.setdefault("grid_bg_color", "#333333")
         grid_layout_config.setdefault("grid_gradient_linear_color1", "#444444")
@@ -112,7 +120,6 @@ class GridLayoutManager(Gtk.Fixed):
             source_info = self.AVAILABLE_DATA_SOURCES[type_id]
             disp_key = config_dict.get('displayer_type')
             
-            # --- FIX: If config has old 'combo' key, map it to the new 'arc_combo' key for backward compatibility ---
             if disp_key == 'combo':
                 disp_key = 'arc_combo'
                 config_dict['displayer_type'] = 'arc_combo'
@@ -446,6 +453,18 @@ class GridLayoutManager(Gtk.Fixed):
     def _setup_context_menu_and_actions(self):
         """Sets up the right-click context menu for the grid background."""
         self.context_menu = Gio.Menu()
+        self.context_menu.append("Add Panel...", "win.add_panel")
+        self.context_menu.append_section(None, Gio.Menu.new()) 
+        self.context_menu.append("Configure Layout & Appearance...", "grid.configure_layout_and_appearance")
+        
+        # Store the item so we can change its label later
+        self.fullscreen_menu_item = Gio.MenuItem.new("Enter Fullscreen", "win.toggle_fullscreen")
+        self.context_menu.append_item(self.fullscreen_menu_item)
+
+        self.context_menu.append("Save Layout Now", "win.save_layout_now")
+        self.context_menu.append_section(None, Gio.Menu.new()) 
+        self.context_menu.append("Quit", "app.quit")
+
         action_group = Gio.SimpleActionGroup.new()
         configure_action = Gio.SimpleAction.new("configure_layout_and_appearance", None)
         configure_action.connect("activate", self._on_configure_layout_activate)
@@ -460,28 +479,26 @@ class GridLayoutManager(Gtk.Fixed):
         self.popover_context_menu = Gtk.PopoverMenu.new_from_model(self.context_menu)
         self.popover_context_menu.set_parent(self)
 
-    def _update_fullscreen_menu_item_label(self, main_window=None):
-        if not main_window: main_window = self.get_ancestor(Gtk.ApplicationWindow)
-        if main_window:
-            self.fullscreen_menu_item_label = "Exit Fullscreen" if main_window.is_fullscreen() else "Enter Fullscreen"
 
     def _on_background_right_click_for_menu(self, gesture, n_press, x, y):
         """Shows the context menu when the background is right-clicked."""
         if self.pick(x, y, Gtk.PickFlags.DEFAULT) == self:
             self.grab_focus()
-            self._update_fullscreen_menu_item_label()
             
-            self.context_menu = Gio.Menu()
-            self.context_menu.append("Add Panel...", "win.add_panel")
-            self.context_menu.append_section(None, Gio.Menu.new()) 
-            self.context_menu.append("Configure Layout & Appearance...", "grid.configure_layout_and_appearance")
-            self.context_menu.append(self.fullscreen_menu_item_label, "win.toggle_fullscreen")
-            self.context_menu.append("Save Layout Now", "win.save_layout_now")
-            self.context_menu.append_section(None, Gio.Menu.new()) 
-            self.context_menu.append("Quit", "app.quit")
+            main_window = self.get_ancestor(Gtk.ApplicationWindow)
+            if main_window:
+                label = "Exit Fullscreen" if main_window.is_fullscreen() else "Enter Fullscreen"
+                # The attribute is on the Gio.MenuItem, not the popover itself
+                self.fullscreen_menu_item.set_label(label)
             
-            self.popover_context_menu.set_menu_model(self.context_menu)
-            self.popover_context_menu.set_pointing_to(Gdk.Rectangle(x=int(x), y=int(y), width=1, height=1))
+            # Use a Gdk.Rectangle to position the popover at the cursor
+            rect = Gdk.Rectangle()
+            rect.x = x
+            rect.y = y
+            rect.width = 1
+            rect.height = 1
+            self.popover_context_menu.set_pointing_to(rect)
+            
             self.popover_context_menu.popup()
 
     def _on_configure_layout_activate(self, action, param):
@@ -528,6 +545,9 @@ class GridLayoutManager(Gtk.Fixed):
                 ConfigOption("fullscreen_display_index", "dropdown", "Fullscreen on Display:", "-1", 
                              options_dict=monitor_options, 
                              tooltip="Select which monitor to use for fullscreen mode."),
+                ConfigOption("fullscreen_auto_scroll", "bool", "Enable Fullscreen Auto-Scroll:", "False",
+                             tooltip="Automatically scroll horizontally if content is wider than the screen."),
+                ConfigOption("fullscreen_scroll_interval", "scale", "Auto-Scroll Interval (sec):", "5.0", 1.0, 30.0, 1.0, 1),
             ]
         }
         
@@ -585,7 +605,7 @@ class GridLayoutManager(Gtk.Fixed):
         panel_drag_controller.connect("drag-end", self.on_drag_end, widget, panel_id)
         widget.add_controller(panel_drag_controller)
         
-        self._ensure_fixed_size_for_panel(grid_x, grid_y, width_units, height_units)
+        self._recalculate_container_size()
         widget.apply_panel_frame_style()
 
     def handle_panel_dimension_update(self, panel_id, new_width_units, new_height_units):
@@ -594,8 +614,7 @@ class GridLayoutManager(Gtk.Fixed):
         self.panel_sizes[panel_id] = (new_width_units, new_height_units)
         widget = self.panel_widgets[panel_id]
         widget.set_size_request(new_width_units * CELL_SIZE, new_height_units * CELL_SIZE)
-        grid_x, grid_y = self.panel_positions.get(panel_id, (0,0))
-        self._ensure_fixed_size_for_panel(grid_x, grid_y, new_width_units, new_height_units)
+        self._recalculate_container_size()
         
     def _find_first_available_spot(self, w_units, h_units, exclude_id=None):
         """Finds the first available top-left coordinate for a new panel."""
@@ -614,15 +633,28 @@ class GridLayoutManager(Gtk.Fixed):
                     return x_coord, y_coord
         return 0, 0
 
-    def _ensure_fixed_size_for_panel(self, grid_x, grid_y, width_units, height_units):
-        """Ensures the Gtk.Fixed container is large enough to hold all panels."""
-        required_width_px = (grid_x + width_units) * CELL_SIZE
-        required_height_px = (grid_y + height_units) * CELL_SIZE
-        current_width, current_height = self.get_size_request()
-        new_width = max(current_width, required_width_px + CELL_SIZE)
-        new_height = max(current_height, required_height_px + CELL_SIZE)
-        if new_width > current_width or new_height > current_height:
-            self.set_size_request(new_width, new_height)
+    def _get_content_bounding_box(self):
+        """Calculates the total width and height occupied by all panels."""
+        max_x = 0
+        max_y = 0
+        if not self.panel_positions:
+            return {'width': 0, 'height': 0}
+
+        for panel_id, (grid_x, grid_y) in self.panel_positions.items():
+            if panel_id in self.panel_sizes:
+                width_units, height_units = self.panel_sizes[panel_id]
+                max_x = max(max_x, (grid_x + width_units) * CELL_SIZE)
+                max_y = max(max_y, (grid_y + height_units) * CELL_SIZE)
+        
+        return {'width': max_x, 'height': max_y}
+
+    def _recalculate_container_size(self):
+        """Resizes the Gtk.Fixed container to tightly fit all panels."""
+        bbox = self._get_content_bounding_box()
+        # Add a little padding to ensure scrollbars appear if needed
+        required_width = bbox['width'] + CELL_SIZE
+        required_height = bbox['height'] + CELL_SIZE
+        self.set_size_request(required_width, required_height)
     
     def remove_panel_widget_by_id(self, panel_id_to_remove):
         """Completely removes a panel and all its associated state."""
@@ -642,6 +674,8 @@ class GridLayoutManager(Gtk.Fixed):
 
         if widget.get_parent() == self:
             self.remove(widget)
+        
+        self._recalculate_container_size()
 
     def on_drag_begin(self, gesture, start_x, start_y, widget, panel_id):
         event = gesture.get_current_event()
@@ -747,7 +781,6 @@ class GridLayoutManager(Gtk.Fixed):
                 
                 self.selected_panel_ids = newly_created_ids
             else: # Move logic
-                max_x, max_y = 0, 0
                 for pid_move in self.selected_panel_ids:
                     if pid_move not in self.drag_panel_offsets: continue
                     offset_x_grid, offset_y_grid = self.drag_panel_offsets[pid_move]
@@ -759,10 +792,8 @@ class GridLayoutManager(Gtk.Fixed):
                     self.panel_widgets[pid_move].config["grid_x"] = str(final_x)
                     self.panel_widgets[pid_move].config["grid_y"] = str(final_y)
                     config_manager.update_panel_config(pid_move, self.panel_widgets[pid_move].config)
-                    
-                    panel_w, panel_h = self.panel_sizes[pid_move]
-                    max_x, max_y = max(max_x, final_x + panel_w), max(max_y, final_y + panel_h)
-                self._ensure_fixed_size_for_panel(0, 0, max_x, max_y)
+                
+                self._recalculate_container_size()
 
         self.drag_active = False
         self._update_selected_panels_visuals()
@@ -781,4 +812,87 @@ class GridLayoutManager(Gtk.Fixed):
                 y < current_y2 and rect_to_check_y2 > current_y):
                 return True
         return False
+        
+    # --- Fullscreen Auto-Scroll ---
+
+    def start_auto_scrolling(self):
+        """Starts the timer for auto-scrolling if the feature is enabled."""
+        self.stop_auto_scrolling() # Ensure no previous timer is running
+        
+        grid_config = config_manager.config["GridLayout"]
+        is_enabled = grid_config.get("fullscreen_auto_scroll", "False").lower() == 'true'
+        
+        if is_enabled and self._h_adjustment:
+            interval_sec = float(grid_config.get("fullscreen_scroll_interval", "5.0"))
+            self._current_scroll_page = 0
+            # Wait for the first interval before scrolling
+            self._scroll_timer_id = GLib.timeout_add_seconds(int(interval_sec), self._auto_scroll_callback)
+
+    def stop_auto_scrolling(self):
+        """Stops the auto-scroll timer and any ongoing scroll animation."""
+        if self._scroll_timer_id is not None:
+            GLib.source_remove(self._scroll_timer_id)
+            self._scroll_timer_id = None
+        
+        if self._scroll_animation_id is not None:
+            GLib.source_remove(self._scroll_animation_id)
+            self._scroll_animation_id = None
+        
+        # Reset to the first page when scrolling stops
+        if self._h_adjustment and self._h_adjustment.get_value() != 0:
+            self._animate_scroll_to(0)
+
+    def _auto_scroll_callback(self):
+        """Called by the timer to trigger the next scroll."""
+        if not self._h_adjustment:
+            return GLib.SOURCE_REMOVE
+
+        bbox = self._get_content_bounding_box()
+        total_width = bbox['width']
+        page_width = self._h_adjustment.get_page_size()
+        
+        if total_width <= page_width:
+            self._current_scroll_page = 0
+            # If we are not at the start, scroll back
+            if self._h_adjustment.get_value() != 0:
+                self._animate_scroll_to(0)
+            return GLib.SOURCE_CONTINUE
+
+        num_pages = math.ceil(total_width / page_width)
+        self._current_scroll_page = (self._current_scroll_page + 1) % num_pages
+        
+        target_x = self._current_scroll_page * page_width
+        self._animate_scroll_to(target_x)
+        
+        return GLib.SOURCE_CONTINUE
+
+    def _animate_scroll_to(self, target_x):
+        """Smoothly animates the horizontal scroll to a target position."""
+        if self._scroll_animation_id is not None:
+            GLib.source_remove(self._scroll_animation_id)
+        
+        start_x = self._h_adjustment.get_value()
+        distance = target_x - start_x
+        if abs(distance) < 1: return
+
+        duration = 500 # ms
+        start_time = GLib.get_monotonic_time()
+
+        def animation_step(_user_data):
+            elapsed = GLib.get_monotonic_time() - start_time
+            progress = min(elapsed / (duration * 1000.0), 1.0)
+            
+            # Ease-out interpolation
+            eased_progress = 1 - pow(1 - progress, 3)
+            
+            current_pos = start_x + distance * eased_progress
+            self._h_adjustment.set_value(current_pos)
+            
+            if progress >= 1.0:
+                self._h_adjustment.set_value(target_x) # Ensure it ends exactly
+                self._scroll_animation_id = None
+                return GLib.SOURCE_REMOVE
+            return GLib.SOURCE_CONTINUE
+        
+        self._scroll_animation_id = GLib.timeout_add(16, animation_step, None)
 

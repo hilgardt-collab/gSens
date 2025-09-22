@@ -1,4 +1,4 @@
-# data_displayers/arc_combo.py
+# /data_displayers/arc_combo.py
 import gi
 import math
 import cairo
@@ -230,7 +230,6 @@ class ArcComboDisplayer(ComboBase):
                 arc_model = {f"Arc {i} Style": full_model[f"Arc {i} Style"]}
                 build_ui_from_model(tab_box, panel_config, arc_model, widgets)
 
-            # --- BUG FIX: Refactored to remove recursion ---
             def update_destination_checkboxes():
                 count = widgets["combo_arc_count"].get_value_as_int()
                 dest_arc_checkboxes.clear()
@@ -267,7 +266,6 @@ class ArcComboDisplayer(ComboBase):
                 arc_count_spinner.connect("value-changed", on_arc_count_changed)
                 source_arc_combo.connect("changed", lambda c: update_destination_checkboxes())
                 GLib.idle_add(on_arc_count_changed, arc_count_spinner)
-            # --- END BUG FIX ---
 
         return build_style_tabs
 
@@ -473,9 +471,7 @@ class ArcComboDisplayer(ComboBase):
         layout = PangoCairo.create_layout(ctx); layout.set_font_description(Pango.FontDescription.from_string(self.config.get("center_caption_font")))
         
         is_inverted = str(self.config.get("center_caption_inverted", "False")).lower() == 'true'
-        if is_inverted:
-            text = text[::-1]
-
+        
         char_widths = [layout.set_text(char, -1) or layout.get_pixel_extents()[1].width for char in text]
         total_text_angular_width = sum(char_widths) / (radius * 0.85) if radius > 0 else 0
         
@@ -532,8 +528,6 @@ class ArcComboDisplayer(ComboBase):
         layout = PangoCairo.create_layout(ctx); layout.set_font_description(Pango.FontDescription.from_string(self.config.get(f"arc{index}_label_font")))
         
         is_inverted = str(self.config.get(f"arc{index}_label_inverted", "False")).lower() == 'true'
-        if is_inverted:
-            text = text[::-1]
 
         char_data = []
         for char in text:
@@ -582,4 +576,3 @@ class ArcComboDisplayer(ComboBase):
     def close(self):
         self._stop_animation_timer()
         super().close()
-

@@ -9,7 +9,7 @@ from config_dialog import ConfigOption, build_ui_from_model, get_config_from_wid
 from ui_helpers import build_background_config_ui, CustomDialog
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gtk, Gdk, GLib
+from gi.repository import Gtk, Gdk, GLib, Pango
 from config_manager import config_manager
 
 from data_sources.analog_clock import AnalogClockDataSource
@@ -165,7 +165,8 @@ class DataPanel(BasePanel):
                 if rgba.parse(str(value)):
                     widget.set_rgba(rgba)
             elif isinstance(widget, Gtk.FontButton):
-                widget.set_font(str(value))
+                font_desc = Pango.FontDescription.from_string(str(value))
+                widget.set_font_desc(font_desc)
             elif isinstance(widget, Gtk.ComboBoxText):
                 widget.set_active_id(str(value))
 

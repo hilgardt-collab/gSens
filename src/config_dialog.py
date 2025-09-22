@@ -1,7 +1,7 @@
 # /config_dialog.py
 import gi
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gtk, Gdk, GLib
+from gi.repository import Gtk, Gdk, GLib, Pango
 
 # Import the clipboard singletons from the new unified module
 from ui_clipboard import font_clipboard, color_clipboard
@@ -92,19 +92,22 @@ def build_ui_from_model(parent_box, config, model, widgets=None):
             elif option.type == "font":
                 font_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, hexpand=True)
                 
-                widget = Gtk.FontButton.new_with_font(str(config.get(option.key, option.default)))
+                font_desc = Pango.FontDescription.from_string(str(config.get(option.key, option.default)))
+                widget = Gtk.FontButton()
+                widget.set_font_desc(font_desc)
                 widget.set_hexpand(True)
                 font_box.append(widget)
 
                 copy_button = Gtk.Button(icon_name="edit-copy-symbolic", tooltip_text="Copy Font")
                 paste_button = Gtk.Button(icon_name="edit-paste-symbolic", tooltip_text="Paste Font")
 
-                copy_button.connect("clicked", lambda btn, font_btn=widget: font_clipboard.copy_font(font_btn.get_font()))
+                copy_button.connect("clicked", lambda btn, font_btn=widget: font_clipboard.copy_font(font_btn.get_font_desc().to_string()))
                 
                 def on_paste_clicked(btn, font_btn=widget):
-                    font_to_paste = font_clipboard.get_font()
-                    if font_to_paste:
-                        font_btn.set_font(font_to_paste)
+                    font_to_paste_str = font_clipboard.get_font()
+                    if font_to_paste_str:
+                        new_font_desc = Pango.FontDescription.from_string(font_to_paste_str)
+                        font_btn.set_font_desc(new_font_desc)
                 
                 paste_button.connect("clicked", on_paste_clicked)
                 
@@ -254,7 +257,12 @@ def get_config_from_widgets(widgets, models_list):
         elif option_def.type == "color":
             new_config[key] = widget.get_rgba().to_string()
         elif option_def.type == "font":
-            new_config[key] = widget.get_font()
+            font_desc = widget.get_font_desc()
+            if font_desc:
+                new_config[key] = font_desc.to_string()
+            else:
+                # Fallback in case something is very wrong
+                new_config[key] = option_def.default
         elif option_def.type == "scale" or option_def.type == "spinner":
             new_config[key] = f"{widget.get_value():.{option_def.digits}f}"
         elif option_def.type == "dropdown":
@@ -264,4 +272,3 @@ def get_config_from_widgets(widgets, models_list):
             else:
                 new_config[key] = option_def.default
     return new_config
-
