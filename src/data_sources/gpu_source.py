@@ -131,26 +131,28 @@ class GPUDataSource(DataSource):
             "Active Processes": "processes"
         }
         secondary_metric_opts = {"None": "none", **metric_opts}
+        controller_key = "gpu_metric_to_display"
 
         model["Metric & Display"] = [
-            ConfigOption("gpu_metric_to_display", "dropdown", "Primary Metric:", "utilization",
+            ConfigOption(controller_key, "dropdown", "Primary Metric:", "utilization",
                          options_dict=metric_opts),
             ConfigOption("gpu_secondary_metric", "dropdown", "Secondary Metric:", "none",
                          options_dict=secondary_metric_opts,
                          tooltip="Display an additional metric as a secondary label.")
         ]
-        model["Temperature Settings"] = [
+        
+        model["Metric Specific Settings"] = [
             ConfigOption("display_unit_temp", "dropdown", "Temp. Unit:", "C", 
-                         options_dict={"Celsius (°C)": "C", "Fahrenheit (°F)": "F", "Kelvin (K)": "K"}),
-        ]
-        model["Frequency Settings"] = [
+                         options_dict={"Celsius (°C)": "C", "Fahrenheit (°F)": "F", "Kelvin (K)": "K"},
+                         dynamic_group=controller_key, dynamic_show_on="temperature"),
             ConfigOption("display_unit_freq", "dropdown", "Freq. Unit:", "GHz",
-                         options_dict={"Gigahertz (GHz)": "GHz", "Megahertz (MHz)": "MHz"}),
-        ]
-        model["VRAM Settings"] = [
+                         options_dict={"Gigahertz (GHz)": "GHz", "Megahertz (MHz)": "MHz"},
+                         dynamic_group=controller_key, dynamic_show_on="frequency"),
             ConfigOption("text_content_style_vram", "dropdown", "VRAM Text Style:", "gb_and_percent", 
-                         options_dict={"GB and %": "gb_and_percent", "GB Only": "gb_only", "% Only": "percent_only"})
+                         options_dict={"GB and %": "gb_and_percent", "GB Only": "gb_only", "% Only": "percent_only"},
+                         dynamic_group=controller_key, dynamic_show_on="vram")
         ]
+
         model["Graph Range"] = [
             ConfigOption("graph_min_value", "spinner", "Graph Min Value:", "0.0", 0.0, 10000.0, 1.0, 0),
             ConfigOption("graph_max_value", "spinner", "Graph Max Value:", "100.0", 0.0, 10000.0, 1.0, 0)
@@ -159,48 +161,5 @@ class GPUDataSource(DataSource):
         return model
 
     def get_configure_callback(self):
-        """Dynamically shows/hides UI sections based on the selected metric."""
-        def setup_dynamic_options(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
-            key_prefix = f"{prefix}opt_" if prefix else ""
-            
-            metric_combo_key = f"{key_prefix}gpu_metric_to_display"
-            metric_combo = widgets.get(metric_combo_key)
-            if not metric_combo: return
-
-            full_model = self.get_config_model()
-            
-            section_widgets = {}
-            for section_title, options in full_model.items():
-                if section_title.endswith(" Settings"):
-                    section_widgets[section_title] = []
-                    
-                    for opt in options:
-                        widget = widgets.get(f"{key_prefix}{opt.key}")
-                        if widget and widget.get_parent():
-                            section_widgets[section_title].append(widget.get_parent())
-            
-            all_children = list(content_box)
-            for section_title, s_widgets in section_widgets.items():
-                if s_widgets:
-                    first_row_of_section = s_widgets[0]
-                    try:
-                        idx = all_children.index(first_row_of_section)
-                        if idx > 1 and isinstance(all_children[idx-1], Gtk.Label) and isinstance(all_children[idx-2], Gtk.Separator):
-                            s_widgets.insert(0, all_children[idx-1]) # Header
-                            s_widgets.insert(0, all_children[idx-2]) # Separator
-                    except ValueError:
-                         print(f"Warning: Could not find row for section '{section_title}' to get header.")
-
-
-            def on_metric_changed(combo):
-                active_metric = combo.get_active_id()
-                
-                for w in section_widgets.get("Temperature Settings", []): w.set_visible(active_metric == "temperature")
-                for w in section_widgets.get("Frequency Settings", []): w.set_visible(active_metric == "frequency")
-                for w in section_widgets.get("VRAM Settings", []): w.set_visible(active_metric == "vram")
-
-            metric_combo.connect("changed", on_metric_changed)
-            GLib.idle_add(on_metric_changed, metric_combo)
-
-        return setup_dynamic_options
-
+        """No longer needed for showing/hiding sections."""
+        return super().get_configure_callback()

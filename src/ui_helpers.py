@@ -76,32 +76,52 @@ def draw_cairo_background(ctx, width, height, config, prefix, pixbuf=None, shape
 def get_background_config_model(prefix):
     """
     Returns a dictionary defining the configuration model for background styles,
-    with all keys using the provided prefix. This is a data-only function.
+    with all keys using the provided prefix. This model is now declarative,
+    using the dynamic_group properties to control UI visibility.
     """
     image_file_filters = [{"name": "Image Files", "patterns": ["*.png", "*.jpg", "*.jpeg", "*.bmp", "*.svg"]}, {"name": "All Files", "patterns": ["*"]}]
     
+    # This is the dropdown that will control the Gtk.Stack
+    controller_key = f"{prefix}bg_type"
+
     return {
         "Background Style": [
-            ConfigOption(f"{prefix}bg_type", "dropdown", "Style:", "solid", 
+            # The controller
+            ConfigOption(controller_key, "dropdown", "Style:", "solid", 
                          options_dict={"Solid Color": "solid", "Linear Gradient": "gradient_linear", 
                                        "Radial Gradient": "gradient_radial", "Image": "image"}),
-            ConfigOption(f"{prefix}bg_color", "color", "Color:", "#222222"),
-            ConfigOption(f"{prefix}gradient_linear_color1", "color", "Start Color:", "#444444"),
-            ConfigOption(f"{prefix}gradient_linear_color2", "color", "End Color:", "#222222"),
-            ConfigOption(f"{prefix}gradient_linear_angle_deg", "spinner", "Angle (°):", 90.0, 0, 359, 1, 0),
-            ConfigOption(f"{prefix}gradient_radial_color1", "color", "Center Color:", "#444444"),
-            ConfigOption(f"{prefix}gradient_radial_color2", "color", "Edge Color:", "#222222"),
-            ConfigOption(f"{prefix}background_image_path", "file", "Image File:", "", file_filters=image_file_filters),
+            # Dynamic options for "solid"
+            ConfigOption(f"{prefix}bg_color", "color", "Color:", "#222222",
+                         dynamic_group=controller_key, dynamic_show_on="solid"),
+            # Dynamic options for "gradient_linear"
+            ConfigOption(f"{prefix}gradient_linear_color1", "color", "Start Color:", "#444444",
+                         dynamic_group=controller_key, dynamic_show_on="gradient_linear"),
+            ConfigOption(f"{prefix}gradient_linear_color2", "color", "End Color:", "#222222",
+                         dynamic_group=controller_key, dynamic_show_on="gradient_linear"),
+            ConfigOption(f"{prefix}gradient_linear_angle_deg", "spinner", "Angle (°):", 90.0, 0, 359, 1, 0,
+                         dynamic_group=controller_key, dynamic_show_on="gradient_linear"),
+            # Dynamic options for "gradient_radial"
+            ConfigOption(f"{prefix}gradient_radial_color1", "color", "Center Color:", "#444444",
+                         dynamic_group=controller_key, dynamic_show_on="gradient_radial"),
+            ConfigOption(f"{prefix}gradient_radial_color2", "color", "Edge Color:", "#222222",
+                         dynamic_group=controller_key, dynamic_show_on="gradient_radial"),
+            # Dynamic options for "image"
+            ConfigOption(f"{prefix}background_image_path", "file", "Image File:", "", file_filters=image_file_filters,
+                         dynamic_group=controller_key, dynamic_show_on="image"),
             ConfigOption(f"{prefix}background_image_style", "dropdown", "Style:", "zoom", 
-                                       options_dict={"Zoom (Cover)": "zoom", "Tile": "tile", "Stretch": "stretch"}),
-            ConfigOption(f"{prefix}background_image_alpha", "scale", "Image Opacity:", "1.0", min_val=0.0, max_val=1.0, step=0.05, digits=2),
+                         options_dict={"Zoom (Cover)": "zoom", "Tile": "tile", "Stretch": "stretch"},
+                         dynamic_group=controller_key, dynamic_show_on="image"),
+            ConfigOption(f"{prefix}background_image_alpha", "scale", "Image Opacity:", "1.0", min_val=0.0, max_val=1.0, step=0.05, digits=2,
+                         dynamic_group=controller_key, dynamic_show_on="image"),
         ]
     }
 
 def build_background_config_ui(parent_box, config, widgets, dialog_parent, prefix, title="Background Settings"):
     """
     Builds and adds a comprehensive set of UI controls for selecting a background
-    (solid, gradient, image) to a given parent container.
+    (solid, gradient, image) to a given parent container. This now uses the
+    declarative model and the main build_ui_from_model function to automatically
+    create a Gtk.Stack for the dynamic options.
     """
     sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL, margin_top=12, margin_bottom=6)
     parent_box.append(sep)
@@ -109,57 +129,17 @@ def build_background_config_ui(parent_box, config, widgets, dialog_parent, prefi
     header_label.set_markup(f"<b>{title}</b>")
     parent_box.append(header_label)
 
-    # Use the helper to get the model definition
+    # Get the declarative model for the background options
     full_model = get_background_config_model(prefix)
-    bg_model_list = full_model.get("Background Style", [])
     
-    bg_model = {
-        "bg_type": next(o for o in bg_model_list if o.key == f"{prefix}bg_type"),
-        "bg_color": next(o for o in bg_model_list if o.key == f"{prefix}bg_color"),
-        "gradient_linear_color1": next(o for o in bg_model_list if o.key == f"{prefix}gradient_linear_color1"),
-        "gradient_linear_color2": next(o for o in bg_model_list if o.key == f"{prefix}gradient_linear_color2"),
-        "gradient_linear_angle": next(o for o in bg_model_list if o.key == f"{prefix}gradient_linear_angle_deg"),
-        "gradient_radial_color1": next(o for o in bg_model_list if o.key == f"{prefix}gradient_radial_color1"),
-        "gradient_radial_color2": next(o for o in bg_model_list if o.key == f"{prefix}gradient_radial_color2"),
-        "background_image_path": next(o for o in bg_model_list if o.key == f"{prefix}background_image_path"),
-        "background_image_style": next(o for o in bg_model_list if o.key == f"{prefix}background_image_style"),
-        "background_image_alpha": next(o for o in bg_model_list if o.key == f"{prefix}background_image_alpha"),
-    }
-    
+    # Store the model in the dialog for saving later
     if dialog_parent and not hasattr(dialog_parent, 'ui_models'):
         dialog_parent.ui_models = {}
     if dialog_parent:
-        dialog_parent.ui_models[f'background_{prefix}'] = {title: bg_model_list}
+        dialog_parent.ui_models[f'background_{prefix}'] = full_model
 
-    build_ui_from_model(parent_box, config, {"": [bg_model["bg_type"]]}, widgets)
-    
-    bg_type_combo = widgets[f"{prefix}bg_type"]
-
-    solid_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=5)
-    parent_box.append(solid_box)
-    build_ui_from_model(solid_box, config, {"": [bg_model["bg_color"]]}, widgets)
-
-    grad_linear_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=5)
-    parent_box.append(grad_linear_box)
-    build_ui_from_model(grad_linear_box, config, {"": [bg_model["gradient_linear_color1"], bg_model["gradient_linear_color2"], bg_model["gradient_linear_angle"]]}, widgets)
-
-    grad_radial_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=5)
-    parent_box.append(grad_radial_box)
-    build_ui_from_model(grad_radial_box, config, {"": [bg_model["gradient_radial_color1"], bg_model["gradient_radial_color2"]]}, widgets)
-
-    image_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=5)
-    parent_box.append(image_box)
-    build_ui_from_model(image_box, config, {"": [bg_model["background_image_path"], bg_model["background_image_style"], bg_model["background_image_alpha"]]}, widgets)
-
-    def on_bg_type_changed(combo):
-        active_id = combo.get_active_id()
-        solid_box.set_visible(active_id == "solid")
-        grad_linear_box.set_visible(active_id == "gradient_linear")
-        grad_radial_box.set_visible(active_id == "gradient_radial")
-        image_box.set_visible(active_id == "image")
-
-    bg_type_combo.connect("changed", on_bg_type_changed)
-    on_bg_type_changed(bg_type_combo)
+    # Let the main UI builder do all the work
+    build_ui_from_model(parent_box, config, full_model, widgets)
 
 
 class ScrollingLabel(Gtk.DrawingArea):

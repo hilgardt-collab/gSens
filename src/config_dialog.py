@@ -9,10 +9,12 @@ from ui_clipboard import font_clipboard, color_clipboard
 class ConfigOption:
     """
     A data class to define a single configuration option.
+    Now supports dynamic UI grouping for creating Gtk.Stack-based UIs.
     """
     def __init__(self, key, option_type, label, default,
                  min_val=None, max_val=None, step=None, digits=0, 
-                 options_dict=None, tooltip=None, file_filters=None):
+                 options_dict=None, tooltip=None, file_filters=None,
+                 dynamic_group=None, dynamic_show_on=None):
         self.key = key
         # Valid types: "string", "bool", "color", "font", "scale", "spinner", "dropdown", "file", "timezone_selector"
         self.type = option_type 
@@ -26,12 +28,14 @@ class ConfigOption:
         self.tooltip = tooltip
         # A list of dicts, e.g., [{"name": "Audio", "patterns": ["*.mp3"]}]
         self.file_filters = file_filters or []
+        # New properties for dynamic UI sections
+        self.dynamic_group = dynamic_group
+        self.dynamic_show_on = dynamic_show_on
 
 def build_ui_from_model(parent_box, config, model, widgets=None):
     """
     Populates a parent Gtk.Box with widgets based on a configuration model.
-    Returns a dictionary of the created widgets, keyed by their config key.
-    If a `widgets` dictionary is passed in, it will be updated with the new widgets.
+    It can now automatically create Gtk.Stack widgets for dynamic options.
     """
     if widgets is None:
         widgets = {}
@@ -44,177 +48,246 @@ def build_ui_from_model(parent_box, config, model, widgets=None):
             header_label.set_markup(f"<b>{GLib.markup_escape_text(section_title)}</b>")
             parent_box.append(header_label)
 
+        # --- NEW: Dynamic UI Generation Logic ---
+        dynamic_groups = {}
+        static_options = []
+        controller_option_key = None
+
+        # First, separate static options from dynamic ones
         for option in options:
-            widget = None
-            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10, margin_bottom=4)
+            if option.dynamic_group:
+                controller_option_key = option.dynamic_group
+                if option.dynamic_show_on not in dynamic_groups:
+                    dynamic_groups[option.dynamic_show_on] = []
+                dynamic_groups[option.dynamic_show_on].append(option)
+            else:
+                static_options.append(option)
+        
+        # Build static options first
+        _build_option_widgets(parent_box, config, static_options, widgets)
+
+        # If dynamic groups were found, build the Stack UI
+        if dynamic_groups and controller_option_key:
+            controller_widget = widgets.get(controller_option_key)
+            if not controller_widget:
+                print(f"Error: Dynamic UI controller '{controller_option_key}' not found or built yet.")
+                # Build the dynamic options statically as a fallback
+                for group_options in dynamic_groups.values():
+                    _build_option_widgets(parent_box, config, group_options, widgets)
+                continue
+
+            stack = Gtk.Stack()
+            stack.set_transition_type(Gtk.StackTransitionType.SLIDE_UP_DOWN)
+            
+            # Create a blank page for when no option is matched
+            stack.add_titled(Gtk.Box(), "none", "None")
+
+            for show_on_value, group_options in dynamic_groups.items():
+                page_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=5)
+                _build_option_widgets(page_box, config, group_options, widgets)
+                stack.add_titled(page_box, str(show_on_value), str(show_on_value).replace("_", " ").title())
+            
+            parent_box.append(stack)
+            
+            def on_controller_changed(widget, *args):
+                active_id = "none"
+                if isinstance(widget, Gtk.ComboBoxText):
+                    active_id = widget.get_active_id()
+                elif isinstance(widget, Gtk.Switch):
+                    active_id = str(widget.get_active())
+
+                if active_id and stack.get_child_by_name(active_id):
+                    stack.set_visible_child_name(active_id)
+                else:
+                    stack.set_visible_child_name("none")
+
+            # --- FIX: Use the correct signal for the widget type ---
+            if isinstance(controller_widget, Gtk.Switch):
+                controller_widget.connect("notify::active", on_controller_changed)
+            else: # Assumes Gtk.ComboBoxText or similar
+                controller_widget.connect("changed", on_controller_changed)
+            
+            # Set initial state
+            GLib.idle_add(on_controller_changed, controller_widget)
+
+    return widgets
+
+def _build_option_widgets(parent_box, config, options, widgets):
+    """
+    Internal helper to build the actual widgets for a list of ConfigOption objects.
+    This is extracted from the main function to be reusable for static and dynamic parts.
+    """
+    for option in options:
+        widget = None
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10, margin_bottom=4)
+        
+        if option.type == "scale":
+            container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, margin_bottom=4)
+            label_widget = Gtk.Label(label=option.label, xalign=0)
+            container.append(label_widget)
+        else:
+            label_widget = Gtk.Label(label=option.label, xalign=0)
+            row.append(label_widget)
+
+        if option.type == "string":
+            widget = Gtk.Entry(text=config.get(option.key, option.default), hexpand=True)
+        elif option.type == "bool":
+            widget = Gtk.Switch(active=str(config.get(option.key, str(option.default))).lower() == 'true', halign=Gtk.Align.END)
+        elif option.type == "color":
+            color_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, hexpand=True)
+            
+            rgba = Gdk.RGBA()
+            rgba.parse(str(config.get(option.key, option.default)))
+            widget = Gtk.ColorButton.new_with_rgba(rgba)
+            widget.set_use_alpha(True)
+            widget.set_hexpand(True)
+            color_box.append(widget)
+
+            copy_button = Gtk.Button(icon_name="edit-copy-symbolic", tooltip_text="Copy Color")
+            paste_button = Gtk.Button(icon_name="edit-paste-symbolic", tooltip_text="Paste Color")
+
+            copy_button.connect("clicked", lambda btn, color_btn=widget: color_clipboard.copy_color(color_btn.get_rgba().to_string()))
+            
+            def on_paste_clicked(btn, color_btn=widget):
+                color_to_paste_str = color_clipboard.get_color()
+                if color_to_paste_str:
+                    new_rgba = Gdk.RGBA()
+                    if new_rgba.parse(color_to_paste_str):
+                        color_btn.set_rgba(new_rgba)
+
+            paste_button.connect("clicked", on_paste_clicked)
+            
+            color_box.append(copy_button)
+            color_box.append(paste_button)
+            
+            row.append(color_box)
+
+        elif option.type == "font":
+            font_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, hexpand=True)
+            
+            font_desc = Pango.FontDescription.from_string(str(config.get(option.key, option.default)))
+            widget = Gtk.FontButton()
+            widget.set_font_desc(font_desc)
+            widget.set_hexpand(True)
+            font_box.append(widget)
+
+            copy_button = Gtk.Button(icon_name="edit-copy-symbolic", tooltip_text="Copy Font")
+            paste_button = Gtk.Button(icon_name="edit-paste-symbolic", tooltip_text="Paste Font")
+
+            copy_button.connect("clicked", lambda btn, font_btn=widget: font_clipboard.copy_font(font_btn.get_font_desc().to_string()))
+            
+            def on_paste_clicked(btn, font_btn=widget):
+                font_to_paste_str = font_clipboard.get_font()
+                if font_to_paste_str:
+                    new_font_desc = Pango.FontDescription.from_string(font_to_paste_str)
+                    font_btn.set_font_desc(new_font_desc)
+            
+            paste_button.connect("clicked", on_paste_clicked)
+            
+            font_box.append(copy_button)
+            font_box.append(paste_button)
+            
+            row.append(font_box)
+        elif option.type == "scale":
+            widget = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, option.min_val, option.max_val, option.step)
+            widget.set_value(float(config.get(option.key, option.default)))
+            widget.set_digits(option.digits)
+            widget.set_draw_value(True)
+            widget.set_hexpand(True)
+        elif option.type == "spinner":
+            adjustment = Gtk.Adjustment(
+                value=float(config.get(option.key, option.default)),
+                lower=option.min_val,
+                upper=option.max_val,
+                step_increment=option.step,
+                page_increment=10 * (option.step or 1.0)
+            )
+            widget = Gtk.SpinButton(adjustment=adjustment, digits=option.digits, numeric=True)
+        elif option.type == "dropdown":
+            widget = Gtk.ComboBoxText()
+            for display_name, id_str in option.options_dict.items():
+                widget.append(id=str(id_str), text=display_name)
+            
+            current_value = str(config.get(option.key, option.default))
+            
+            if not widget.set_active_id(current_value):
+                print(f"[Warning] Could not set active ID '{current_value}' for '{option.key}'. Defaulting to first item.")
+                widget.set_active(0)
+        
+        elif option.type == "file":
+            file_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, hexpand=True)
+            
+            widget = Gtk.Entry(text=config.get(option.key, option.default), hexpand=True)
+            file_box.append(widget)
+            
+            choose_button = Gtk.Button(label="Choose…")
+            
+            def on_choose_file_clicked(_btn, entry_widget, current_option):
+                parent_window = _btn.get_ancestor(Gtk.Window)
+                file_chooser = Gtk.FileChooserNative.new(
+                    "Select File",
+                    parent_window,
+                    Gtk.FileChooserAction.OPEN,
+                    "_Open",
+                    "_Cancel"
+                )
+                
+                if current_option.file_filters:
+                    for filter_info in current_option.file_filters:
+                        new_filter = Gtk.FileFilter.new()
+                        if "name" in filter_info:
+                            new_filter.set_name(filter_info["name"])
+                        for mime_type in filter_info.get("mimetypes", []):
+                            new_filter.add_mime_type(mime_type)
+                        for pattern in filter_info.get("patterns", []):
+                            new_filter.add_pattern(pattern)
+                        file_chooser.add_filter(new_filter)
+                
+                def on_response(dialog, response):
+                    if response == Gtk.ResponseType.ACCEPT:
+                        file = dialog.get_file()
+                        if file:
+                            entry_widget.set_text(file.get_path() or "")
+                    dialog.destroy()
+                
+                file_chooser.connect("response", on_response)
+                file_chooser.show()
+
+            choose_button.connect("clicked", on_choose_file_clicked, widget, option)
+            file_box.append(choose_button)
+            
+            row.append(file_box)
+
+        elif option.type == "timezone_selector":
+            tz_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, hexpand=True)
+            
+            widget = Gtk.Entry(text=config.get(option.key, option.default), hexpand=True, editable=False)
+            tz_box.append(widget)
+            
+            choose_button = Gtk.Button(label="Choose…")
+            widgets[f"{option.key}_button"] = choose_button # Store button for callback
+            tz_box.append(choose_button)
+            
+            row.append(tz_box)
+
+
+        if widget:
+            if option.tooltip:
+                widget.set_tooltip_text(option.tooltip)
             
             if option.type == "scale":
-                container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, margin_bottom=4)
-                label_widget = Gtk.Label(label=option.label, xalign=0)
-                container.append(label_widget)
-            else:
-                label_widget = Gtk.Label(label=option.label, xalign=0)
-                row.append(label_widget)
+                container.append(widget)
+                parent_box.append(container)
+            elif option.type not in ["file", "timezone_selector", "font", "color"]:
+                row.append(widget)
 
-            if option.type == "string":
-                widget = Gtk.Entry(text=config.get(option.key, option.default), hexpand=True)
-            elif option.type == "bool":
-                widget = Gtk.Switch(active=str(config.get(option.key, str(option.default))).lower() == 'true', halign=Gtk.Align.END)
-            elif option.type == "color":
-                color_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, hexpand=True)
-                
-                rgba = Gdk.RGBA()
-                rgba.parse(str(config.get(option.key, option.default)))
-                widget = Gtk.ColorButton.new_with_rgba(rgba)
-                widget.set_use_alpha(True)
-                widget.set_hexpand(True)
-                color_box.append(widget)
-
-                copy_button = Gtk.Button(icon_name="edit-copy-symbolic", tooltip_text="Copy Color")
-                paste_button = Gtk.Button(icon_name="edit-paste-symbolic", tooltip_text="Paste Color")
-
-                copy_button.connect("clicked", lambda btn, color_btn=widget: color_clipboard.copy_color(color_btn.get_rgba().to_string()))
-                
-                def on_paste_clicked(btn, color_btn=widget):
-                    color_to_paste_str = color_clipboard.get_color()
-                    if color_to_paste_str:
-                        new_rgba = Gdk.RGBA()
-                        if new_rgba.parse(color_to_paste_str):
-                            color_btn.set_rgba(new_rgba)
-
-                paste_button.connect("clicked", on_paste_clicked)
-                
-                color_box.append(copy_button)
-                color_box.append(paste_button)
-                
-                row.append(color_box)
-
-            elif option.type == "font":
-                font_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, hexpand=True)
-                
-                font_desc = Pango.FontDescription.from_string(str(config.get(option.key, option.default)))
-                widget = Gtk.FontButton()
-                widget.set_font_desc(font_desc)
-                widget.set_hexpand(True)
-                font_box.append(widget)
-
-                copy_button = Gtk.Button(icon_name="edit-copy-symbolic", tooltip_text="Copy Font")
-                paste_button = Gtk.Button(icon_name="edit-paste-symbolic", tooltip_text="Paste Font")
-
-                copy_button.connect("clicked", lambda btn, font_btn=widget: font_clipboard.copy_font(font_btn.get_font_desc().to_string()))
-                
-                def on_paste_clicked(btn, font_btn=widget):
-                    font_to_paste_str = font_clipboard.get_font()
-                    if font_to_paste_str:
-                        new_font_desc = Pango.FontDescription.from_string(font_to_paste_str)
-                        font_btn.set_font_desc(new_font_desc)
-                
-                paste_button.connect("clicked", on_paste_clicked)
-                
-                font_box.append(copy_button)
-                font_box.append(paste_button)
-                
-                row.append(font_box)
-            elif option.type == "scale":
-                widget = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, option.min_val, option.max_val, option.step)
-                widget.set_value(float(config.get(option.key, option.default)))
-                widget.set_digits(option.digits)
-                widget.set_draw_value(True)
-                widget.set_hexpand(True)
-            elif option.type == "spinner":
-                adjustment = Gtk.Adjustment(
-                    value=float(config.get(option.key, option.default)),
-                    lower=option.min_val,
-                    upper=option.max_val,
-                    step_increment=option.step,
-                    page_increment=10 * (option.step or 1.0)
-                )
-                widget = Gtk.SpinButton(adjustment=adjustment, digits=option.digits, numeric=True)
-            elif option.type == "dropdown":
-                widget = Gtk.ComboBoxText()
-                for display_name, id_str in option.options_dict.items():
-                    widget.append(id=str(id_str), text=display_name)
-                
-                current_value = str(config.get(option.key, option.default))
-                
-                if not widget.set_active_id(current_value):
-                    print(f"[Warning] Could not set active ID '{current_value}' for '{option.key}'. Defaulting to first item.")
-                    widget.set_active(0)
+            if option.type != "scale":
+                parent_box.append(row)
             
-            elif option.type == "file":
-                file_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, hexpand=True)
-                
-                widget = Gtk.Entry(text=config.get(option.key, option.default), hexpand=True)
-                file_box.append(widget)
-                
-                choose_button = Gtk.Button(label="Choose…")
-                
-                def on_choose_file_clicked(_btn, entry_widget, current_option):
-                    parent_window = _btn.get_ancestor(Gtk.Window)
-                    file_chooser = Gtk.FileChooserNative.new(
-                        "Select File",
-                        parent_window,
-                        Gtk.FileChooserAction.OPEN,
-                        "_Open",
-                        "_Cancel"
-                    )
-                    
-                    if current_option.file_filters:
-                        for filter_info in current_option.file_filters:
-                            new_filter = Gtk.FileFilter.new()
-                            if "name" in filter_info:
-                                new_filter.set_name(filter_info["name"])
-                            for mime_type in filter_info.get("mimetypes", []):
-                                new_filter.add_mime_type(mime_type)
-                            for pattern in filter_info.get("patterns", []):
-                                new_filter.add_pattern(pattern)
-                            file_chooser.add_filter(new_filter)
-                    
-                    def on_response(dialog, response):
-                        if response == Gtk.ResponseType.ACCEPT:
-                            file = dialog.get_file()
-                            if file:
-                                entry_widget.set_text(file.get_path() or "")
-                        dialog.destroy()
-                    
-                    file_chooser.connect("response", on_response)
-                    file_chooser.show()
+            if option.key in widgets:
+                 print(f"[WARNING] Duplicate widget key detected in build_ui_from_model: '{option.key}'. Overwriting.")
+            widgets[option.key] = widget
 
-                choose_button.connect("clicked", on_choose_file_clicked, widget, option)
-                file_box.append(choose_button)
-                
-                row.append(file_box)
-
-            elif option.type == "timezone_selector":
-                tz_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, hexpand=True)
-                
-                widget = Gtk.Entry(text=config.get(option.key, option.default), hexpand=True, editable=False)
-                tz_box.append(widget)
-                
-                choose_button = Gtk.Button(label="Choose…")
-                widgets[f"{option.key}_button"] = choose_button # Store button for callback
-                tz_box.append(choose_button)
-                
-                row.append(tz_box)
-
-
-            if widget:
-                if option.tooltip:
-                    widget.set_tooltip_text(option.tooltip)
-                
-                if option.type == "scale":
-                    container.append(widget)
-                    parent_box.append(container)
-                elif option.type not in ["file", "timezone_selector", "font", "color"]:
-                    row.append(widget)
-
-                if option.type != "scale":
-                    parent_box.append(row)
-                
-                if option.key in widgets:
-                     print(f"[WARNING] Duplicate widget key detected in build_ui_from_model: '{option.key}'. Overwriting.")
-                widgets[option.key] = widget
-    return widgets
 
 def _get_all_options_from_model(model):
     """Recursively finds all ConfigOption objects within a model structure."""
@@ -272,3 +345,4 @@ def get_config_from_widgets(widgets, models_list):
             else:
                 new_config[key] = option_def.default
     return new_config
+

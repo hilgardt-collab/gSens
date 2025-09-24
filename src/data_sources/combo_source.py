@@ -13,7 +13,7 @@ from gi.repository import Gtk, GLib
 class ComboDataSource(DataSource):
     """
     A unified container data source for panels that display multiple child sources.
-    It fetches fresh data from all its children whenever it is polled by the UpdateManager.
+    It now relies on the UpdateManager for all scheduling.
     """
     def __init__(self, config):
         super().__init__(config)
@@ -82,7 +82,7 @@ class ComboDataSource(DataSource):
 
     def get_data(self):
         """
-        Fetches fresh data from all configured child sources and bundles it.
+        Fetches fresh data from all configured child sources.
         """
         data_bundle = {}
         with self.lock:
@@ -107,9 +107,10 @@ class ComboDataSource(DataSource):
 
     @staticmethod
     def get_config_model():
+        # Get the base model which includes the update interval
         model = DataSource.get_config_model()
+        # Only remove the alarm section, as it doesn't apply to the combo as a whole
         model.pop("Alarm", None) 
-        model.pop("Data Source & Update", None)
         return model
 
 
@@ -146,7 +147,11 @@ class ComboDataSource(DataSource):
                     for key, widget in unprefixed_widgets.items():
                         widgets[f"{sub_opt_prefix}{key}"] = widget
 
-                    prefixed_model = {s: [ConfigOption(f"{sub_opt_prefix}{o.key}", o.type, o.label, o.default, o.min_val, o.max_val, o.step, o.digits, o.options_dict, o.tooltip, o.file_filters) for o in opts] for s, opts in model.items()}
+                    prefixed_model = {s: [ConfigOption(f"{sub_opt_prefix}{o.key}", o.type, o.label, o.default, o.min_val, o.max_val, o.step, o.digits, o.options_dict, o.tooltip, o.file_filters,
+                                                       dynamic_group=f"{sub_opt_prefix}{o.dynamic_group}" if o.dynamic_group else None,
+                                                       dynamic_show_on=o.dynamic_show_on) 
+                                           for o in opts] 
+                                    for s, opts in model.items()}
                     dialog.dynamic_models.append(prefixed_model)
                     
                     custom_cb = SourceClass(config=child_config).get_configure_callback()
@@ -334,3 +339,4 @@ class ComboDataSource(DataSource):
                 _build_arc_config_ui(dialog, content_box, widgets, available_sources, panel_config, source_opts)
 
         return build_main_config_ui
+

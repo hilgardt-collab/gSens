@@ -31,6 +31,8 @@ class PanelBuilderDialog:
         
         self.widgets = {}
         self.current_config = {}
+        # --- FIX: Initialize ui_models on the dialog instance ---
+        self.dialog.ui_models = {}
         self.dialog.dynamic_models = []
 
         self._build_ui()
@@ -166,6 +168,7 @@ class PanelBuilderDialog:
         self.widgets.clear()
         self.current_config.clear()
         self.dialog.dynamic_models.clear()
+        self.dialog.ui_models.clear()
         
         self._clear_box(self.source_config_box)
         self._clear_box(self.displayer_config_box)

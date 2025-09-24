@@ -294,6 +294,12 @@ class DataPanel(BasePanel):
                 self.title_label.set_text(self.config.get("title_text"))
             
             config_manager.update_panel_config(self.config["id"], self.config)
+            
+            # --- FIX: Re-register the panel with the UpdateManager ---
+            # This ensures the manager has the latest config, including the update interval.
+            if not self.is_clock_source:
+                update_manager.register_panel(self)
+
             if original_displayer_key_on_open != final_displayer_key:
                 main_window.grid_manager.recreate_panel(self.config['id'])
             else:
@@ -312,7 +318,6 @@ class DataPanel(BasePanel):
         cancel_button.connect("clicked", lambda w: dialog.destroy())
         
         apply_button = dialog.add_non_modal_button("_Apply")
-        # --- BUG FIX: Assign apply_button to the dialog object so custom builders can access it ---
         dialog.apply_button = apply_button
         apply_button.connect("clicked", apply_changes)
         
@@ -322,7 +327,6 @@ class DataPanel(BasePanel):
             if dialog.is_visible(): dialog.destroy()
         accept_button.connect("clicked", on_accept)
         
-        # --- BUG FIX: Call custom builders *after* the apply button has been created ---
         source_custom_builder = self.data_source.get_configure_callback()
         if source_custom_builder:
             source_custom_builder(dialog, source_tab_box, all_widgets, AVAILABLE_DATA_SOURCES, self.config)

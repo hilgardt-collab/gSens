@@ -97,7 +97,8 @@ class LevelBarDisplayer(DataDisplayer):
         self.secondary_text = source.get_display_string(value)
 
         num_segments = int(self.config.get("level_bar_segment_count", 30))
-        min_v, max_v = float(self.config.get("level_min_value", 0)), float(self.config.get("level_max_value", 100))
+        # Use the data source's graph limits, not local ones
+        min_v, max_v = float(self.config.get("graph_min_value", 0)), float(self.config.get("graph_max_value", 100))
         v_range = max_v - min_v if max_v > min_v else 1
         self.target_on_level = int(round(((min(max(self.current_value, min_v), max_v) - min_v) / v_range) * num_segments))
         now = time.monotonic()
@@ -119,26 +120,33 @@ class LevelBarDisplayer(DataDisplayer):
             "Middle Left": "middle_left", "Middle Center": "middle_center", "Middle Right": "middle_right",
             "Bottom Left": "bottom_left", "Bottom Center": "bottom_center", "Bottom Right": "bottom_right"
         }
-        model["Level Bar Range"] = [ConfigOption("level_min_value", "spinner", "Min Value:", 0, -10000, 10000, 1, 1), ConfigOption("level_max_value", "spinner", "Max Value:", 100, -10000, 10000, 1, 1)]
+
+        grad_controller = "level_bar_on_gradient_enabled"
+        pulse_controller = "level_bar_on_pulse_enabled"
+        pulse_grad_controller = "level_bar_on_pulse_gradient_enabled"
+
         model["Level Bar Style"] = [ 
             ConfigOption("level_bar_orientation", "dropdown", "Orientation:", "vertical", options_dict={"Vertical": "vertical", "Horizontal": "horizontal"}), 
             ConfigOption("level_bar_background_color", "color", "Background Color:", "rgba(20,30,50,1)"), 
             ConfigOption("level_bar_on_color", "color", "Start 'On' Color:", "rgba(170,220,255,1)"), 
+            # Moved End Color here to group it logically
+            ConfigOption("level_bar_on_color2", "color", "End Color:", "rgba(255,255,0,1)"),
             ConfigOption("level_bar_off_color", "color", "Segment 'Off' Color:", "rgba(40,60,80,1)"), 
             ConfigOption("level_bar_segment_count", "spinner", "Number of Segments:", 30, 5, 100, 1, 0), 
             ConfigOption("level_bar_spacing", "spinner", "Segment Spacing (px):", 2, 0, 10, 1, 0),
+            ConfigOption("level_bar_padding", "spinner", "End Padding (px):", 2, 0, 50, 1, 0),
             ConfigOption("level_bar_slant_px", "spinner", "Segment Slant (px):", 0, -50, 50, 1, 0)
         ]
         model["Level Bar Effects"] = [ 
             ConfigOption("level_bar_fill_speed_ms", "spinner", "Fill Speed (ms/bar):", 15, 1, 100, 1, 0),
             ConfigOption("level_bar_fade_enabled", "bool", "Enable 'Off' Fade Out:", "True"), 
             ConfigOption("level_bar_fade_duration_ms", "spinner", "'Off' Fade Duration (ms):", 500, 50, 2000, 50, 0),
-            ConfigOption("level_bar_on_gradient_enabled", "bool", "Enable 'On' Color Gradient:", "False"),
+            ConfigOption(grad_controller, "bool", "Bar Gradient:", "False"),
             ConfigOption("level_bar_gradient_mode", "dropdown", "Gradient Mode:", "full", 
                          options_dict={"Over Full Bar": "full", "Over Active Segments": "active"}),
-            ConfigOption("level_bar_on_color2", "color", "End 'On' Color:", "rgba(255,255,0,1)"),
-            ConfigOption("level_bar_on_pulse_enabled", "bool", "Enable 'On' Color Pulse:", "False"),
+            ConfigOption(pulse_controller, "bool", "Pulse:", "False"),
             ConfigOption("level_bar_on_pulse_color1", "color", "Pulse Start Color:", "rgba(170,220,255,1)"),
+            ConfigOption(pulse_grad_controller, "bool", "Pulse Gradient:", "False"),
             ConfigOption("level_bar_on_pulse_color2", "color", "Pulse End Color:", "rgba(255,255,255,1)"),
             ConfigOption("level_bar_on_pulse_duration_ms", "spinner", "Pulse Duration (ms):", 1000, 100, 5000, 100, 0)
         ]
@@ -160,36 +168,93 @@ class LevelBarDisplayer(DataDisplayer):
         ]
         return model
 
+    @staticmethod
+    def get_config_key_prefixes():
+        """Returns the unique prefixes used for theme saving."""
+        return ["level_bar_"]
+
     def get_configure_callback(self):
         def setup_dynamic_options(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
+            key_prefix = f"{prefix}_" if prefix else ""
             try:
-                grad_switch = widgets["level_bar_on_gradient_enabled"]
-                pulse_switch = widgets["level_bar_on_pulse_enabled"]
-                layout_combo = widgets["level_bar_text_layout"]
-                split_ratio_scale = widgets["level_bar_split_ratio"]
-                grad_end_color = widgets["level_bar_on_color2"].get_parent()
-                grad_mode_combo = widgets["level_bar_gradient_mode"].get_parent()
-                pulse_start_color = widgets["level_bar_on_pulse_color1"].get_parent()
-                pulse_end_color = widgets["level_bar_on_pulse_color2"].get_parent()
-                pulse_duration = widgets["level_bar_on_pulse_duration_ms"].get_parent()
-            except KeyError:
+                layout_combo = widgets[f"{key_prefix}level_bar_text_layout"]
+                split_ratio_scale = widgets[f"{key_prefix}level_bar_split_ratio"]
+                grad_switch = widgets[f"{key_prefix}level_bar_on_gradient_enabled"]
+                pulse_switch = widgets[f"{key_prefix}level_bar_on_pulse_enabled"]
+                
+                # Gradient options
+                grad_mode_combo = widgets[f"{key_prefix}level_bar_gradient_mode"]
+                end_color_picker = widgets[f"{key_prefix}level_bar_on_color2"]
+                
+                # Pulse options
+                pulse_start_color_picker = widgets[f"{key_prefix}level_bar_on_pulse_color1"]
+                pulse_grad_switch = widgets[f"{key_prefix}level_bar_on_pulse_gradient_enabled"]
+                pulse_end_color_picker = widgets[f"{key_prefix}level_bar_on_pulse_color2"]
+                pulse_duration_spinner = widgets[f"{key_prefix}level_bar_on_pulse_duration_ms"]
+
+            except KeyError as e:
+                # This is expected if the displayer is part of a combo where not all widgets are created
+                # print(f"LevelBarDisplayer config: Missing widget for key {e}")
                 return
 
-            def update_visibility(*args):
-                is_grad = grad_switch.get_active()
-                is_pulse = pulse_switch.get_active()
-                grad_end_color.set_visible(is_grad)
-                grad_mode_combo.set_visible(is_grad)
-                pulse_start_color.set_visible(is_pulse)
-                pulse_end_color.set_visible(is_pulse)
-                pulse_duration.set_visible(is_pulse)
-                
-                is_superimposed = layout_combo.get_active_id() == "superimposed"
-                split_ratio_scale.get_parent().set_visible(not is_superimposed)
+            def get_widget_row(widget):
+                # Helper to reliably find the full Gtk.Box row for a widget
+                if not widget: return None
+                parent = widget.get_parent()
+                # Keep going up until we find a direct child of the main content_box
+                while parent is not None and parent.get_parent() != content_box:
+                    parent = parent.get_parent()
+                return parent
+            
+            # Get the parent Gtk.Box for each widget row
+            split_ratio_row = get_widget_row(split_ratio_scale)
+            grad_mode_row = get_widget_row(grad_mode_combo)
+            end_color_row = get_widget_row(end_color_picker)
+            
+            pulse_start_color_row = get_widget_row(pulse_start_color_picker)
+            pulse_grad_row = get_widget_row(pulse_grad_switch)
+            pulse_end_color_row = get_widget_row(pulse_end_color_picker)
+            pulse_duration_row = get_widget_row(pulse_duration_spinner)
 
+            # --- Simplified visibility logic for the declarative model ---
+            # This is now only needed for non-declarative, complex interactions.
+            if pulse_grad_row: # It's part of a combo, needs manual logic
+                 pulse_grad_row.set_visible(False)
+                 pulse_end_color_row.set_visible(False)
+
+            def update_visibility(*args):
+                # Handle text layout options
+                is_superimposed = layout_combo.get_active_id() == "superimposed"
+                if split_ratio_row:
+                    split_ratio_row.set_visible(not is_superimposed)
+
+                # Handle nested logic for pulse gradient (only if it's a combo child)
+                if pulse_grad_row:
+                    is_grad_active = grad_switch.get_active()
+                    is_pulse_active = pulse_switch.get_active()
+                    
+                    # Show/hide gradient options
+                    if grad_mode_row: grad_mode_row.set_visible(is_grad_active)
+                    if end_color_row: end_color_row.set_visible(is_grad_active)
+                    
+                    # Show/hide pulse options
+                    if pulse_start_color_row: pulse_start_color_row.set_visible(is_pulse_active)
+                    if pulse_duration_row: pulse_duration_row.set_visible(is_pulse_active)
+
+                    can_show_pulse_grad = is_grad_active and is_pulse_active
+                    pulse_grad_row.set_visible(can_show_pulse_grad)
+                    
+                    can_show_pulse_end_color = can_show_pulse_grad and pulse_grad_switch.get_active()
+                    if pulse_end_color_row:
+                        pulse_end_color_row.set_visible(can_show_pulse_end_color)
+
+            # Connect signals
+            layout_combo.connect("changed", update_visibility)
             grad_switch.connect("notify::active", update_visibility)
             pulse_switch.connect("notify::active", update_visibility)
-            layout_combo.connect("changed", update_visibility)
+            pulse_grad_switch.connect("notify::active", update_visibility)
+            
+            # Set initial state
             GLib.idle_add(update_visibility)
 
         return setup_dynamic_options
@@ -208,8 +273,15 @@ class LevelBarDisplayer(DataDisplayer):
         self._layout_secondary = None
         if self.widget.get_realized(): self._start_animation_timer()
         self.widget.queue_draw()
+        
+    def reset_cache(self):
+        """Invalidates all cached surfaces and layouts."""
+        self._static_surface = None
+        self._layout_primary = None
+        self._layout_secondary = None
 
     def on_draw(self, area, ctx, width, height):
+        self._sync_state_with_config()
         width, height = int(width), int(height)
         if width <= 0 or height <= 0: return
         
@@ -368,24 +440,25 @@ class LevelBarDisplayer(DataDisplayer):
     def _draw_static_bar_elements(ctx, bar_width, bar_height, config):
         slant = float(config.get("level_bar_slant_px", 0))
         orientation = config.get("level_bar_orientation", "vertical")
-        
+        padding = float(config.get("level_bar_padding", 2))
+
         ctx.save()
 
         if orientation == "vertical":
-            rect_width, rect_height = bar_width - abs(slant), bar_height
-            if rect_width <= 0: ctx.restore(); return
+            rect_width, rect_height = bar_width - abs(slant), bar_height - (2 * padding)
+            if rect_width <= 0 or rect_height <= 0: ctx.restore(); return
             offset_x = -slant if slant < 0 else 0
-            ctx.translate(offset_x, 0)
+            ctx.translate(offset_x, padding)
             tan_angle = slant / rect_height if rect_height > 0 else 0
             ctx.transform(cairo.Matrix(1, 0, tan_angle, 1, 0, 0))
         else: # Horizontal
-            rect_width, rect_height = bar_width, bar_height - abs(slant)
-            if rect_height <= 0: ctx.restore(); return
+            rect_width, rect_height = bar_width - (2 * padding), bar_height - abs(slant)
+            if rect_width <= 0 or rect_height <= 0: ctx.restore(); return
             offset_y = -slant if slant < 0 else 0
-            ctx.translate(0, offset_y)
+            ctx.translate(padding, offset_y)
             tan_angle = slant / rect_width if rect_width > 0 else 0
             ctx.transform(cairo.Matrix(1, tan_angle, 0, 1, 0, 0))
-
+        
         bg_rgba = Gdk.RGBA(); bg_rgba.parse(config.get("level_bar_background_color"))
         ctx.set_source_rgba(bg_rgba.red, bg_rgba.green, bg_rgba.blue, bg_rgba.alpha)
         ctx.rectangle(0, 0, rect_width, rect_height); ctx.fill()
@@ -418,21 +491,22 @@ class LevelBarDisplayer(DataDisplayer):
     def _draw_dynamic_bar_elements(ctx, bar_width, bar_height, config, current_on_level, segment_states):
         slant = float(config.get("level_bar_slant_px", 0))
         orientation = config.get("level_bar_orientation", "vertical")
+        padding = float(config.get("level_bar_padding", 2))
         
         ctx.save()
 
         if orientation == "vertical":
-            rect_width, rect_height = bar_width - abs(slant), bar_height
-            if rect_width <= 0: ctx.restore(); return
+            rect_width, rect_height = bar_width - abs(slant), bar_height - (2 * padding)
+            if rect_width <= 0 or rect_height <=0: ctx.restore(); return
             offset_x = -slant if slant < 0 else 0
-            ctx.translate(offset_x, 0)
+            ctx.translate(offset_x, padding)
             tan_angle = slant / rect_height if rect_height > 0 else 0
             ctx.transform(cairo.Matrix(1, 0, tan_angle, 1, 0, 0))
         else: # Horizontal
-            rect_width, rect_height = bar_width, bar_height - abs(slant)
-            if rect_height <= 0: ctx.restore(); return
+            rect_width, rect_height = bar_width - (2 * padding), bar_height - abs(slant)
+            if rect_width <= 0 or rect_height <= 0: ctx.restore(); return
             offset_y = -slant if slant < 0 else 0
-            ctx.translate(0, offset_y)
+            ctx.translate(padding, offset_y)
             tan_angle = slant / rect_width if rect_width > 0 else 0
             ctx.transform(cairo.Matrix(1, tan_angle, 0, 1, 0, 0))
         
@@ -448,6 +522,7 @@ class LevelBarDisplayer(DataDisplayer):
         on_color2_str = config.get("level_bar_on_color2")
         pulse_color1_str = config.get("level_bar_on_pulse_color1")
         pulse_color2_str = config.get("level_bar_on_pulse_color2")
+        pulse_grad_enabled = str(config.get("level_bar_on_pulse_gradient_enabled", "False")).lower() == 'true'
 
         if orientation == "vertical":
             segment_height = (rect_height - (num_segments - 1) * spacing) / num_segments if num_segments > 0 else 0
@@ -480,14 +555,18 @@ class LevelBarDisplayer(DataDisplayer):
                     pulse_duration_s = float(config.get("level_bar_on_pulse_duration_ms", 1000)) / 1000.0
                     if pulse_duration_s > 0:
                         fade_factor = (math.sin(now * (2 * math.pi) / pulse_duration_s) + 1) / 2.0
-                        pulse_target_color_str = pulse_color1_str
-                        if on_grad_enabled: # Apply same logic to pulse target
-                            grad_mode = config.get("level_bar_gradient_mode", "full")
-                            if grad_mode == 'full' and num_segments > 1: denominator = num_segments - 1
-                            elif current_on_level > 1: denominator = current_on_level - 1
-                            else: denominator = 1
-                            factor = i / denominator if denominator > 0 else 0.0
-                            pulse_target_color_str = DataDisplayer._interpolate_color(None, factor, pulse_color1_str, pulse_color2_str).to_string()
+                        
+                        pulse_start_color_str = pulse_color1_str
+                        if on_grad_enabled: # Apply same logic to pulse start
+                            factor = i / ( (current_on_level - 1) if current_on_level > 1 else 1 ) if config.get("level_bar_gradient_mode") == "active" else i / ( (num_segments -1) if num_segments > 1 else 1)
+                            pulse_start_color_str = DataDisplayer._interpolate_color(None, factor, pulse_color1_str, pulse_color1_str).to_string() # No gradient on start pulse color by default
+
+                        pulse_end_color_str = pulse_color2_str if pulse_grad_enabled else pulse_start_color_str
+                        
+                        pulse_target_color_str = pulse_start_color_str
+                        if on_grad_enabled: 
+                            factor = i / ( (current_on_level - 1) if current_on_level > 1 else 1 ) if config.get("level_bar_gradient_mode") == "active" else i / ( (num_segments -1) if num_segments > 1 else 1)
+                            pulse_target_color_str = DataDisplayer._interpolate_color(None, factor, pulse_start_color_str, pulse_end_color_str).to_string()
 
                         color_to_use = DataDisplayer._interpolate_color(None, fade_factor, base_color_str, pulse_target_color_str).to_string()
             
@@ -511,3 +590,4 @@ class LevelBarDisplayer(DataDisplayer):
 
     def close(self):
         self._stop_animation_timer(); super().close()
+

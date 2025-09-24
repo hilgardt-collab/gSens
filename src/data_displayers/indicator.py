@@ -49,14 +49,19 @@ class IndicatorDisplayer(DataDisplayer):
     def get_config_model():
         model = DataDisplayer.get_config_model()
         
+        controller_key = "indicator_shape"
+
         model["Indicator Shape"] = [
-            ConfigOption("indicator_shape", "dropdown", "Shape:", "full_panel", 
+            ConfigOption(controller_key, "dropdown", "Shape:", "full_panel", 
                          options_dict={"Full Panel": "full_panel", "Circle": "circle", 
                                        "Square": "square", "Polygon": "polygon"}),
             ConfigOption("indicator_shape_padding", "spinner", "Padding (px):", 10, 0, 100, 1, 0),
+            # These options are now dynamic
             ConfigOption("indicator_square_keep_aspect", "bool", "Keep Aspect Ratio:", "True",
-                         tooltip="If unchecked, the square will stretch to fill the available space."),
-            ConfigOption("indicator_polygon_sides", "spinner", "Number of Sides:", 6, 3, 12, 1, 0)
+                         tooltip="If unchecked, the square will stretch to fill the available space.",
+                         dynamic_group=controller_key, dynamic_show_on="square"),
+            ConfigOption("indicator_polygon_sides", "spinner", "Number of Sides:", 6, 3, 12, 1, 0,
+                         dynamic_group=controller_key, dynamic_show_on="polygon")
         ]
 
         color_stops = [
@@ -102,8 +107,16 @@ class IndicatorDisplayer(DataDisplayer):
         ]
         return model
 
+    @staticmethod
+    def get_config_key_prefixes():
+        """Returns the unique prefixes used for theme saving."""
+        return ["indicator_"]
+
     def get_configure_callback(self):
-        """A custom callback to dynamically show/hide shape and color stop widgets."""
+        """
+        A custom callback to dynamically show/hide the variable number of color stop widgets.
+        The shape-specific logic is now handled declaratively by the main UI builder.
+        """
         def setup_dynamic_options(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
             # --- Color Stop Logic ---
             color_count_spinner = widgets.get("indicator_color_count")
@@ -124,27 +137,22 @@ class IndicatorDisplayer(DataDisplayer):
                         is_visible = i <= count
                         widget_group["value_row"].set_visible(is_visible)
                         widget_group["color_row"].set_visible(is_visible)
-                        value_widget = widget_group["value_row"].get_first_child()
-                        if i == 1: value_widget.set_text(f"Percent for Color 1 (Min):")
-                        elif i == count: value_widget.set_text(f"Percent for Color {i} (Max):")
-                        else: value_widget.set_text(f"Percent for Color {i}:")
+                        # Find the Gtk.Label inside the row to update its text
+                        value_label = None
+                        child = widget_group["value_row"].get_first_child()
+                        while child is not None:
+                            if isinstance(child, Gtk.Label):
+                                value_label = child
+                                break
+                            child = child.get_next_sibling()
+                        
+                        if value_label:
+                            if i == 1: value_label.set_text(f"Percent for Color 1 (Min):")
+                            elif i == count: value_label.set_text(f"Percent for Color {i} (Max):")
+                            else: value_label.set_text(f"Percent for Color {i}:")
 
                 color_count_spinner.connect("value-changed", on_color_count_changed)
                 GLib.idle_add(on_color_count_changed, color_count_spinner)
-
-            # --- Shape Logic ---
-            shape_combo = widgets.get("indicator_shape")
-            if shape_combo:
-                aspect_widget = widgets.get("indicator_square_keep_aspect")
-                sides_widget = widgets.get("indicator_polygon_sides")
-                
-                def on_shape_changed(combo):
-                    shape = combo.get_active_id()
-                    if aspect_widget: aspect_widget.get_parent().set_visible(shape == "square")
-                    if sides_widget: sides_widget.get_parent().set_visible(shape == "polygon")
-
-                shape_combo.connect("changed", on_shape_changed)
-                GLib.idle_add(on_shape_changed, shape_combo)
 
         return setup_dynamic_options
 
@@ -289,3 +297,4 @@ class IndicatorDisplayer(DataDisplayer):
             PangoCairo.show_layout(ctx, layout)
             
             current_y += element['height'] + spacing
+

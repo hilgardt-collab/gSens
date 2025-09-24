@@ -15,7 +15,8 @@ class TableDisplayer(DataDisplayer):
     """
     def __init__(self, panel_ref, config):
         self._process_data = []
-        self._layout_cache = {} # Cache Pango layouts for performance
+        # --- FIX: Cache only header Pango layouts to prevent memory leaks ---
+        self._header_layout_cache = {} 
         super().__init__(panel_ref, config)
         populate_defaults_from_model(self.config, self.get_config_model())
         self._set_initial_defaults()
@@ -43,20 +44,9 @@ class TableDisplayer(DataDisplayer):
 
     def apply_styles(self):
         """Invalidates caches and triggers a redraw when styles change."""
-        self._layout_cache.clear()
+        # --- FIX: Clear the header layout cache on style changes ---
+        self._header_layout_cache.clear()
         self.widget.queue_draw()
-
-    def _get_pango_layout(self, ctx, text, font_str):
-        """Gets or creates a Pango layout for given text and font."""
-        cache_key = f"{text}_{font_str}"
-        if cache_key in self._layout_cache:
-            return self._layout_cache[cache_key]
-        
-        layout = PangoCairo.create_layout(ctx)
-        layout.set_font_description(Pango.FontDescription.from_string(font_str))
-        layout.set_text(text, -1)
-        self._layout_cache[cache_key] = layout
-        return layout
 
     def on_draw(self, area, ctx, width, height):
         """The main drawing function for rendering the entire table."""
@@ -93,8 +83,12 @@ class TableDisplayer(DataDisplayer):
 
         # --- Draw Header ---
         header_font_default = self.config.get("table_header_font", "Sans Bold 10")
-        header_layout = self._get_pango_layout(ctx, "Tg", header_font_default)
-        header_height = header_layout.get_pixel_extents()[1].height + (padding * 2)
+        
+        # --- FIX: Use a temporary layout to measure height, don't cache it on text ---
+        header_height_layout = PangoCairo.create_layout(ctx)
+        header_height_layout.set_font_description(Pango.FontDescription.from_string(header_font_default))
+        header_height_layout.set_text("Tg", -1)
+        header_height = header_height_layout.get_pixel_extents()[1].height + (padding * 2)
 
         current_x = 0
         for i, col in enumerate(visible_cols):
@@ -109,7 +103,15 @@ class TableDisplayer(DataDisplayer):
             header_color = Gdk.RGBA(); header_color.parse(header_color_str)
             ctx.set_source_rgba(header_color.red, header_color.green, header_color.blue, header_color.alpha)
             
-            layout = self._get_pango_layout(ctx, col['title'], header_font)
+            # --- FIX: Cache header layouts by title and font ---
+            header_cache_key = f"{col['title']}_{header_font}"
+            layout = self._header_layout_cache.get(header_cache_key)
+            if not layout:
+                layout = PangoCairo.create_layout(ctx)
+                layout.set_font_description(Pango.FontDescription.from_string(header_font))
+                layout.set_text(col['title'], -1)
+                self._header_layout_cache[header_cache_key] = layout
+
             text_width, text_height = layout.get_pixel_extents()[1].width, layout.get_pixel_extents()[1].height
             
             align = self.config.get(f"table_col_{col_num}_header_align", "left")
@@ -122,12 +124,18 @@ class TableDisplayer(DataDisplayer):
             current_x += col['width']
 
         # --- Draw Rows ---
-        row_layout = self._get_pango_layout(ctx, "Tg", row_font_default)
-        row_height = row_layout.get_pixel_extents()[1].height + (padding * 2)
+        # --- FIX: Create a single reusable layout for all rows to measure height ---
+        row_height_layout = PangoCairo.create_layout(ctx)
+        row_height_layout.set_font_description(Pango.FontDescription.from_string(row_font_default))
+        row_height_layout.set_text("Tg",-1)
+        row_height = row_height_layout.get_pixel_extents()[1].height + (padding * 2)
         current_y = header_height
 
         row_bg1 = Gdk.RGBA(); row_bg1.parse(row_color_str1)
         row_bg2 = Gdk.RGBA(); row_bg2.parse(row_color_str2)
+        
+        # --- FIX: Create a single reusable layout for cells to avoid repeated allocation in loop ---
+        cell_layout = PangoCairo.create_layout(ctx)
 
         for i, p_info in enumerate(self._process_data):
             if current_y + row_height > height: break
@@ -155,8 +163,10 @@ class TableDisplayer(DataDisplayer):
                 item_color = Gdk.RGBA(); item_color.parse(item_color_str)
                 ctx.set_source_rgba(item_color.red, item_color.green, item_color.blue, item_color.alpha)
 
-                layout = self._get_pango_layout(ctx, text, item_font)
-                text_width, text_height = layout.get_pixel_extents()[1].width, layout.get_pixel_extents()[1].height
+                # --- FIX: Reuse the cell layout object ---
+                cell_layout.set_font_description(Pango.FontDescription.from_string(item_font))
+                cell_layout.set_text(text, -1)
+                text_width, text_height = cell_layout.get_pixel_extents()[1].width, cell_layout.get_pixel_extents()[1].height
                 
                 align = self.config.get(f"table_col_{col_num}_item_align", "left")
                 if align == "right": draw_x = current_x + col['width'] - text_width - padding
@@ -164,7 +174,7 @@ class TableDisplayer(DataDisplayer):
                 else: draw_x = current_x + padding
                     
                 ctx.move_to(draw_x, current_y + (row_height - text_height) / 2)
-                PangoCairo.show_layout(ctx, layout)
+                PangoCairo.show_layout(ctx, cell_layout)
                 current_x += col['width']
             
             current_y += row_height
@@ -281,4 +291,3 @@ class TableDisplayer(DataDisplayer):
                 GLib.idle_add(update_visibility, alt_row_switch, None)
 
         return build_dynamic_ui
-

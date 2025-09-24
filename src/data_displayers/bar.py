@@ -72,23 +72,32 @@ class BarDisplayer(DataDisplayer):
             "Bottom Left": "bottom_left", "Bottom Center": "bottom_center", "Bottom Right": "bottom_right"
         }
         
+        bg_controller_key = "bar_bg_gradient"
+        fg_controller_key = "bar_fg_gradient"
+
         model = DataDisplayer.get_config_model()
         model["Bar Style"] = [
             ConfigOption("bar_orientation", "dropdown", "Orientation:", "horizontal", 
                          options_dict={"Horizontal": "horizontal", "Vertical": "vertical"}),
             ConfigOption("bar_thickness", "spinner", "Thickness (px):", 12, 4, 200, 1, 0),
+            ConfigOption("bar_padding", "spinner", "End Padding (px):", 0, 0, 100, 1, 0),
             ConfigOption("bar_end_style", "dropdown", "End Style:", "round", 
                          options_dict={"Round": "round", "Square": "square"}),
         ]
         model["Bar Colors"] = [
-            ConfigOption("bar_bg_gradient", "bool", "Gradient Background:", "False"),
+            ConfigOption(bg_controller_key, "bool", "Gradient Background:", "False"),
             ConfigOption("bar_background_color", "color", "BG Color 1:", "rgba(204,204,204,0.7)"),
-            ConfigOption("bar_background_color2", "color", "BG Color 2:", "rgba(100,100,100,0.7)"),
-            ConfigOption("bar_bg_angle", "spinner", "BG Angle (°):", 90, 0, 359, 1, 0),
-            ConfigOption("bar_fg_gradient", "bool", "Gradient Foreground:", "False"),
+            ConfigOption("bar_background_color2", "color", "BG Color 2:", "rgba(100,100,100,0.7)",
+                         dynamic_group=bg_controller_key, dynamic_show_on="True"),
+            ConfigOption("bar_bg_angle", "spinner", "BG Angle (°):", 90, 0, 359, 1, 0,
+                         dynamic_group=bg_controller_key, dynamic_show_on="True"),
+            
+            ConfigOption(fg_controller_key, "bool", "Gradient Foreground:", "False"),
             ConfigOption("bar_color", "color", "FG Color 1:", "rgba(0,150,255,1.0)"),
-            ConfigOption("bar_color2", "color", "FG Color 2:", "rgba(0,100,200,1.0)"),
-            ConfigOption("bar_fg_angle", "spinner", "FG Angle (°):", 90, 0, 359, 1, 0),
+            ConfigOption("bar_color2", "color", "FG Color 2:", "rgba(0,100,200,1.0)",
+                         dynamic_group=fg_controller_key, dynamic_show_on="True"),
+            ConfigOption("bar_fg_angle", "spinner", "FG Angle (°):", 90, 0, 359, 1, 0,
+                         dynamic_group=fg_controller_key, dynamic_show_on="True"),
         ]
         model["Labels & Layout"] = [
             ConfigOption("bar_text_layout", "dropdown", "Text Layout:", "top", 
@@ -110,30 +119,39 @@ class BarDisplayer(DataDisplayer):
         ]
         return model
 
+    @staticmethod
+    def get_config_key_prefixes():
+        """Returns the unique prefixes used for theme saving."""
+        return ["bar_"]
+
     def get_configure_callback(self):
         """Dynamically show/hide options based on other settings."""
         def setup_dynamic_options(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
-            bg_grad_switch = widgets.get("bar_bg_gradient")
-            fg_grad_switch = widgets.get("bar_fg_gradient")
+            # Gradient logic is now handled declaratively by the main UI builder.
+            # We only need to handle the special case for the split ratio.
             layout_combo = widgets.get("bar_text_layout")
+            split_ratio_scale = widgets.get("bar_split_ratio")
+
+            if not layout_combo or not split_ratio_scale:
+                return
+
+            split_ratio_row = get_widget_row(split_ratio_scale)
 
             def update_visibility(*args):
-                if bg_grad_switch:
-                    is_bg_grad = bg_grad_switch.get_active()
-                    widgets["bar_background_color2"].get_parent().set_visible(is_bg_grad)
-                    widgets["bar_bg_angle"].get_parent().set_visible(is_bg_grad)
-                if fg_grad_switch:
-                    is_fg_grad = fg_grad_switch.get_active()
-                    widgets["bar_color2"].get_parent().set_visible(is_fg_grad)
-                    widgets["bar_fg_angle"].get_parent().set_visible(is_fg_grad)
-                if layout_combo:
-                    is_super = layout_combo.get_active_id() == "superimposed"
-                    widgets["bar_split_ratio"].get_parent().set_visible(not is_super)
+                is_superimposed = layout_combo.get_active_id() == "superimposed"
+                if split_ratio_row:
+                    split_ratio_row.set_visible(not is_superimposed)
             
-            if bg_grad_switch: bg_grad_switch.connect("notify::active", update_visibility)
-            if fg_grad_switch: fg_grad_switch.connect("notify::active", update_visibility)
-            if layout_combo: layout_combo.connect("changed", update_visibility)
-            GLib.idle_add(update_visibility)
+            layout_combo.connect("changed", update_visibility)
+            GLib.idle_add(update_visibility, layout_combo)
+            
+        def get_widget_row(widget):
+            if not widget: return None
+            if isinstance(widget, Gtk.Scale): return widget.get_parent()
+            if widget.get_parent() and isinstance(widget.get_parent(), Gtk.Box):
+                return widget.get_parent()
+            return None
+
         return setup_dynamic_options
 
     def on_draw(self, area, ctx, width, height):
@@ -180,13 +198,14 @@ class BarDisplayer(DataDisplayer):
     def _draw_bar_graphic(self, ctx, x, y, w, h):
         orientation = self.config.get("bar_orientation", "horizontal")
         thickness = float(self.config.get("bar_thickness", 12))
+        padding = float(self.config.get("bar_padding", 0))
         
         if orientation == "horizontal":
-            bar_w, bar_h = w, min(h, thickness)
-            bar_x, bar_y = x, y + (h - bar_h) / 2
+            bar_w, bar_h = w - (2 * padding), min(h, thickness)
+            bar_x, bar_y = x + padding, y + (h - bar_h) / 2
         else: # vertical
-            bar_w, bar_h = min(w, thickness), h
-            bar_x, bar_y = x + (w - bar_w) / 2, y
+            bar_w, bar_h = min(w, thickness), h - (2 * padding)
+            bar_x, bar_y = x + (w - bar_w) / 2, y + padding
 
         # Draw background
         self._draw_rect(ctx, bar_x, bar_y, bar_w, bar_h, "bg", 1.0)
@@ -317,3 +336,4 @@ class BarDisplayer(DataDisplayer):
         
         ctx.move_to(draw_x, y)
         PangoCairo.show_layout(ctx, layout)
+

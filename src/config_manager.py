@@ -193,17 +193,18 @@ class ConfigManager:
             if key in panel_config:
                 defaults_to_save[key] = panel_config[key]
         
-        # --- FIX: Ask the displayer class for its unique config prefixes ---
-        prefixes_to_check = [f"{displayer_key}_"]
+        # --- FIX: Only use prefixes explicitly provided by the displayer class ---
+        prefixes_to_check = []
         if hasattr(displayer_class, 'get_config_key_prefixes'):
-            prefixes_to_check.extend(displayer_class.get_config_key_prefixes())
+            prefixes_to_check = displayer_class.get_config_key_prefixes()
 
         # Use the collected prefixes to find all relevant dynamic keys
-        for key, value in panel_config.items():
-            for prefix in set(prefixes_to_check): # Use set to avoid duplicates
-                if key.startswith(prefix):
-                    defaults_to_save[key] = value
-                    break # Move to next key once matched
+        if prefixes_to_check:
+            for key, value in panel_config.items():
+                for prefix in set(prefixes_to_check): # Use set to avoid duplicates
+                    if key.startswith(prefix):
+                        defaults_to_save[key] = value
+                        break # Move to next key once matched
 
         section_name = f"defaults_{displayer_key}"
         if self.theme_config.has_section(section_name):
@@ -223,5 +224,3 @@ class ConfigManager:
             return False
 
 config_manager = ConfigManager()
-
-

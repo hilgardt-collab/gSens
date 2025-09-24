@@ -20,6 +20,8 @@ class LevelBarComboDisplayer(ComboBase):
         self._animation_timer_id = None
         self._bar_values = {}
         self._drawer = LevelBarDisplayer(None, config)
+        # --- FIX: Add a cache for drawer configurations ---
+        self._drawer_configs = {}
 
         super().__init__(panel_ref, config)
         populate_defaults_from_model(self.config, self.get_config_model())
@@ -195,8 +197,17 @@ class LevelBarComboDisplayer(ComboBase):
                 
                 prefixed_model = {}
                 for section, options in base_model.items():
-                    if section in ["Level Bar Range"]: continue
-                    prefixed_options = [ConfigOption(f"bar{i}_{opt.key}", opt.type, opt.label, opt.default, opt.min_val, opt.max_val, opt.step, opt.digits, opt.options_dict, opt.tooltip, opt.file_filters) for opt in options]
+                    prefixed_options = []
+                    for opt in options:
+                        new_key = f"bar{i}_{opt.key}"
+                        new_dynamic_group = f"bar{i}_{opt.dynamic_group}" if opt.dynamic_group else None
+                        
+                        prefixed_options.append(ConfigOption(
+                            new_key, opt.type, opt.label, opt.default, 
+                            opt.min_val, opt.max_val, opt.step, opt.digits, 
+                            opt.options_dict, opt.tooltip, opt.file_filters,
+                            dynamic_group=new_dynamic_group, dynamic_show_on=opt.dynamic_show_on
+                        ))
                     prefixed_model[section] = prefixed_options
                 
                 populate_defaults_from_model(panel_config, prefixed_model)
@@ -223,8 +234,36 @@ class LevelBarComboDisplayer(ComboBase):
 
         return build_display_ui
 
+    def _update_drawer_configs(self):
+        """
+        Builds and caches a specific configuration dictionary for each bar.
+        This runs only when styles are applied, not on every draw call.
+        """
+        self._drawer_configs.clear()
+        num_bars = int(self.config.get("number_of_bars", 3))
+        
+        base_model = LevelBarDisplayer.get_config_model()
+        
+        for i in range(1, num_bars + 1):
+            bar_key = f"bar{i}"
+            bar_prefix = f"{bar_key}_"
+            
+            instance_config = {}
+            # Populate with defaults from the base LevelBar model first
+            populate_defaults_from_model(instance_config, base_model)
+
+            # Then, overwrite with specific values from the combo's main config
+            for key, value in self.config.items():
+                if key.startswith(bar_prefix):
+                    unprefixed_key = key[len(bar_prefix):]
+                    instance_config[unprefixed_key] = value
+            
+            self._drawer_configs[bar_key] = instance_config
+
     def apply_styles(self):
         super().apply_styles()
+        # --- FIX: Rebuild cached drawer configs when styles change ---
+        self._update_drawer_configs()
         self.widget.queue_draw()
 
     def _start_animation_timer(self, widget=None):
@@ -289,19 +328,16 @@ class LevelBarComboDisplayer(ComboBase):
             source_key = f"{bar_key}_source"
             data_packet = self.data_bundle.get(source_key, {})
             
-            drawer_config = {}
-            populate_defaults_from_model(drawer_config, LevelBarDisplayer.get_config_model())
+            # --- FIX: Use the cached drawer config ---
+            drawer_config = self._drawer_configs.get(bar_key, {})
+            if not drawer_config: continue
 
-            bar_prefix = f"bar{i}_"
-            for key, value in self.config.items():
-                if key.startswith(bar_prefix):
-                    drawer_config[key.replace(bar_prefix, '')] = value
-            
-            drawer_config['level_min_value'] = data_packet.get('min_value', 0.0)
-            drawer_config['level_max_value'] = data_packet.get('max_value', 100.0)
+            drawer_config['graph_min_value'] = data_packet.get('min_value', 0.0)
+            drawer_config['graph_max_value'] = data_packet.get('max_value', 100.0)
 
             self._drawer.config = drawer_config
-            self._drawer.apply_styles()
+            # --- FIX: Invalidate the drawer's static cache before each use ---
+            self._drawer.reset_cache()
 
             self._drawer.primary_text = self.config.get(f"bar{i}_caption") or data_packet.get('primary_label', '')
             self._drawer.secondary_text = data_packet.get('display_string', '')
@@ -309,7 +345,7 @@ class LevelBarComboDisplayer(ComboBase):
             current_animated_val = self._bar_values.get(bar_key, {}).get('current', 0.0)
             self._drawer.current_value = current_animated_val
             
-            min_v, max_v = drawer_config.get('level_min_value', 0.0), drawer_config.get('level_max_value', 100.0)
+            min_v, max_v = drawer_config.get('graph_min_value', 0.0), drawer_config.get('graph_max_value', 100.0)
             v_range = max_v - min_v if max_v > min_v else 1
             num_segments = int(drawer_config.get("level_bar_segment_count", 30))
             
@@ -318,6 +354,7 @@ class LevelBarComboDisplayer(ComboBase):
 
             ctx.save()
             ctx.translate(bar_x, bar_y)
+            # --- FIX: We can directly call the drawer's on_draw method ---
             self._drawer.on_draw(area, ctx, bar_width, bar_height)
             ctx.restore()
 

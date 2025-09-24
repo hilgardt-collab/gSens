@@ -16,6 +16,7 @@ class SystemTempDataSource(DataSource):
     def __init__(self, config):
         self.alarm_config_prefix = "sys_temp_"
         super().__init__(config)
+        self._available_sensors_cache = None
 
     @staticmethod
     def _discover_temp_sensors_statically():
@@ -39,18 +40,26 @@ class SystemTempDataSource(DataSource):
             print(f"SystemTempDataSource: Static error discovering sensors: {e}")
         return sensors_data if sensors_data else {"": {"display_name": "No sensors found"}}
 
+
+    def _discover_temp_sensors(self):
+        if self._available_sensors_cache is not None: return self._available_sensors_cache
+        self._available_sensors_cache = self._discover_temp_sensors_statically()
+        return self._available_sensors_cache
+
     def get_data(self):
         temp_val_c = None
         sensor_key = self.config.get("selected_sensor_key", "")
+        # Use the global cache populated at startup
+        self._available_sensors_cache = SENSOR_CACHE.get('system_temp', {})
         
-        cached_sensors = SENSOR_CACHE.get('system_temp', {})
-        if sensor_key and sensor_key in cached_sensors:
-            sensor_info = cached_sensors[sensor_key]
+        if sensor_key and sensor_key in self._available_sensors_cache:
+            sensor_info = self._available_sensors_cache[sensor_key]
             adapter, input_name = sensor_info.get("adapter"), sensor_info.get("input_raw")
             if adapter and input_name:
                 try:
-                    # Use the UpdateManager's cached call instead of a direct subprocess
-                    sensors_output = update_manager.get_sensor_adapter_data(adapter)
+                    # FIX: Pass the full command to the UpdateManager's caching function
+                    command_to_run = ["sensors", "-u", adapter]
+                    sensors_output = update_manager.get_sensor_adapter_data(adapter, command_to_run)
                     
                     if sensors_output and sensors_output != "N/A":
                         for line in sensors_output.splitlines():
@@ -76,10 +85,10 @@ class SystemTempDataSource(DataSource):
     def get_primary_label_string(self, data):
         """Returns the display name of the currently monitored sensor."""
         sensor_key = self.config.get("selected_sensor_key", "")
-        cached_sensors = SENSOR_CACHE.get('system_temp', {})
+        self._available_sensors_cache = SENSOR_CACHE.get('system_temp', {})
         
-        if sensor_key and sensor_key in cached_sensors:
-            return cached_sensors[sensor_key].get("display_name", "Temperature")
+        if sensor_key and self._available_sensors_cache and sensor_key in self._available_sensors_cache:
+            return self._available_sensors_cache[sensor_key].get("display_name", "Temperature")
         return "Temperature"
 
     @staticmethod
@@ -156,3 +165,4 @@ class SystemTempDataSource(DataSource):
             _repopulate_sensor_dropdown(widgets, panel_config, prefix)
 
         return setup_auto_title_logic
+

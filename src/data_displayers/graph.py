@@ -58,13 +58,16 @@ class GraphDisplayer(DataDisplayer):
     @staticmethod
     def get_config_model():
         model = DataDisplayer.get_config_model()
+        controller_key = "graph_type"
+
         model["Graph Visuals"] = [
-            ConfigOption("graph_type", "dropdown", "Graph Type:", "line", 
+            ConfigOption(controller_key, "dropdown", "Graph Type:", "line", 
                          options_dict={"Line Chart": "line", "Bar Chart": "bar"}),
             ConfigOption("graph_line_color", "color", "Line/Border Color:", "rgba(255,0,0,0.8)"),
             ConfigOption("graph_line_width", "scale", "Line/Border Width:", "2.0", 0.5, 10.0, 0.5, 1),
             ConfigOption("graph_line_style", "dropdown", "Line Style:", "sharp", 
-                         options_dict={"Sharp": "sharp", "Smooth": "smooth"}),
+                         options_dict={"Sharp": "sharp", "Smooth": "smooth"},
+                         dynamic_group=controller_key, dynamic_show_on="line"),
             ConfigOption("graph_fill_enabled", "bool", "Fill (Line/Bar):", "True"),
             ConfigOption("graph_fill_color", "color", "Fill Color:", "rgba(255,0,0,0.2)")
         ]
@@ -98,20 +101,8 @@ class GraphDisplayer(DataDisplayer):
             if prefix is None:
                 build_background_config_ui(content_box, panel_config, widgets, dialog, prefix="graph_", title="Graph Background")
             
-            graph_type_combo = widgets.get("graph_type")
-            line_style_widget = widgets.get("graph_line_style")
-
-            if not graph_type_combo or not line_style_widget:
-                return
-
-            line_style_box = line_style_widget.get_parent()
-
-            def on_type_changed(combo):
-                is_line = combo.get_active_id() == "line"
-                line_style_box.set_visible(is_line)
-
-            graph_type_combo.connect("changed", on_type_changed)
-            GLib.idle_add(on_type_changed, graph_type_combo)
+            # The line_style option is now handled automatically by the declarative model.
+            # This callback remains only for the background UI builder.
 
         return setup_dynamic_options
 
@@ -232,3 +223,4 @@ class GraphDisplayer(DataDisplayer):
             text_rgba = Gdk.RGBA(); text_rgba.parse(self.config.get("overlay_text_color"))
             ctx.set_source_rgba(text_rgba.red, text_rgba.green, text_rgba.blue, text_rgba.alpha)
             ctx.move_to(text_x, text_y); PangoCairo.show_layout(ctx, self._layout_overlay)
+

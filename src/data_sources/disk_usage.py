@@ -5,7 +5,7 @@ from ui_helpers import CustomDialog
 import psutil
 import gi
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gtk, Pango, GLib
+from gi.repository import Gtk, Pango, GLib, Gio
 
 class DiskUsageDataSource(DataSource):
     """Data source for fetching disk usage statistics for a mountpoint."""
@@ -127,18 +127,50 @@ class DiskUsageDataSource(DataSource):
         expanders_box=Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
         scroll.set_child(expanders_box)
         
-        partitions = {"internal":[],"external":[],"other":[]}
-        for p in psutil.disk_partitions():
-            if not p.mountpoint: continue
-            cat = "other"; lbl = f"{p.mountpoint} ({p.device}, {p.fstype})"
-            if p.mountpoint == "/" or p.mountpoint.startswith(("/home","/boot")): cat="internal"
-            elif p.mountpoint.startswith(("/media/","/run/media/")): cat="external"
-            partitions[cat].append({"label":lbl, "mountpoint":p.mountpoint})
-        
+        partitions = {"internal":[], "external":[], "user":[], "other":[]}
+        seen_mounts = set()
+
+        # 1. Get all physical and pseudo partitions from psutil
+        try:
+            for p in psutil.disk_partitions(all=True):
+                if not p.mountpoint or p.mountpoint in seen_mounts: continue
+                seen_mounts.add(p.mountpoint)
+                cat = "other"; lbl = f"{p.mountpoint} ({p.device}, {p.fstype})"
+                if p.mountpoint == "/" or p.mountpoint.startswith(("/home","/boot")): cat="internal"
+                elif p.mountpoint.startswith(("/media/","/run/media/")): cat="external"
+                partitions[cat].append({"label":lbl, "mountpoint":p.mountpoint})
+        except Exception as e:
+            print(f"Error getting partitions from psutil: {e}")
+
+        # 2. Get all user-visible mounts from Gio (USB drives, network shares, etc.)
+        try:
+            monitor = Gio.VolumeMonitor.get()
+            for volume in monitor.get_volumes():
+                mount = volume.get_mount()
+                if mount:
+                    root = mount.get_root()
+                    if root:
+                        path = root.get_path()
+                        if path and path not in seen_mounts:
+                            seen_mounts.add(path)
+                            name = mount.get_name()
+                            lbl = f"{name} ({path})"
+                            partitions["user"].append({"label": lbl, "mountpoint": path})
+        except Exception as e:
+            print(f"Error getting volumes from Gio: {e}")
+
         list_boxes=[]
-        for cat_key, cat_name in [("internal","Internal"),("external","External"),("other","Other")]:
+        # Define categories and their order
+        category_map = [
+            ("internal", "Internal"),
+            ("external", "External"),
+            ("user", "Removable & Network"),
+            ("other", "Other")
+        ]
+
+        for cat_key, cat_name in category_map:
             if not partitions[cat_key]: continue
-            exp=Gtk.Expander(label=cat_name, expanded=True)
+            exp=Gtk.Expander(label=cat_name, expanded=(cat_key != "other"))
             list_box=Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
             list_boxes.append(list_box)
 
@@ -167,9 +199,7 @@ class DiskUsageDataSource(DataSource):
                     
                     panel_config[mount_path_key] = selected_path
                     
-                    # BUG FIX: Use the correct variable 'parent_dlg' to reference the main config dialog
                     if hasattr(parent_dlg, 'apply_button') and parent_dlg.apply_button:
                         parent_dlg.apply_button.emit("clicked")
                     break
         dlg.destroy()
-

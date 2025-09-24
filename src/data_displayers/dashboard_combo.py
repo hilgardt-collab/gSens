@@ -39,6 +39,7 @@ class DashboardComboDisplayer(ComboBase):
             self._drawers["level_bar"].is_drawer = True
 
         self._animation_timer_id = None
+        # --- FIX: Add a cache for drawer configurations ---
         self._drawer_configs = {}
         self._animation_values = {}
 
@@ -71,7 +72,7 @@ class DashboardComboDisplayer(ComboBase):
                              options_dict={"Horizontal": "horizontal", "Vertical": "vertical", "2x2 Grid": "grid_2x2"}),
                 ConfigOption("dashboard_h_translate", "spinner", "Horizontal Translation (px):", 0, -500, 500, 5, 0),
                 ConfigOption("dashboard_v_translate", "spinner", "Vertical Translation (px):", 0, -500, 500, 5, 0),
-                ConfigOption("dashboard_scale_factor", "scale", "Overall Scale:", 1.0, 0.2, 3.0, 0.05, 2),
+                ConfigOption("dashboard_scale_factor", "spinner", "Overall Scale:", 1.0, 0.2, 3.0, 0.05, 2),
             ]
         }
         for i in range(1, 5):
@@ -94,7 +95,7 @@ class DashboardComboDisplayer(ComboBase):
             ]
             model[f"Satellite {i} Placement"] = [
                 ConfigOption(f"satellite_{i}_angle", "spinner", "Placement Angle (°):", 180 + (i-1)*20, -360, 360, 5, 0),
-                ConfigOption(f"satellite_{i}_distance", "scale", "Placement Distance (%):", 0.7, 0.1, 2.0, 0.05, 2),
+                ConfigOption(f"satellite_{i}_distance", "spinner", "Placement Distance (px):", 400, 20, 2000, 10, 0),
             ]
 
         return model
@@ -105,6 +106,70 @@ class DashboardComboDisplayer(ComboBase):
             
             main_notebook = Gtk.Notebook()
             content_box.append(main_notebook)
+
+            # --- HELPER: Copy Style UI & Logic ---
+            def _create_copy_ui(parent_box, item_type, dest_index, max_items):
+                copy_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=15)
+                copy_box.append(Gtk.Separator())
+                copy_box.append(Gtk.Label(label="<b>Copy Style</b>", use_markup=True, xalign=0, margin_top=5))
+                
+                row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+                copy_box.append(row)
+                
+                source_combo = Gtk.ComboBoxText()
+                for i in range(1, max_items + 1):
+                    if i != dest_index:
+                        source_combo.append(id=f"{item_type}_{i}", text=f"{item_type.title()} {i}")
+                source_combo.set_active(0)
+                
+                apply_button = Gtk.Button(label="Apply Style")
+                
+                row.append(Gtk.Label(label="Copy from:"))
+                row.append(source_combo)
+                row.append(apply_button)
+                
+                parent_box.append(copy_box)
+
+                def on_copy_settings_clicked(btn):
+                    source_prefix = source_combo.get_active_id()
+                    if not source_prefix: return
+                    
+                    dest_prefix = f"{item_type}_{dest_index}"
+                    
+                    # Find all unique key suffixes for this item type
+                    key_suffixes = set()
+                    for key in full_model.keys():
+                        if key.startswith(f"{item_type.title()} {dest_index}"):
+                            for option in full_model[key]:
+                                base_key = option.key.replace(f"{dest_prefix}_", "")
+                                key_suffixes.add(base_key)
+                    
+                    # Iterate through suffixes and copy widget values
+                    for suffix in key_suffixes:
+                        source_key = f"{source_prefix}_{suffix}"
+                        dest_key = f"{dest_prefix}_{suffix}"
+                        
+                        source_widget = widgets.get(source_key)
+                        dest_widget = widgets.get(dest_key)
+                        
+                        if source_widget and dest_widget and type(source_widget) == type(dest_widget):
+                            _copy_widget_value(source_widget, dest_widget)
+
+                def _copy_widget_value(source, dest):
+                    if isinstance(source, (Gtk.SpinButton, Gtk.Scale)):
+                        dest.set_value(source.get_value())
+                    elif isinstance(source, Gtk.ColorButton):
+                        dest.set_rgba(source.get_rgba())
+                    elif isinstance(source, Gtk.FontButton):
+                        dest.set_font_desc(source.get_font_desc())
+                    elif isinstance(source, Gtk.ComboBoxText):
+                        dest.set_active_id(source.get_active_id())
+                    elif isinstance(source, Gtk.Switch):
+                        dest.set_active(source.get_active())
+
+                apply_button.connect("clicked", on_copy_settings_clicked)
+
+            # --- END HELPER ---
 
             layout_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
             layout_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
@@ -125,7 +190,15 @@ class DashboardComboDisplayer(ComboBase):
                     
                     sub_model = {}
                     for s_title, s_opts in drawer_instance.get_config_model().items():
-                        prefixed_opts = [ConfigOption(f"{prefix}_{opt.key}", opt.type, opt.label, opt.default, opt.min_val, opt.max_val, opt.step, opt.digits, opt.options_dict, opt.tooltip, opt.file_filters) for opt in s_opts]
+                        prefixed_opts = []
+                        for opt in s_opts:
+                            new_dynamic_group = f"{prefix}_{opt.dynamic_group}" if opt.dynamic_group else None
+                            prefixed_opts.append(ConfigOption(
+                                f"{prefix}_{opt.key}", opt.type, opt.label, opt.default, 
+                                opt.min_val, opt.max_val, opt.step, opt.digits, 
+                                opt.options_dict, opt.tooltip, opt.file_filters,
+                                dynamic_group=new_dynamic_group, dynamic_show_on=opt.dynamic_show_on
+                            ))
                         sub_model[s_title] = prefixed_opts
 
                     build_ui_from_model(section_box, panel_config, sub_model, widgets)
@@ -152,9 +225,16 @@ class DashboardComboDisplayer(ComboBase):
                         section.set_visible(key == active_id)
                     
                     is_level_bar = active_id == "level_bar"
-                    if lb_width_widget: lb_width_widget.get_parent().set_visible(is_level_bar)
-                    if lb_height_widget: lb_height_widget.get_parent().set_visible(is_level_bar)
-                    if size_widget: size_widget.get_parent().set_visible(not is_level_bar)
+                    if lb_width_widget: get_widget_row(lb_width_widget).set_visible(is_level_bar)
+                    if lb_height_widget: get_widget_row(lb_height_widget).set_visible(is_level_bar)
+                    if size_widget: get_widget_row(size_widget).set_visible(not is_level_bar)
+                
+                def get_widget_row(widget):
+                    if not widget: return None
+                    parent = widget.get_parent()
+                    while parent is not None and not (isinstance(parent, Gtk.Box) and parent.get_parent() == parent_box):
+                        parent = parent.get_parent()
+                    return parent
 
                 display_type_combo.connect("changed", on_display_type_changed)
                 GLib.idle_add(on_display_type_changed, display_type_combo)
@@ -173,6 +253,7 @@ class DashboardComboDisplayer(ComboBase):
                 build_ui_from_model(page_box, panel_config, center_style_model, widgets)
                 dialog.dynamic_models.append(center_style_model)
                 setup_dynamic_style_ui(page_box, f"center_{i}", f"center_{i}_display_as")
+                _create_copy_ui(page_box, "center", i, 4) # Add the copy UI
                 page_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
                 page_scroll.set_child(page_box)
                 page_num = center_notebook.append_page(page_scroll, Gtk.Label(label=f"Center {i}"))
@@ -195,6 +276,7 @@ class DashboardComboDisplayer(ComboBase):
                 build_ui_from_model(page_box, panel_config, sat_model, widgets)
                 dialog.dynamic_models.append(sat_model)
                 setup_dynamic_style_ui(page_box, f"satellite_{i}", f"satellite_{i}_display_as")
+                _create_copy_ui(page_box, "satellite", i, 12) # Add the copy UI
                 page_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
                 page_scroll.set_child(page_box)
                 page_num = satellite_notebook.append_page(page_scroll, Gtk.Label(label=f"Satellite {i}"))
@@ -246,6 +328,7 @@ class DashboardComboDisplayer(ComboBase):
 
     def apply_styles(self):
         super().apply_styles()
+        # --- FIX: Rebuild cached drawer configs when styles change ---
         self._update_drawer_configs()
         self.widget.queue_draw()
 
@@ -349,8 +432,7 @@ class DashboardComboDisplayer(ComboBase):
                 size_h = size_w
 
             angle_deg = float(self.config.get(f"{prefix}_angle", 180))
-            distance_percent = float(self.config.get(f"{prefix}_distance", 0.7))
-            distance_pixels = distance_percent * min(width, height) / 2
+            distance_pixels = float(self.config.get(f"{prefix}_distance", 400))
             angle_rad = math.radians(angle_deg)
             x = avg_center_x + math.cos(angle_rad) * distance_pixels - size_w/2
             y = avg_center_y + math.sin(angle_rad) * distance_pixels - size_h/2
@@ -362,7 +444,9 @@ class DashboardComboDisplayer(ComboBase):
         drawer = self._drawers.get(display_as)
         if not drawer: return
 
+        # --- FIX: Use the cached drawer config ---
         drawer.config = self._drawer_configs.get(prefix, {})
+        if not drawer.config: return
         
         source_key = f"{prefix}_source"
         data_packet = data_bundle.get(source_key, {})
@@ -372,7 +456,7 @@ class DashboardComboDisplayer(ComboBase):
         drawer.config['graph_min_value'] = data_packet.get('min_value', drawer.config.get('graph_min_value', 0.0))
         drawer.config['graph_max_value'] = data_packet.get('max_value', drawer.config.get('graph_max_value', 100.0))
         
-        drawer.apply_styles()
+        # --- FIX: Do not call apply_styles in the draw loop ---
 
         anim_state = self._animation_values.get(prefix, {})
         drawer._current_display_value = anim_state.get('current', 0.0)
@@ -427,4 +511,3 @@ class DashboardComboDisplayer(ComboBase):
                 drawer.close()
         self._drawers.clear()
         super().close()
-

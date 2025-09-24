@@ -30,7 +30,7 @@ class SpeedometerDisplayer(DataDisplayer):
         self._target_value = self._current_display_value
         self._first_update = True
         
-        # Caching state
+        # Caching state 
         self._static_surface = None
         self._last_draw_width, self._last_draw_height = -1, -1
         self._cached_bg_pixbuf = None
@@ -304,3 +304,4 @@ class SpeedometerDisplayer(DataDisplayer):
     def close(self):
         self._stop_animation_timer()
         super().close()
+

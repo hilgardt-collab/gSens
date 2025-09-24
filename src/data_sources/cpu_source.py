@@ -225,141 +225,86 @@ class CPUDataSource(DataSource):
 
     @staticmethod
     def get_config_model():
-        """Returns a combined configuration model for all CPU metrics."""
-        model = DataSource.get_config_model()
+        """Returns a combined and declarative configuration model for all CPU metrics."""
+        base_model = DataSource.get_config_model()
         
         metric_opts = {"Usage": "usage", "Temperature": "temperature", "Frequency": "frequency"}
         secondary_metric_opts = {"None": "none", **metric_opts}
+        core_opts = {"Overall": "overall", **{f"Core {i}": f"core_{i}" for i in range(psutil.cpu_count(logical=True))}}
+        temp_sensors = SENSOR_CACHE.get('cpu_temp', {"": {"display_name": "Scanning..."}})
+        temp_opts = {v['display_name']: k for k, v in sorted(temp_sensors.items(), key=lambda i:i[1]['display_name'])}
+        
+        # This is the controller dropdown
+        controller_key = "cpu_metric_to_display"
 
-        model["Metric & Display"] = [
-            ConfigOption("cpu_metric_to_display", "dropdown", "Primary Metric:", "usage",
-                         options_dict=metric_opts),
+        base_model["Metric & Display"] = [
+            ConfigOption(controller_key, "dropdown", "Primary Metric:", "usage", options_dict=metric_opts),
             ConfigOption("cpu_secondary_metric", "dropdown", "Secondary Metric:", "none",
                          options_dict=secondary_metric_opts,
                          tooltip="Display an additional metric as a secondary label.")
         ]
-
-        # --- Usage Options ---
-        core_opts_usage = {"Overall": "overall", **{f"Core {i}": f"core_{i}" for i in range(psutil.cpu_count(logical=True))}}
-        model["Usage Settings"] = [
-            ConfigOption("cpu_usage_mode", "dropdown", "Monitor:", "overall", options_dict=core_opts_usage)
-        ]
         
-        # --- Temperature Options ---
-        temp_sensors = SENSOR_CACHE.get('cpu_temp', {"": {"display_name": "Scanning..."}})
-        temp_opts = {v['display_name']: k for k, v in sorted(temp_sensors.items(), key=lambda i:i[1]['display_name'])}
-        model["Temperature Settings"] = [
-            ConfigOption("cpu_temp_sensor_key", "dropdown", "Sensor:", "", options_dict=temp_opts),
+        # These sections are now dynamic and controlled by the dropdown above
+        base_model["Metric Specific Settings"] = [
+            # --- Usage Options ---
+            ConfigOption("cpu_usage_mode", "dropdown", "Monitor:", "overall", options_dict=core_opts,
+                         dynamic_group=controller_key, dynamic_show_on="usage"),
+            # --- Temperature Options ---
+            ConfigOption("cpu_temp_sensor_key", "dropdown", "Sensor:", "", options_dict=temp_opts,
+                         dynamic_group=controller_key, dynamic_show_on="temperature"),
             ConfigOption("display_unit_temp", "dropdown", "Display Unit:", "C",
-                         options_dict={"Celsius (°C)": "C", "Fahrenheit (°F)": "F", "Kelvin (K)": "K"})
-        ]
-        
-        # --- Frequency Options ---
-        core_opts_freq = {"Overall": "overall", **{f"Core {i}": f"core_{i}" for i in range(psutil.cpu_count(logical=True))}}
-        model["Frequency Settings"] = [
-            ConfigOption("cpu_freq_mode", "dropdown", "Monitor:", "overall", options_dict=core_opts_freq),
+                         options_dict={"Celsius (°C)": "C", "Fahrenheit (°F)": "F", "Kelvin (K)": "K"},
+                         dynamic_group=controller_key, dynamic_show_on="temperature"),
+            # --- Frequency Options ---
+            ConfigOption("cpu_freq_mode", "dropdown", "Monitor:", "overall", options_dict=core_opts,
+                         dynamic_group=controller_key, dynamic_show_on="frequency"),
             ConfigOption("display_unit_freq", "dropdown", "Display Unit:", "GHz",
-                         options_dict={"Gigahertz (GHz)": "GHz", "Megahertz (MHz)": "MHz"})
+                         options_dict={"Gigahertz (GHz)": "GHz", "Megahertz (MHz)": "MHz"},
+                         dynamic_group=controller_key, dynamic_show_on="frequency")
         ]
         
-        model["Graph Range"] = [
+        base_model["Graph Range"] = [
             ConfigOption("graph_min_value", "spinner", "Graph Min Value:", "0.0", 0.0, 10000.0, 1.0, 0),
             ConfigOption("graph_max_value", "spinner", "Graph Max Value:", "100.0", 0.0, 10000.0, 1.0, 0)
         ]
-        model["Alarm"][1] = ConfigOption("data_alarm_high_value", "scale", "Alarm High Value:", "90.0", 0.0, 10000.0, 1.0, 1)
+        base_model["Alarm"][1] = ConfigOption("data_alarm_high_value", "scale", "Alarm High Value:", "90.0", 0.0, 10000.0, 1.0, 1)
         
-        return model
+        return base_model
 
     def get_configure_callback(self):
-        """Provides a callback to dynamically show/hide UI sections in the config dialog."""
-        def setup_dynamic_options(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
-            
-            key_prefix = f"{prefix}opt_" if prefix else ""
-            
-            metric_combo_key = f"{key_prefix}cpu_metric_to_display"
-            metric_combo = widgets.get(metric_combo_key)
+        """
+        No longer needed for dynamic UI. The base alarm callback is still inherited.
+        We only need to provide a simple callback to adjust the ranges of the
+        min/max/alarm spinners based on the selected metric.
+        """
+        def setup_range_adjustments(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
+            metric_combo = widgets.get("cpu_metric_to_display")
             if not metric_combo: return
 
-            min_widget = widgets.get(f"{key_prefix}graph_min_value")
-            max_widget = widgets.get(f"{key_prefix}graph_max_value")
-            alarm_widget = widgets.get(f"{key_prefix}data_alarm_high_value")
+            min_widget = widgets.get("graph_min_value")
+            max_widget = widgets.get("graph_max_value")
+            alarm_widget = widgets.get("data_alarm_high_value")
             
-            all_children = list(content_box)
-            alarm_label = None
-
-            if alarm_widget:
-                try:
-                    alarm_row_container = alarm_widget.get_parent().get_parent()
-                    idx = all_children.index(alarm_row_container)
-                    for i in range(idx - 1, -1, -1):
-                        if isinstance(all_children[i], Gtk.Label):
-                            alarm_label = all_children[i]
-                            break
-                except (ValueError, AttributeError):
-                    pass
-
-            min_label = min_widget.get_parent().get_first_child() if min_widget else None
-            max_label = max_widget.get_parent().get_first_child() if max_widget else None
-
-            if min_label and not hasattr(min_label, 'original_text'): min_label.original_text = min_label.get_label()
-            if max_label and not hasattr(max_label, 'original_text'): max_label.original_text = max_label.get_label()
-            if alarm_label and not hasattr(alarm_label, 'original_text'): alarm_label.original_text = alarm_label.get_label()
-
-            full_model = self.get_config_model()
-            section_widgets = {}
-            for section_title, options in full_model.items():
-                if section_title.endswith(" Settings"):
-                    section_widgets[section_title] = []
-                    for opt in options:
-                        widget = widgets.get(f"{key_prefix}{opt.key}")
-                        if widget and widget.get_parent():
-                            section_widgets[section_title].append(widget.get_parent())
-
-            for section_title, s_widgets in section_widgets.items():
-                if s_widgets:
-                    first_row = s_widgets[0]
-                    try:
-                        idx = all_children.index(first_row)
-                        if idx > 1 and isinstance(all_children[idx-1], Gtk.Label) and isinstance(all_children[idx-2], Gtk.Separator):
-                            section_widgets[section_title].insert(0, all_children[idx-1])
-                            section_widgets[section_title].insert(0, all_children[idx-2])
-                    except ValueError:
-                        pass
+            if not all([min_widget, max_widget, alarm_widget]): return
 
             def on_metric_changed(combo):
                 active_metric = combo.get_active_id()
                 
-                for w_list in section_widgets.get("Usage Settings", []): w_list.set_visible(active_metric == "usage")
-                for w_list in section_widgets.get("Temperature Settings", []): w_list.set_visible(active_metric == "temperature")
-                for w_list in section_widgets.get("Frequency Settings", []): w_list.set_visible(active_metric == "frequency")
-                
-                if not all([min_widget, max_widget, alarm_widget, min_label, max_label, alarm_label]):
-                    return
-                
+                # Configure adjustment ranges based on metric
                 if active_metric == "usage":
                     min_widget.get_adjustment().configure(0.0, 0.0, 100.0, 1.0, 10.0, 0)
                     max_widget.get_adjustment().configure(100.0, 0.0, 100.0, 1.0, 10.0, 0)
                     alarm_widget.get_adjustment().configure(90.0, 0.0, 100.0, 1.0, 10.0, 0)
-                    min_label.set_text(min_label.original_text.replace(":", " (%):"))
-                    max_label.set_text(max_label.original_text.replace(":", " (%):"))
-                    alarm_label.set_text(alarm_label.original_text.replace(":", " (%):"))
                 elif active_metric == "temperature":
                     min_widget.get_adjustment().configure(0.0, 0.0, 200.0, 1.0, 10.0, 0)
                     max_widget.get_adjustment().configure(120.0, 0.0, 200.0, 1.0, 10.0, 0)
                     alarm_widget.get_adjustment().configure(95.0, 0.0, 200.0, 1.0, 10.0, 0)
-                    min_label.set_text(min_label.original_text.replace(":", " (°C):"))
-                    max_label.set_text(max_label.original_text.replace(":", " (°C):"))
-                    alarm_label.set_text(alarm_label.original_text.replace(":", " (°C):"))
                 elif active_metric == "frequency":
                     min_widget.get_adjustment().configure(0.0, 0.0, 10000.0, 100.0, 1000.0, 0)
                     max_widget.get_adjustment().configure(5000.0, 0.0, 10000.0, 100.0, 1000.0, 0)
                     alarm_widget.get_adjustment().configure(5500.0, 0.0, 10000.0, 100.0, 1000.0, 0)
-                    min_label.set_text(min_label.original_text.replace(":", " (MHz):"))
-                    max_label.set_text(max_label.original_text.replace(":", " (MHz):"))
-                    alarm_label.set_text(alarm_label.original_text.replace(":", " (MHz):"))
-            
+
             metric_combo.connect("changed", on_metric_changed)
             GLib.idle_add(on_metric_changed, metric_combo)
 
-        return setup_dynamic_options
-
+        return setup_range_adjustments

@@ -98,6 +98,14 @@ class TextDisplayer(DataDisplayer):
         ]
         return model
 
+    @staticmethod
+    def get_config_key_prefixes():
+        """
+        Returns the unique prefixes used for theme saving, including dynamically
+        generated prefixes for each possible line.
+        """
+        return ["text_"] + [f"line{i}_" for i in range(1, 11)]
+
     def get_configure_callback(self):
         """A custom callback to dynamically build the UI for each text line."""
         def build_dynamic_line_configs(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
@@ -236,3 +244,4 @@ class TextDisplayer(DataDisplayer):
             ctx.restore()
             
             current_y += text_height + spacing
+

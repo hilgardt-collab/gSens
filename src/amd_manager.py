@@ -25,7 +25,6 @@ class AMDManager:
         self.amd_gpus_found = False
         self.device_count = 0
         self.devices = []
-        # --- PERF OPT 1: Add a cache for sensor data ---
         self.cached_data = []
         self._initialized = True
 
@@ -53,11 +52,9 @@ class AMDManager:
         self.device_count = len(self.devices)
         if self.device_count > 0:
             self.amd_gpus_found = True
-            # --- PERF OPT 1: Initialize cache structure ---
             self.cached_data = [{} for _ in range(self.device_count)]
             print(f"AMDManager initialized successfully. Found {self.device_count} AMD GPU(s).")
 
-    # --- PERF OPT 1: New method to perform a bulk update of all sensor data ---
     def update(self):
         """
         Reads all sensor files for all detected AMD GPUs at once and caches
@@ -76,7 +73,6 @@ class AMDManager:
                 'fan_speed': self._get_fan_from_files(device_info["paths"]["fan_rpm"], device_info["paths"]["fan_max_rpm"]),
             }
 
-    # --- PERF OPT 1: Helper methods for the update() function ---
     def _get_temp_from_file(self, path):
         temp_str = self._read_sysfs_file(path)
         return int(temp_str) / 1000.0 if temp_str else None
