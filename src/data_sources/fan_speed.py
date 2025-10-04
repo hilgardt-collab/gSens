@@ -8,6 +8,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk, GLib
 
 from sensor_cache import SENSOR_CACHE
+from update_manager import update_manager
 
 class FanSpeedDataSource(DataSource):
     """Data source for fetching fan RPM using psutil for efficiency."""
@@ -40,7 +41,9 @@ class FanSpeedDataSource(DataSource):
 
     def get_data(self):
         """Fetches the current RPM for the selected fan using an index-based key."""
-        if not hasattr(psutil, "sensors_fans"):
+        # --- PERF OPT: Get data from the central cache ---
+        fan_data = update_manager.get_psutil_data('sensors_fans')
+        if not fan_data:
             return {"rpm": None}
 
         selected_key = self.config.get("selected_fan_key", "")
@@ -51,7 +54,6 @@ class FanSpeedDataSource(DataSource):
             chip, index_str = selected_key.split('::', 1)
             index = int(index_str)
             
-            fan_data = psutil.sensors_fans()
             if chip in fan_data and 0 <= index < len(fan_data[chip]):
                 return {"rpm": fan_data[chip][index].current}
         except (ValueError, IndexError, Exception) as e:
@@ -155,8 +157,6 @@ class FanSpeedDataSource(DataSource):
                 fan_combo.connect("changed", on_fan_changed)
                 GLib.idle_add(on_fan_changed, fan_combo)
 
-            # --- BUGFIX 2: Remove spinner and polling logic ---
-            # The main window now ensures the cache is ready before this dialog can open.
             _repopulate_sensor_dropdown(widgets, panel_config, prefix)
 
         return setup_auto_title_logic

@@ -249,7 +249,9 @@ class DataPanel(BasePanel):
             config_manager.update_panel_config(self.config["id"], self.config)
             if main_window and hasattr(main_window, 'grid_manager'):
                  main_window.grid_manager.recreate_panel(self.config['id'])
-            dialog.destroy()
+            
+            # --- FIX: Destroy the dialog asynchronously to prevent race conditions ---
+            GLib.idle_add(dialog.destroy)
             print("INFO: Panel display type changed. Please re-open configuration for the new panel.")
             return
 

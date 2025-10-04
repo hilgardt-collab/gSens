@@ -419,18 +419,21 @@ class LevelBarDisplayer(DataDisplayer):
     def draw_bar(self, ctx, bar_x, bar_y, bar_width, bar_height):
         if bar_width <= 0 or bar_height <= 0: return
 
+        # --- PERF OPT: Check for cached static surface ---
         if not self._static_surface or self._last_draw_width != bar_width or self._last_draw_height != bar_height:
             self._static_surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, int(bar_width), int(bar_height))
             static_ctx = cairo.Context(self._static_surface)
             self._draw_static_bar_elements(static_ctx, bar_width, bar_height, self.config)
             self._last_draw_width, self._last_draw_height = bar_width, bar_height
 
+        # Paint the cached background and inactive segments
         ctx.save()
         ctx.translate(bar_x, bar_y)
         ctx.set_source_surface(self._static_surface, 0, 0)
         ctx.paint()
         ctx.restore()
         
+        # Draw the dynamic (on/fading) segments on top
         ctx.save()
         ctx.translate(bar_x, bar_y)
         self._draw_dynamic_bar_elements(ctx, bar_width, bar_height, self.config, self.current_on_level, self.segment_states)

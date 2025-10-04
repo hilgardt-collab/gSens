@@ -50,6 +50,9 @@ class MainWindow(Gtk.ApplicationWindow):
         self.app = app
         self.sensors_ready_event = sensors_ready_event
 
+        # --- NEW: Add a flag to prevent resize signal recursion ---
+        self._is_snapping = False
+
         # Use the centrally loaded module data
         self.AVAILABLE_DATA_SOURCES = AVAILABLE_DATA_SOURCES
         self.AVAILABLE_DISPLAYERS = AVAILABLE_DISPLAYERS
@@ -79,6 +82,9 @@ class MainWindow(Gtk.ApplicationWindow):
             self.grid_manager._load_and_apply_grid_config()
             
         self.connect("notify::fullscreened", self._on_fullscreen_changed)
+        # --- NEW: Connect to size change signals for snapping ---
+        self.connect("notify::default-width", self._on_window_resize_snap)
+        self.connect("notify::default-height", self._on_window_resize_snap)
         self._setup_key_press_controller()
         GLib.timeout_add(100, self._check_sensors_ready)
         
@@ -110,6 +116,34 @@ class MainWindow(Gtk.ApplicationWindow):
                 return True
         return False
 
+    # --- NEW: Snapping logic ---
+    def _reset_snapping_flag(self):
+        """Resets the recursion guard flag."""
+        self._is_snapping = False
+        return GLib.SOURCE_REMOVE
+
+    def _on_window_resize_snap(self, *args):
+        """Callback to snap the window size to the nearest grid cell multiple."""
+        if self._is_snapping or self.is_fullscreen():
+            return
+
+        self._is_snapping = True
+        
+        current_width = self.get_width()
+        current_height = self.get_height()
+        
+        # Calculate the new size rounded to the nearest CELL_SIZE
+        snapped_width = round(current_width / CELL_SIZE) * CELL_SIZE
+        snapped_height = round(current_height / CELL_SIZE) * CELL_SIZE
+        
+        # Only resize if the size has actually changed to avoid unnecessary events
+        if current_width != snapped_width or current_height != snapped_height:
+            # --- FIX: Use set_default_size for GTK4 ---
+            self.set_default_size(snapped_width, snapped_height)
+
+        # Reset the flag after the current GTK main loop iteration is done
+        GLib.idle_add(self._reset_snapping_flag)
+
     def _apply_startup_fullscreen_settings(self):
         grid_config = config_manager.config["GridLayout"] if config_manager.config.has_section("GridLayout") else {}
         if grid_config.get("launch_fullscreen", "False").lower() == 'true':
@@ -135,12 +169,8 @@ class MainWindow(Gtk.ApplicationWindow):
             if hasattr(self.grid_manager, '_update_fullscreen_menu_item_label'):
                 self.grid_manager._update_fullscreen_menu_item_label(self)
             
-            if is_fullscreen:
-                if hasattr(self.grid_manager, 'start_auto_scrolling'):
-                    self.grid_manager.start_auto_scrolling()
-            else:
-                if hasattr(self.grid_manager, 'stop_auto_scrolling'):
-                    self.grid_manager.stop_auto_scrolling()
+            # --- MODIFIED: Delegate scrolling logic to the central method ---
+            self.grid_manager.check_and_update_scrolling_state()
 
     def toggle_fullscreen_mode(self, action=None, parameter=None):
         if self.is_fullscreen(): self.unfullscreen()
@@ -334,3 +364,4 @@ class SystemMonitorApp(Gtk.Application):
 if __name__ == "__main__":
     app = SystemMonitorApp()
     sys.exit(app.run(sys.argv))
+

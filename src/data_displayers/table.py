@@ -15,7 +15,6 @@ class TableDisplayer(DataDisplayer):
     """
     def __init__(self, panel_ref, config):
         self._process_data = []
-        # --- FIX: Cache only header Pango layouts to prevent memory leaks ---
         self._header_layout_cache = {} 
         super().__init__(panel_ref, config)
         populate_defaults_from_model(self.config, self.get_config_model())
@@ -44,7 +43,6 @@ class TableDisplayer(DataDisplayer):
 
     def apply_styles(self):
         """Invalidates caches and triggers a redraw when styles change."""
-        # --- FIX: Clear the header layout cache on style changes ---
         self._header_layout_cache.clear()
         self.widget.queue_draw()
 
@@ -84,7 +82,6 @@ class TableDisplayer(DataDisplayer):
         # --- Draw Header ---
         header_font_default = self.config.get("table_header_font", "Sans Bold 10")
         
-        # --- FIX: Use a temporary layout to measure height, don't cache it on text ---
         header_height_layout = PangoCairo.create_layout(ctx)
         header_height_layout.set_font_description(Pango.FontDescription.from_string(header_font_default))
         header_height_layout.set_text("Tg", -1)
@@ -103,7 +100,6 @@ class TableDisplayer(DataDisplayer):
             header_color = Gdk.RGBA(); header_color.parse(header_color_str)
             ctx.set_source_rgba(header_color.red, header_color.green, header_color.blue, header_color.alpha)
             
-            # --- FIX: Cache header layouts by title and font ---
             header_cache_key = f"{col['title']}_{header_font}"
             layout = self._header_layout_cache.get(header_cache_key)
             if not layout:
@@ -124,7 +120,6 @@ class TableDisplayer(DataDisplayer):
             current_x += col['width']
 
         # --- Draw Rows ---
-        # --- FIX: Create a single reusable layout for all rows to measure height ---
         row_height_layout = PangoCairo.create_layout(ctx)
         row_height_layout.set_font_description(Pango.FontDescription.from_string(row_font_default))
         row_height_layout.set_text("Tg",-1)
@@ -134,7 +129,6 @@ class TableDisplayer(DataDisplayer):
         row_bg1 = Gdk.RGBA(); row_bg1.parse(row_color_str1)
         row_bg2 = Gdk.RGBA(); row_bg2.parse(row_color_str2)
         
-        # --- FIX: Create a single reusable layout for cells to avoid repeated allocation in loop ---
         cell_layout = PangoCairo.create_layout(ctx)
 
         for i, p_info in enumerate(self._process_data):
@@ -163,7 +157,6 @@ class TableDisplayer(DataDisplayer):
                 item_color = Gdk.RGBA(); item_color.parse(item_color_str)
                 ctx.set_source_rgba(item_color.red, item_color.green, item_color.blue, item_color.alpha)
 
-                # --- FIX: Reuse the cell layout object ---
                 cell_layout.set_font_description(Pango.FontDescription.from_string(item_font))
                 cell_layout.set_text(text, -1)
                 text_width, text_height = cell_layout.get_pixel_extents()[1].width, cell_layout.get_pixel_extents()[1].height
@@ -291,3 +284,4 @@ class TableDisplayer(DataDisplayer):
                 GLib.idle_add(update_visibility, alt_row_switch, None)
 
         return build_dynamic_ui
+

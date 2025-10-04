@@ -149,7 +149,7 @@ class ArcGaugeDisplayer(DataDisplayer):
             except GLib.Error as e:
                 print(f"Error loading gauge image: {e}")
                 self._cached_bg_pixbuf = None
-        # --- FIX: Invalidate static surface and Pango layouts on style change ---
+        # --- PERF OPT: Invalidate static surface and Pango layouts on style change ---
         self._static_surface = None 
         self._layout_value = None
         self._layout_unit = None
@@ -206,7 +206,7 @@ class ArcGaugeDisplayer(DataDisplayer):
         width, height = int(width_float), int(height_float)
         if width <= 0 or height <= 0: return
 
-        # --- FIX: Use cached static surface if available ---
+        # --- PERF OPT: Use cached static surface if available and size hasn't changed ---
         if not self._static_surface or self._last_draw_width != width or self._last_draw_height != height:
             self._static_surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, width, height)
             static_ctx = cairo.Context(self._static_surface)
@@ -216,6 +216,7 @@ class ArcGaugeDisplayer(DataDisplayer):
             
             bg_radius = min_dim / 2 * float(self.config.get("gauge_bg_radius_factor", 0.85))
             
+            # Draw static background (dial face)
             if bg_radius > 0:
                 static_ctx.save()
                 static_ctx.arc(cx, cy, bg_radius, 0, 2 * math.pi)
@@ -228,6 +229,7 @@ class ArcGaugeDisplayer(DataDisplayer):
                 
                 static_ctx.restore()
             
+            # Draw static inactive segments
             inner_r = min_dim / 2 * float(self.config.get("gauge_inner_radius_factor", 0.6))
             outer_r = min_dim / 2 * float(self.config.get("gauge_outer_radius_factor", 0.8))
             start_angle = math.radians(float(self.config.get("gauge_start_angle", 135)))
@@ -250,9 +252,10 @@ class ArcGaugeDisplayer(DataDisplayer):
 
             self._last_draw_width, self._last_draw_height = width, height
 
+        # Paint the cached static elements first
         ctx.set_source_surface(self._static_surface, 0, 0); ctx.paint()
 
-        # --- Dynamic Drawing (Needle and Text) ---
+        # --- Dynamic Drawing (Active Segments and Text) ---
         cx, cy = width / 2, height / 2
         min_dim = min(width, height)
         inner_r = min_dim / 2 * float(self.config.get("gauge_inner_radius_factor", 0.6))
@@ -297,7 +300,7 @@ class ArcGaugeDisplayer(DataDisplayer):
             x2, y2 = cx + math.cos(angle) * outer_r, cy + math.sin(angle) * outer_r
             ctx.move_to(x1, y1); ctx.line_to(x2, y2); ctx.stroke()
 
-        # --- FIX: Use cached Pango layouts ---
+        # --- Text Drawing (remains dynamic) ---
         if self._layout_value is None: self._layout_value = self.widget.create_pango_layout("")
         self._layout_value.set_font_description(Pango.FontDescription.from_string(self.config.get("gauge_value_font", "Sans Bold 48"))); self._layout_value.set_text(self.display_value_text, -1); _, log_v = self._layout_value.get_pixel_extents()
 
@@ -338,3 +341,4 @@ class ArcGaugeDisplayer(DataDisplayer):
     def close(self):
         self._stop_animation_timer()
         super().close()
+

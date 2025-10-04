@@ -402,59 +402,94 @@ class AnalogClockDisplayer(DataDisplayer):
                 face_style_combo.connect("changed", on_face_style_changed)
                 GLib.idle_add(on_face_style_changed, face_style_combo)
 
+            # --- Alarm Sound Preview ---
             alarm_file_widget = widgets.get("alarm_sound_file")
             if alarm_file_widget:
                 alarm_section_box = alarm_file_widget.get_parent().get_parent()
                 if alarm_section_box and isinstance(alarm_section_box, Gtk.Box):
-                    preview_sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL, margin_top=8, margin_bottom=4)
-                    preview_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-                    preview_vbox.append(Gtk.Label(label="Sound Preview:", xalign=0))
-                    controls_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-                    btn = Gtk.Button(icon_name="media-playback-start-symbolic")
-                    bar = Gtk.ProgressBar(show_text=True, hexpand=True)
-                    controls_row.append(btn); controls_row.append(bar); preview_vbox.append(controls_row)
-                    alarm_section_box.append(preview_sep); alarm_section_box.append(preview_vbox)
+                    self._build_sound_preview_ui(dialog, alarm_section_box, widgets, "alarm_sound_file")
 
-                    player_data = {'player': None, 'is_playing': False, 'progress_timer_id': None}
-                    def _update_progress_bar():
-                        if not player_data.get('is_playing') or not player_data.get('player'): return GLib.SOURCE_REMOVE
-                        ret, duration = player_data['player'].query_duration(Gst.Format.TIME)
-                        if not ret: return GLib.SOURCE_CONTINUE
-                        ret, position = player_data['player'].query_position(Gst.Format.TIME)
-                        if ret and duration > 0:
-                            fraction, pos_sec, dur_sec = position / duration, position // Gst.SECOND, duration // Gst.SECOND
-                            bar.set_fraction(fraction); bar.set_text(f"{pos_sec//60:02d}:{pos_sec%60:02d} / {dur_sec//60:02d}:{dur_sec%60:02d}")
-                        return GLib.SOURCE_CONTINUE
-
-                    def stop_playback(clear_text=True):
-                        if player_data.get('player'): player_data['player'].set_state(Gst.State.NULL)
-                        if player_data.get('progress_timer_id'): GLib.source_remove(player_data['progress_timer_id']); player_data['progress_timer_id'] = None
-                        btn.set_icon_name("media-playback-start-symbolic"); player_data['is_playing'] = False
-                        bar.set_fraction(0); 
-                        if clear_text: bar.set_text("N/A")
-
-                    def on_msg(bus, msg):
-                        if msg.type in (Gst.MessageType.EOS, Gst.MessageType.ERROR): GLib.idle_add(stop_playback, False)
-                        return True
-
-                    def on_play_clicked(_):
-                        if player_data['is_playing']: stop_playback()
-                        else:
-                            path = widgets.get("alarm_sound_file").get_text() if "alarm_sound_file" in widgets else ""
-                            if not path or not os.path.exists(path): bar.set_text("Select a file"); return
-                            if not player_data.get('player'):
-                                player_data['player'] = Gst.ElementFactory.make("playbin", "preview")
-                                player_data['player'].get_bus().add_watch(GLib.PRIORITY_DEFAULT, on_msg)
-                            
-                            player_data['player'].set_property("uri", GLib.filename_to_uri(path, None))
-                            player_data['player'].set_state(Gst.State.PLAYING); btn.set_icon_name("media-playback-stop-symbolic")
-                            player_data['is_playing'] = True
-                            player_data['progress_timer_id'] = GLib.timeout_add(200, _update_progress_bar)
-                    
-                    btn.connect("clicked", on_play_clicked)
-                    dialog.connect("destroy", lambda d: stop_playback())
+            # --- Timer Sound Preview ---
+            timer_file_widget = widgets.get("timer_sound_file")
+            if timer_file_widget:
+                timer_section_box = timer_file_widget.get_parent().get_parent()
+                if timer_section_box and isinstance(timer_section_box, Gtk.Box):
+                    self._build_sound_preview_ui(dialog, timer_section_box, widgets, "timer_sound_file")
 
         return build_clock_config_tab
+
+    def _build_sound_preview_ui(self, dialog, parent_box, widgets, file_widget_key):
+        """Helper to build and connect a sound preview widget block."""
+        preview_sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL, margin_top=8, margin_bottom=4)
+        preview_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        preview_vbox.append(Gtk.Label(label="Sound Preview:", xalign=0))
+        controls_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        btn = Gtk.Button(icon_name="media-playback-start-symbolic")
+        bar = Gtk.ProgressBar(show_text=True, hexpand=True)
+        controls_row.append(btn); controls_row.append(bar); preview_vbox.append(controls_row)
+        parent_box.append(preview_sep); parent_box.append(preview_vbox)
+
+        player_data = {'player': None, 'is_playing': False, 'progress_timer_id': None, 'bus_watch_id': None}
+        
+        def on_msg(bus, msg):
+            if msg.type in (Gst.MessageType.EOS, Gst.MessageType.ERROR): 
+                # Use idle_add to avoid calling GStreamer functions from the GStreamer streaming thread
+                GLib.idle_add(stop_playback, False)
+            return True
+
+        def stop_playback(clear_text=True):
+            if player_data.get('player'): 
+                player_data['player'].set_state(Gst.State.NULL)
+            if player_data.get('progress_timer_id'): 
+                GLib.source_remove(player_data['progress_timer_id'])
+                player_data['progress_timer_id'] = None
+            
+            # --- BUG FIX: Reliably remove the bus watch ---
+            if player_data.get('bus_watch_id'):
+                GLib.source_remove(player_data['bus_watch_id'])
+                player_data['bus_watch_id'] = None
+
+            btn.set_icon_name("media-playback-start-symbolic")
+            player_data['is_playing'] = False
+            bar.set_fraction(0)
+            if clear_text: bar.set_text("N/A")
+        
+        def _update_progress_bar():
+            if not player_data.get('is_playing') or not player_data.get('player'): 
+                player_data['progress_timer_id'] = None
+                return GLib.SOURCE_REMOVE
+            ret, duration = player_data['player'].query_duration(Gst.Format.TIME)
+            if not ret: return GLib.SOURCE_CONTINUE
+            ret, position = player_data['player'].query_position(Gst.Format.TIME)
+            if ret and duration > 0:
+                fraction, pos_sec, dur_sec = position / duration, position // Gst.SECOND, duration // Gst.SECOND
+                bar.set_fraction(fraction)
+                bar.set_text(f"{pos_sec//60:02d}:{pos_sec%60:02d} / {dur_sec//60:02d}:{dur_sec%60:02d}")
+            return GLib.SOURCE_CONTINUE
+
+        def on_play_clicked(_):
+            if player_data['is_playing']: 
+                stop_playback()
+            else:
+                path = widgets.get(file_widget_key).get_text()
+                if not path or not os.path.exists(path): 
+                    bar.set_text("Select a file")
+                    return
+                
+                if not player_data.get('player'):
+                    player_data['player'] = Gst.ElementFactory.make("playbin", f"preview_{file_widget_key}")
+                    bus = player_data['player'].get_bus()
+                    player_data['bus_watch_id'] = bus.add_watch(GLib.PRIORITY_DEFAULT, on_msg)
+                
+                player_data['player'].set_property("uri", GLib.filename_to_uri(path, None))
+                player_data['player'].set_state(Gst.State.PLAYING)
+                btn.set_icon_name("media-playback-stop-symbolic")
+                player_data['is_playing'] = True
+                if player_data['progress_timer_id'] is None:
+                    player_data['progress_timer_id'] = GLib.timeout_add(200, _update_progress_bar)
+        
+        btn.connect("clicked", on_play_clicked)
+        dialog.connect("destroy", lambda d: stop_playback())
 
     def apply_styles(self):
         super().apply_styles()

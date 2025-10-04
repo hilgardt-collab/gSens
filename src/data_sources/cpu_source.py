@@ -7,20 +7,16 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk, GLib
 from sensor_cache import SENSOR_CACHE
+from update_manager import update_manager
 
 class CPUDataSource(DataSource):
     """
     A unified data source for all CPU metrics: usage, temperature, and frequency.
     The specific metric to display is determined by the panel's configuration.
     """
-    _last_freq_poll_time = 0
-    _last_percpu_freq_result = []
-    _freq_cache_duration = 0.5 
-
     def __init__(self, config):
         super().__init__(config)
-        # Initial call to setup for psutil.cpu_percent
-        psutil.cpu_percent(interval=None, percpu=True)
+        # The initial psutil call is now handled by the UpdateManager
 
     @staticmethod
     def _discover_cpu_temp_sensors_statically():
@@ -54,8 +50,8 @@ class CPUDataSource(DataSource):
 
     def get_data(self):
         """
-        Fetches all relevant CPU data points at once and returns them in a dictionary.
-        This is more efficient than polling for each metric separately.
+        Fetches all relevant CPU data points at once from the UpdateManager's cache
+        and returns them in a dictionary.
         """
         return {
             "usage": self._get_usage_data(),
@@ -65,16 +61,21 @@ class CPUDataSource(DataSource):
 
     def _get_usage_data(self):
         """Returns a dictionary: {'overall': value, 'per_core': [val1, val2, ...]}"""
-        per_cpu = psutil.cpu_percent(interval=None, percpu=True)
+        # --- PERF OPT: Get data from the central cache ---
+        per_cpu = update_manager.get_psutil_data('cpu_percent_percpu')
+        if per_cpu is None:
+            return {'overall': 0.0, 'per_core': []}
         overall = sum(per_cpu) / len(per_cpu) if per_cpu else 0.0
         return {'overall': overall, 'per_core': per_cpu}
 
     def _get_temperature_data(self):
         """
-        Returns the temperature value for the selected sensor.
+        Returns the temperature value for the selected sensor from the central cache.
         If no sensor is selected, it defaults to the first available sensor.
         """
-        if not hasattr(psutil, "sensors_temperatures"): return None
+        # --- PERF OPT: Get data from the central cache ---
+        temp_data = update_manager.get_psutil_data('sensors_temperatures')
+        if not temp_data: return None
         
         selected_key = self.config.get("cpu_temp_sensor_key", "")
         
@@ -90,7 +91,6 @@ class CPUDataSource(DataSource):
 
         try:
             chip, label = selected_key.split('::', 1)
-            temp_data = psutil.sensors_temperatures()
             if chip in temp_data:
                 for sensor in temp_data[chip]:
                     current_label = sensor.label if sensor.label else f"Sensor {temp_data[chip].index(sensor)+1}"
@@ -102,15 +102,8 @@ class CPUDataSource(DataSource):
 
     def _get_frequency_data(self):
         """Returns a dictionary: {'overall': value, 'per_core': [val1, val2, ...]}"""
-        now = time.monotonic()
-        if (now - CPUDataSource._last_freq_poll_time) > CPUDataSource._freq_cache_duration:
-            try:
-                CPUDataSource._last_percpu_freq_result = psutil.cpu_freq(percpu=True)
-            except Exception:
-                CPUDataSource._last_percpu_freq_result = []
-            CPUDataSource._last_freq_poll_time = now
-        
-        result = CPUDataSource._last_percpu_freq_result
+        # --- PERF OPT: Get data from the central cache ---
+        result = update_manager.get_psutil_data('cpu_freq_percpu')
         if not result: return {'overall': None, 'per_core': []}
         
         per_core_freqs = [f.current for f in result]

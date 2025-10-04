@@ -4,6 +4,7 @@
 import threading
 import time
 import os
+import psutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from gi.repository import GLib
 # --- PERF OPT 1: Import the unified GPU manager ---
@@ -47,20 +48,24 @@ class UpdateManager:
         self._worker_thread = None
         self._stop_event = threading.Event()
         
-        # --- FIX: Use a thread pool for non-blocking data fetching ---
         self._executor = ThreadPoolExecutor(max_workers=(os.cpu_count() or 2) + 2, thread_name_prefix='gSens_DataSource_')
         self._pending_futures = set()
 
         self._initialized = True
         self.TICK_INTERVAL = 0.1  # seconds
-        self._sensor_cache = {} # Cache for one update cycle
-        self._sensor_cache_time = 0
+        self._sensor_cache = {} # Cache for `sensors` command output
+        self._psutil_cache = {} # Cache for psutil calls
+        self._cache_time = 0
 
     def start(self):
         """Starts the central update worker thread."""
         if self._worker_thread and self._worker_thread.is_alive():
             return
         
+        # Initial call to setup for psutil.cpu_percent
+        psutil.cpu_percent(interval=None, percpu=True)
+        time.sleep(0.1)
+
         self._stop_event.clear()
         self._worker_thread = threading.Thread(target=self._update_loop, daemon=True)
         self._worker_thread.start()
@@ -100,15 +105,44 @@ class UpdateManager:
         """
         now = time.monotonic()
         # Invalidate cache if we are on a new update tick
-        if now - self._sensor_cache_time > self.TICK_INTERVAL:
+        if now - self._cache_time > self.TICK_INTERVAL:
             self._sensor_cache.clear()
-            self._sensor_cache_time = now
+            self._psutil_cache.clear()
+            self._cache_time = now
         
         if adapter_name not in self._sensor_cache:
             from utils import safe_subprocess
             self._sensor_cache[adapter_name] = safe_subprocess(command)
             
         return self._sensor_cache[adapter_name]
+
+    def get_psutil_data(self, key):
+        """Provides access to the centrally cached psutil data."""
+        return self._psutil_cache.get(key)
+
+    def _poll_psutil_data(self):
+        """Polls all necessary psutil functions at once."""
+        try:
+            self._psutil_cache['cpu_percent_percpu'] = psutil.cpu_percent(interval=None, percpu=True)
+        except Exception as e: print(f"UpdateManager: Error polling cpu_percent: {e}")
+        
+        try:
+            self._psutil_cache['virtual_memory'] = psutil.virtual_memory()
+        except Exception as e: print(f"UpdateManager: Error polling virtual_memory: {e}")
+        
+        try:
+            if hasattr(psutil, "sensors_temperatures"):
+                self._psutil_cache['sensors_temperatures'] = psutil.sensors_temperatures()
+        except Exception as e: print(f"UpdateManager: Error polling sensors_temperatures: {e}")
+            
+        try:
+            if hasattr(psutil, "sensors_fans"):
+                self._psutil_cache['sensors_fans'] = psutil.sensors_fans()
+        except Exception as e: print(f"UpdateManager: Error polling sensors_fans: {e}")
+        
+        try:
+            self._psutil_cache['cpu_freq_percpu'] = psutil.cpu_freq(percpu=True)
+        except Exception as e: print(f"UpdateManager: Error polling cpu_freq: {e}")
 
 
     def _update_loop(self):
@@ -120,7 +154,9 @@ class UpdateManager:
             now = time.monotonic()
             
             with self._lock:
-                gpu_manager.update() # Bulk update for supported GPUs
+                # --- PERF OPT: Poll all data sources centrally once per tick ---
+                self._poll_psutil_data()
+                gpu_manager.update()
                 
                 # --- SUBMIT TASKS ---
                 panels_to_update = []
@@ -146,7 +182,6 @@ class UpdateManager:
                     try:
                         panel, value = future.result()
                         if panel and value is not None:
-                            # --- FIX: Race condition fix. Check if panel is still registered before dispatching UI update ---
                             panel_id = panel.config.get("id")
                             with self._lock:
                                 if panel_id in self._panels:
@@ -156,6 +191,5 @@ class UpdateManager:
 
             time.sleep(self.TICK_INTERVAL)
 
-# --- FIX: Re-add the global instance creation for the singleton pattern ---
 update_manager = UpdateManager()
 

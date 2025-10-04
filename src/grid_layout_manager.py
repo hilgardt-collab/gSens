@@ -85,8 +85,9 @@ class GridLayoutManager(Gtk.Fixed):
         grid_layout_config.setdefault("selected_panel_border_color", "rgba(0, 120, 212, 0.9)")
         grid_layout_config.setdefault("launch_fullscreen", "False")
         grid_layout_config.setdefault("fullscreen_display_index", "-1") 
-        grid_layout_config.setdefault("fullscreen_auto_scroll", "False")
-        grid_layout_config.setdefault("fullscreen_scroll_interval", "5.0")
+        # --- NEW: Generalize auto-scroll config ---
+        grid_layout_config.setdefault("auto_scroll_on_overflow", "False")
+        grid_layout_config.setdefault("auto_scroll_interval_seconds", "5.0")
         grid_layout_config.setdefault("grid_bg_type", "solid")
         grid_layout_config.setdefault("grid_bg_color", "#333333")
         grid_layout_config.setdefault("grid_gradient_linear_color1", "#444444")
@@ -111,6 +112,10 @@ class GridLayoutManager(Gtk.Fixed):
     def set_scroll_adjustments(self, hadjustment, vadjustment):
         self._h_adjustment = hadjustment
         self._v_adjustment = vadjustment
+        # --- NEW: Check scrolling state when adjustments are first set ---
+        if hadjustment:
+            hadjustment.connect("changed", self.check_and_update_scrolling_state)
+            hadjustment.connect("value-changed", self.check_and_update_scrolling_state)
 
     def create_panel_widget(self, config_dict):
         """Creates a DataPanel instance from a configuration dictionary."""
@@ -165,6 +170,8 @@ class GridLayoutManager(Gtk.Fixed):
             panel = self.create_panel_widget(cfg)
             if panel: 
                 self.add_panel(panel, cfg)
+        # --- NEW: Check scrolling state after all panels are loaded ---
+        GLib.idle_add(self.check_and_update_scrolling_state)
 
     def clear_all_panels(self):
         """Removes all panel widgets and their configurations."""
@@ -540,14 +547,15 @@ class GridLayoutManager(Gtk.Fixed):
                 ConfigOption("panel_border_radius", "scale", "Corner Roundness (px):", "4", 0, 20, 1),
                 ConfigOption("selected_panel_border_color", "color", "Selected Border Color:", "rgba(0, 120, 212, 0.9)"),
             ],
-            "Fullscreen Settings": [
+            "Fullscreen & Scrolling": [
                 ConfigOption("launch_fullscreen", "bool", "Launch in Fullscreen:", "False"),
                 ConfigOption("fullscreen_display_index", "dropdown", "Fullscreen on Display:", "-1", 
                              options_dict=monitor_options, 
                              tooltip="Select which monitor to use for fullscreen mode."),
-                ConfigOption("fullscreen_auto_scroll", "bool", "Enable Fullscreen Auto-Scroll:", "False",
-                             tooltip="Automatically scroll horizontally if content is wider than the screen."),
-                ConfigOption("fullscreen_scroll_interval", "scale", "Auto-Scroll Interval (sec):", "5.0", 1.0, 30.0, 1.0, 1),
+                # --- NEW: General auto-scroll option ---
+                ConfigOption("auto_scroll_on_overflow", "bool", "Enable Auto-Scroll on Overflow:", "False",
+                             tooltip="Automatically scroll horizontally if content is wider than the window."),
+                ConfigOption("auto_scroll_interval_seconds", "scale", "Auto-Scroll Interval (sec):", "5.0", 1.0, 30.0, 1.0, 1),
             ]
         }
         
@@ -570,6 +578,8 @@ class GridLayoutManager(Gtk.Fixed):
                 grid_config_section[key] = str(value)
             
             self._load_and_apply_grid_config(final_conf)
+            # --- NEW: Check scrolling state after applying changes ---
+            self.check_and_update_scrolling_state()
 
         cancel = dialog.add_non_modal_button("_Cancel", style_class="destructive-action")
         cancel.connect("clicked", lambda w: dialog.destroy())
@@ -655,6 +665,8 @@ class GridLayoutManager(Gtk.Fixed):
         required_width = bbox['width'] + CELL_SIZE
         required_height = bbox['height'] + CELL_SIZE
         self.set_size_request(required_width, required_height)
+        # --- NEW: Check scrolling state after recalculating size ---
+        GLib.idle_add(self.check_and_update_scrolling_state)
     
     def remove_panel_widget_by_id(self, panel_id_to_remove):
         """Completely removes a panel and all its associated state."""
@@ -813,20 +825,39 @@ class GridLayoutManager(Gtk.Fixed):
                 return True
         return False
         
-    # --- Fullscreen Auto-Scroll ---
+    # --- Auto-Scroll ---
 
-    def start_auto_scrolling(self):
-        """Starts the timer for auto-scrolling if the feature is enabled."""
+    def check_and_update_scrolling_state(self, *args):
+        """
+        NEW: Central method to decide if auto-scrolling should be active.
+        This is called on resize, fullscreen change, and config change.
+        """
+        grid_config = config_manager.config["GridLayout"]
+        is_enabled = grid_config.get("auto_scroll_on_overflow", "False").lower() == 'true'
+
+        if not is_enabled or not self._h_adjustment:
+            self.stop_auto_scrolling()
+            return
+
+        content_width = self._get_content_bounding_box()['width']
+        viewport_width = self._h_adjustment.get_page_size()
+        
+        is_overflowing = content_width > viewport_width
+
+        if is_overflowing and self._scroll_timer_id is None:
+            self._start_auto_scrolling()
+        elif not is_overflowing and self._scroll_timer_id is not None:
+            self.stop_auto_scrolling()
+
+    def _start_auto_scrolling(self):
+        """Starts the timer for auto-scrolling."""
         self.stop_auto_scrolling() # Ensure no previous timer is running
         
         grid_config = config_manager.config["GridLayout"]
-        is_enabled = grid_config.get("fullscreen_auto_scroll", "False").lower() == 'true'
-        
-        if is_enabled and self._h_adjustment:
-            interval_sec = float(grid_config.get("fullscreen_scroll_interval", "5.0"))
-            self._current_scroll_page = 0
-            # Wait for the first interval before scrolling
-            self._scroll_timer_id = GLib.timeout_add_seconds(int(interval_sec), self._auto_scroll_callback)
+        interval_sec = float(grid_config.get("auto_scroll_interval_seconds", "5.0"))
+        self._current_scroll_page = 0
+        # Wait for the first interval before scrolling
+        self._scroll_timer_id = GLib.timeout_add_seconds(int(interval_sec), self._auto_scroll_callback)
 
     def stop_auto_scrolling(self):
         """Stops the auto-scroll timer and any ongoing scroll animation."""
@@ -845,23 +876,24 @@ class GridLayoutManager(Gtk.Fixed):
     def _auto_scroll_callback(self):
         """Called by the timer to trigger the next scroll."""
         if not self._h_adjustment:
+            self._scroll_timer_id = None
             return GLib.SOURCE_REMOVE
 
-        bbox = self._get_content_bounding_box()
-        total_width = bbox['width']
+        total_width = self._get_content_bounding_box()['width']
         page_width = self._h_adjustment.get_page_size()
         
+        # Re-check for overflow in case the window was resized
         if total_width <= page_width:
-            self._current_scroll_page = 0
-            # If we are not at the start, scroll back
-            if self._h_adjustment.get_value() != 0:
-                self._animate_scroll_to(0)
-            return GLib.SOURCE_CONTINUE
+            self.stop_auto_scrolling()
+            return GLib.SOURCE_REMOVE
 
         num_pages = math.ceil(total_width / page_width)
         self._current_scroll_page = (self._current_scroll_page + 1) % num_pages
         
         target_x = self._current_scroll_page * page_width
+        # Ensure the final scroll doesn't go past the maximum
+        target_x = min(target_x, self._h_adjustment.get_upper() - page_width)
+        
         self._animate_scroll_to(target_x)
         
         return GLib.SOURCE_CONTINUE
@@ -882,17 +914,15 @@ class GridLayoutManager(Gtk.Fixed):
             elapsed = GLib.get_monotonic_time() - start_time
             progress = min(elapsed / (duration * 1000.0), 1.0)
             
-            # Ease-out interpolation
             eased_progress = 1 - pow(1 - progress, 3)
             
             current_pos = start_x + distance * eased_progress
             self._h_adjustment.set_value(current_pos)
             
             if progress >= 1.0:
-                self._h_adjustment.set_value(target_x) # Ensure it ends exactly
+                self._h_adjustment.set_value(target_x)
                 self._scroll_animation_id = None
                 return GLib.SOURCE_REMOVE
             return GLib.SOURCE_CONTINUE
         
         self._scroll_animation_id = GLib.timeout_add(16, animation_step, None)
-
