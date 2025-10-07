@@ -41,15 +41,9 @@ class SystemTempDataSource(DataSource):
         return sensors_data if sensors_data else {"": {"display_name": "No sensors found"}}
 
 
-    def _discover_temp_sensors(self):
-        if self._available_sensors_cache is not None: return self._available_sensors_cache
-        self._available_sensors_cache = self._discover_temp_sensors_statically()
-        return self._available_sensors_cache
-
     def get_data(self):
         temp_val_c = None
         sensor_key = self.config.get("selected_sensor_key", "")
-        # Use the global cache populated at startup
         self._available_sensors_cache = SENSOR_CACHE.get('system_temp', {})
         
         if sensor_key and sensor_key in self._available_sensors_cache:
@@ -57,9 +51,13 @@ class SystemTempDataSource(DataSource):
             adapter, input_name = sensor_info.get("adapter"), sensor_info.get("input_raw")
             if adapter and input_name:
                 try:
-                    # FIX: Pass the full command to the UpdateManager's caching function
+                    # --- FIX: Use the new unified, on-demand caching method ---
+                    # The key is the adapter name, and the function is the subprocess call to make if the key isn't in the cache yet.
                     command_to_run = ["sensors", "-u", adapter]
-                    sensors_output = update_manager.get_sensor_adapter_data(adapter, command_to_run)
+                    sensors_output = update_manager.get_cached_data(
+                        key=adapter, 
+                        data_fetch_func=lambda: safe_subprocess(command_to_run)
+                    )
                     
                     if sensors_output and sensors_output != "N/A":
                         for line in sensors_output.splitlines():
@@ -165,4 +163,3 @@ class SystemTempDataSource(DataSource):
             _repopulate_sensor_dropdown(widgets, panel_config, prefix)
 
         return setup_auto_title_logic
-

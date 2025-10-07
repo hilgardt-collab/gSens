@@ -162,4 +162,9 @@ class GPUDataSource(DataSource):
 
     def get_configure_callback(self):
         """No longer needed for showing/hiding sections."""
+        # --- CODE QUALITY REFACTOR: This callback is now redundant. ---
+        # The dynamic UI is handled by the declarative model and build_ui_from_model.
+        # The alarm callback is inherited from the base DataSource.
+        # This method can be safely removed.
         return super().get_configure_callback()
+

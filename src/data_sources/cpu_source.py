@@ -1,13 +1,14 @@
+
 # data_sources/cpu_source.py
 from data_source import DataSource
 from config_dialog import ConfigOption, build_ui_from_model
+from update_manager import update_manager
 import psutil
 import time
 import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk, GLib
 from sensor_cache import SENSOR_CACHE
-from update_manager import update_manager
 
 class CPUDataSource(DataSource):
     """
@@ -16,7 +17,7 @@ class CPUDataSource(DataSource):
     """
     def __init__(self, config):
         super().__init__(config)
-        # The initial psutil call is now handled by the UpdateManager
+        # Priming call is no longer needed here; it's handled by the UpdateManager.
 
     @staticmethod
     def _discover_cpu_temp_sensors_statically():
@@ -50,8 +51,8 @@ class CPUDataSource(DataSource):
 
     def get_data(self):
         """
-        Fetches all relevant CPU data points at once from the UpdateManager's cache
-        and returns them in a dictionary.
+        Fetches all relevant CPU data points at once from the UpdateManager's
+        central cache and returns them in a dictionary.
         """
         return {
             "usage": self._get_usage_data(),
@@ -61,20 +62,17 @@ class CPUDataSource(DataSource):
 
     def _get_usage_data(self):
         """Returns a dictionary: {'overall': value, 'per_core': [val1, val2, ...]}"""
-        # --- PERF OPT: Get data from the central cache ---
-        per_cpu = update_manager.get_psutil_data('cpu_percent_percpu')
-        if per_cpu is None:
-            return {'overall': 0.0, 'per_core': []}
+        # --- OPTIMIZATION: Get data from the central psutil cache ---
+        per_cpu = update_manager.get_cached_data('cpu_percent', lambda: [])
         overall = sum(per_cpu) / len(per_cpu) if per_cpu else 0.0
         return {'overall': overall, 'per_core': per_cpu}
 
     def _get_temperature_data(self):
         """
         Returns the temperature value for the selected sensor from the central cache.
-        If no sensor is selected, it defaults to the first available sensor.
         """
-        # --- PERF OPT: Get data from the central cache ---
-        temp_data = update_manager.get_psutil_data('sensors_temperatures')
+        # --- OPTIMIZATION: Get data from the central psutil cache ---
+        temp_data = update_manager.get_cached_data('temperatures', lambda: {})
         if not temp_data: return None
         
         selected_key = self.config.get("cpu_temp_sensor_key", "")
@@ -102,8 +100,8 @@ class CPUDataSource(DataSource):
 
     def _get_frequency_data(self):
         """Returns a dictionary: {'overall': value, 'per_core': [val1, val2, ...]}"""
-        # --- PERF OPT: Get data from the central cache ---
-        result = update_manager.get_psutil_data('cpu_freq_percpu')
+        # --- OPTIMIZATION: Get data from the central psutil cache ---
+        result = update_manager.get_cached_data('cpu_freq', lambda: [])
         if not result: return {'overall': None, 'per_core': []}
         
         per_core_freqs = [f.current for f in result]
@@ -301,3 +299,4 @@ class CPUDataSource(DataSource):
             GLib.idle_add(on_metric_changed, metric_combo)
 
         return setup_range_adjustments
+

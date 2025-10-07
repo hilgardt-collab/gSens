@@ -1,6 +1,7 @@
 #data_sources/fan_speed.py
 from data_source import DataSource
 from config_dialog import ConfigOption
+from update_manager import update_manager
 import psutil
 import threading
 import gi
@@ -8,7 +9,6 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk, GLib
 
 from sensor_cache import SENSOR_CACHE
-from update_manager import update_manager
 
 class FanSpeedDataSource(DataSource):
     """Data source for fetching fan RPM using psutil for efficiency."""
@@ -41,8 +41,8 @@ class FanSpeedDataSource(DataSource):
 
     def get_data(self):
         """Fetches the current RPM for the selected fan using an index-based key."""
-        # --- PERF OPT: Get data from the central cache ---
-        fan_data = update_manager.get_psutil_data('sensors_fans')
+        # --- OPTIMIZATION: Get data from the central psutil cache ---
+        fan_data = update_manager.get_cached_data('sensors_fans', lambda: {})
         if not fan_data:
             return {"rpm": None}
 
@@ -160,3 +160,4 @@ class FanSpeedDataSource(DataSource):
             _repopulate_sensor_dropdown(widgets, panel_config, prefix)
 
         return setup_auto_title_logic
+

@@ -7,8 +7,8 @@ import os
 import psutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from gi.repository import GLib
-# --- PERF OPT 1: Import the unified GPU manager ---
 from gpu_managers import gpu_manager
+from utils import safe_subprocess
 
 def _fetch_data_for_panel(panel):
     """
@@ -27,8 +27,8 @@ def _fetch_data_for_panel(panel):
 class UpdateManager:
     """
     A singleton that manages a background worker thread to poll all active
-    data sources. It now uses a thread pool to fetch data concurrently,
-    preventing slow sources from blocking faster ones.
+    data sources. It now uses a unified, thread-safe cache for all data
+    fetched within a single update cycle.
     """
     _instance = None
 
@@ -39,52 +39,40 @@ class UpdateManager:
         return cls._instance
 
     def __init__(self):
-        if self._initialized:
-            return
+        if self._initialized: return
 
-        self._panels = {}  # {panel_id: panel_instance}
-        self._last_update_times = {}  # {panel_id: timestamp}
+        self._panels = {}
+        self._last_update_times = {}
         self._lock = threading.Lock()
         self._worker_thread = None
         self._stop_event = threading.Event()
-        
-        self._executor = ThreadPoolExecutor(max_workers=(os.cpu_count() or 2) + 2, thread_name_prefix='gSens_DataSource_')
+        self._executor = ThreadPoolExecutor(max_workers=(os.cpu_count() or 2) + 4, thread_name_prefix='gSens_DataSource_')
         self._pending_futures = set()
 
+        self._cache_lock = threading.Lock()
+        self._cycle_cache = {}
+
         self._initialized = True
-        self.TICK_INTERVAL = 0.1  # seconds
-        self._sensor_cache = {} # Cache for `sensors` command output
-        self._psutil_cache = {} # Cache for psutil calls
-        self._cache_time = 0
+        self.TICK_INTERVAL = 0.1
 
     def start(self):
-        """Starts the central update worker thread."""
-        if self._worker_thread and self._worker_thread.is_alive():
-            return
-        
-        # Initial call to setup for psutil.cpu_percent
-        psutil.cpu_percent(interval=None, percpu=True)
-        time.sleep(0.1)
-
+        if self._worker_thread and self._worker_thread.is_alive(): return
         self._stop_event.clear()
         self._worker_thread = threading.Thread(target=self._update_loop, daemon=True)
         self._worker_thread.start()
         print("UpdateManager started.")
 
     def stop(self):
-        """Stops the central update worker thread and shuts down the executor."""
         if self._worker_thread and self._worker_thread.is_alive():
             self._stop_event.set()
-            # Cancel any pending futures
-            for future in self._pending_futures:
-                future.cancel()
-            self._executor.shutdown(wait=True, cancel_futures=True)
+            # The executor will be shut down gracefully, allowing pending tasks to complete.
+            # We don't cancel futures here to avoid leaving the app in an inconsistent state.
+            self._executor.shutdown(wait=True, cancel_futures=False)
             self._worker_thread.join(timeout=2.0)
             print("UpdateManager stopped.")
         self._worker_thread = None
 
     def register_panel(self, panel):
-        """Adds a panel to be managed for updates."""
         with self._lock:
             panel_id = panel.config.get("id")
             if panel_id and panel_id not in self._panels:
@@ -92,90 +80,73 @@ class UpdateManager:
                 self._last_update_times[panel_id] = 0
 
     def unregister_panel(self, panel):
-        """Removes a panel from the update manager."""
         with self._lock:
             panel_id = panel.config.get("id")
             if panel_id:
                 self._panels.pop(panel_id, None)
                 self._last_update_times.pop(panel_id, None)
     
-    def get_sensor_adapter_data(self, adapter_name, command):
+    def get_cached_data(self, key, data_fetch_func):
         """
-        Efficiently fetches and caches sensor data for one update cycle.
+        Thread-safe method to get data from the current cycle's cache.
+        If the data is not in the cache, it calls the provided function to fetch it.
         """
-        now = time.monotonic()
-        # Invalidate cache if we are on a new update tick
-        if now - self._cache_time > self.TICK_INTERVAL:
-            self._sensor_cache.clear()
-            self._psutil_cache.clear()
-            self._cache_time = now
-        
-        if adapter_name not in self._sensor_cache:
-            from utils import safe_subprocess
-            self._sensor_cache[adapter_name] = safe_subprocess(command)
+        if key in self._cycle_cache:
+            return self._cycle_cache[key]
+
+        with self._cache_lock:
+            if key in self._cycle_cache:
+                return self._cycle_cache[key]
             
-        return self._sensor_cache[adapter_name]
-
-    def get_psutil_data(self, key):
-        """Provides access to the centrally cached psutil data."""
-        return self._psutil_cache.get(key)
-
-    def _poll_psutil_data(self):
-        """Polls all necessary psutil functions at once."""
-        try:
-            self._psutil_cache['cpu_percent_percpu'] = psutil.cpu_percent(interval=None, percpu=True)
-        except Exception as e: print(f"UpdateManager: Error polling cpu_percent: {e}")
-        
-        try:
-            self._psutil_cache['virtual_memory'] = psutil.virtual_memory()
-        except Exception as e: print(f"UpdateManager: Error polling virtual_memory: {e}")
-        
-        try:
-            if hasattr(psutil, "sensors_temperatures"):
-                self._psutil_cache['sensors_temperatures'] = psutil.sensors_temperatures()
-        except Exception as e: print(f"UpdateManager: Error polling sensors_temperatures: {e}")
-            
-        try:
-            if hasattr(psutil, "sensors_fans"):
-                self._psutil_cache['sensors_fans'] = psutil.sensors_fans()
-        except Exception as e: print(f"UpdateManager: Error polling sensors_fans: {e}")
-        
-        try:
-            self._psutil_cache['cpu_freq_percpu'] = psutil.cpu_freq(percpu=True)
-        except Exception as e: print(f"UpdateManager: Error polling cpu_freq: {e}")
-
+            data = data_fetch_func()
+            self._cycle_cache[key] = data
+            return data
 
     def _update_loop(self):
         """
-        The main loop for the worker thread. Submits tasks to the thread pool
-        and processes results as they complete.
+        Main loop: Caches system-wide data, then dispatches panel-specific
+        update tasks to a thread pool.
         """
+        psutil.cpu_percent(interval=None, percpu=True)
+        
         while not self._stop_event.is_set():
             now = time.monotonic()
             
+            with self._cache_lock:
+                self._cycle_cache.clear()
+                self._cycle_cache['cpu_percent'] = psutil.cpu_percent(interval=None, percpu=True)
+                self._cycle_cache['virtual_memory'] = psutil.virtual_memory()
+                self._cycle_cache['sensors_fans'] = psutil.sensors_fans() if hasattr(psutil, "sensors_fans") else {}
+                self._cycle_cache['temperatures'] = psutil.sensors_temperatures() if hasattr(psutil, "sensors_temperatures") else {}
+                try:
+                    self._cycle_cache['cpu_freq'] = psutil.cpu_freq(percpu=True)
+                except Exception:
+                    self._cycle_cache['cpu_freq'] = None
+
             with self._lock:
-                # --- PERF OPT: Poll all data sources centrally once per tick ---
-                self._poll_psutil_data()
                 gpu_manager.update()
                 
-                # --- SUBMIT TASKS ---
                 panels_to_update = []
                 for panel_id, panel in list(self._panels.items()):
                     try:
                         interval = float(panel.config.get("update_interval_seconds", 2.0))
                         last_update = self._last_update_times.get(panel_id, 0)
-                        
                         if (now - last_update) >= interval:
                             panels_to_update.append(panel)
                             self._last_update_times[panel_id] = now
-                    except (ValueError, TypeError, AttributeError):
-                        continue
+                    except (ValueError, TypeError, AttributeError): continue
                 
+                # --- FIX: Handle RuntimeError on shutdown ---
                 for panel in panels_to_update:
-                    future = self._executor.submit(_fetch_data_for_panel, panel)
-                    self._pending_futures.add(future)
+                    try:
+                        future = self._executor.submit(_fetch_data_for_panel, panel)
+                        self._pending_futures.add(future)
+                    except RuntimeError:
+                        # This occurs if shutdown begins while we are submitting tasks.
+                        # It's safe to break and let the thread exit gracefully.
+                        print("UpdateManager is shutting down; no new tasks will be submitted.")
+                        break
 
-            # --- PROCESS COMPLETED TASKS ---
             if self._pending_futures:
                 done, self._pending_futures = as_completed(self._pending_futures), set()
                 for future in done:

@@ -2,16 +2,18 @@
 from data_source import DataSource
 from config_dialog import ConfigOption
 from update_manager import update_manager
+import psutil
 
 class MemoryUsageDataSource(DataSource):
     """Data source for fetching virtual memory statistics."""
     def get_data(self):
-        try: 
-            # --- PERF OPT: Get data from the central cache ---
-            mem = update_manager.get_psutil_data('virtual_memory')
-            if mem is None:
-                return {"error": "Could not retrieve memory data"}
-            return {"percent":mem.percent, "used_gb":mem.used/(1024**3), "total_gb":mem.total/(1024**3)}
+        try:
+            # --- OPTIMIZATION: Get data from the central psutil cache ---
+            mem = update_manager.get_cached_data('virtual_memory', lambda: None)
+            if mem:
+                return {"percent":mem.percent, "used_gb":mem.used/(1024**3), "total_gb":mem.total/(1024**3)}
+            else:
+                return {"error": "Could not retrieve memory data from cache."}
         except Exception as e: 
             return {"error": str(e)}
         
@@ -39,7 +41,6 @@ class MemoryUsageDataSource(DataSource):
         return "" # Return empty string if style is 'none'
 
     def get_tooltip_string(self, data):
-        # BUG FIX: Add a check to handle None data gracefully
         if data is None or not isinstance(data, dict) or data.get("error"): 
             return f"Memory\nError: {data.get('error', 'N/A') if isinstance(data, dict) else 'No data'}"
         return f"Memory Usage\nUsed: {data['used_gb']:.1f} GB ({data['percent']:.1f}%)\nTotal: {data['total_gb']:.1f} GB"
@@ -74,3 +75,4 @@ class MemoryUsageDataSource(DataSource):
 
     @staticmethod
     def get_alarm_unit(): return "%"
+
