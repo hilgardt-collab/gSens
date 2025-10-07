@@ -85,7 +85,6 @@ class GridLayoutManager(Gtk.Fixed):
         grid_layout_config.setdefault("selected_panel_border_color", "rgba(0, 120, 212, 0.9)")
         grid_layout_config.setdefault("launch_fullscreen", "False")
         grid_layout_config.setdefault("fullscreen_display_index", "-1") 
-        # --- NEW: Generalize auto-scroll config ---
         grid_layout_config.setdefault("auto_scroll_on_overflow", "False")
         grid_layout_config.setdefault("auto_scroll_interval_seconds", "5.0")
         grid_layout_config.setdefault("grid_bg_type", "solid")
@@ -112,7 +111,6 @@ class GridLayoutManager(Gtk.Fixed):
     def set_scroll_adjustments(self, hadjustment, vadjustment):
         self._h_adjustment = hadjustment
         self._v_adjustment = vadjustment
-        # --- NEW: Check scrolling state when adjustments are first set ---
         if hadjustment:
             hadjustment.connect("changed", self.check_and_update_scrolling_state)
             hadjustment.connect("value-changed", self.check_and_update_scrolling_state)
@@ -170,7 +168,6 @@ class GridLayoutManager(Gtk.Fixed):
             panel = self.create_panel_widget(cfg)
             if panel: 
                 self.add_panel(panel, cfg)
-        # --- NEW: Check scrolling state after all panels are loaded ---
         GLib.idle_add(self.check_and_update_scrolling_state)
 
     def clear_all_panels(self):
@@ -464,7 +461,6 @@ class GridLayoutManager(Gtk.Fixed):
         self.context_menu.append_section(None, Gio.Menu.new()) 
         self.context_menu.append("Configure Layout & Appearance...", "grid.configure_layout_and_appearance")
         
-        # Store the item so we can change its label later
         self.fullscreen_menu_item = Gio.MenuItem.new("Enter Fullscreen", "win.toggle_fullscreen")
         self.context_menu.append_item(self.fullscreen_menu_item)
 
@@ -495,10 +491,8 @@ class GridLayoutManager(Gtk.Fixed):
             main_window = self.get_ancestor(Gtk.ApplicationWindow)
             if main_window:
                 label = "Exit Fullscreen" if main_window.is_fullscreen() else "Enter Fullscreen"
-                # The attribute is on the Gio.MenuItem, not the popover itself
                 self.fullscreen_menu_item.set_label(label)
             
-            # Use a Gdk.Rectangle to position the popover at the cursor
             rect = Gdk.Rectangle()
             rect.x = x
             rect.y = y
@@ -552,7 +546,6 @@ class GridLayoutManager(Gtk.Fixed):
                 ConfigOption("fullscreen_display_index", "dropdown", "Fullscreen on Display:", "-1", 
                              options_dict=monitor_options, 
                              tooltip="Select which monitor to use for fullscreen mode."),
-                # --- NEW: General auto-scroll option ---
                 ConfigOption("auto_scroll_on_overflow", "bool", "Enable Auto-Scroll on Overflow:", "False",
                              tooltip="Automatically scroll horizontally if content is wider than the window."),
                 ConfigOption("auto_scroll_interval_seconds", "scale", "Auto-Scroll Interval (sec):", "5.0", 1.0, 30.0, 1.0, 1),
@@ -578,7 +571,6 @@ class GridLayoutManager(Gtk.Fixed):
                 grid_config_section[key] = str(value)
             
             self._load_and_apply_grid_config(final_conf)
-            # --- NEW: Check scrolling state after applying changes ---
             self.check_and_update_scrolling_state()
 
         cancel = dialog.add_non_modal_button("_Cancel", style_class="destructive-action")
@@ -661,11 +653,9 @@ class GridLayoutManager(Gtk.Fixed):
     def _recalculate_container_size(self):
         """Resizes the Gtk.Fixed container to tightly fit all panels."""
         bbox = self._get_content_bounding_box()
-        # Add a little padding to ensure scrollbars appear if needed
         required_width = bbox['width'] + CELL_SIZE
         required_height = bbox['height'] + CELL_SIZE
         self.set_size_request(required_width, required_height)
-        # --- NEW: Check scrolling state after recalculating size ---
         GLib.idle_add(self.check_and_update_scrolling_state)
     
     def remove_panel_widget_by_id(self, panel_id_to_remove):
@@ -825,18 +815,15 @@ class GridLayoutManager(Gtk.Fixed):
                 return True
         return False
         
-    # --- Auto-Scroll ---
-
     def check_and_update_scrolling_state(self, *args):
         """
-        NEW: Central method to decide if auto-scrolling should be active.
-        This is called on resize, fullscreen change, and config change.
+        Central method to decide if auto-scrolling should be active.
         """
         grid_config = config_manager.config["GridLayout"]
         is_enabled = grid_config.get("auto_scroll_on_overflow", "False").lower() == 'true'
 
-        if not is_enabled or not self._h_adjustment:
-            self.stop_auto_scrolling()
+        if not self._h_adjustment:
+            self.stop_auto_scrolling(reset_position=False)
             return
 
         content_width = self._get_content_bounding_box()['width']
@@ -844,22 +831,25 @@ class GridLayoutManager(Gtk.Fixed):
         
         is_overflowing = content_width > viewport_width
 
+        if not is_enabled:
+            self.stop_auto_scrolling(reset_position=False)
+            return
+
         if is_overflowing and self._scroll_timer_id is None:
             self._start_auto_scrolling()
         elif not is_overflowing and self._scroll_timer_id is not None:
-            self.stop_auto_scrolling()
+            self.stop_auto_scrolling(reset_position=True)
 
     def _start_auto_scrolling(self):
         """Starts the timer for auto-scrolling."""
-        self.stop_auto_scrolling() # Ensure no previous timer is running
+        self.stop_auto_scrolling(reset_position=False) 
         
         grid_config = config_manager.config["GridLayout"]
         interval_sec = float(grid_config.get("auto_scroll_interval_seconds", "5.0"))
         self._current_scroll_page = 0
-        # Wait for the first interval before scrolling
         self._scroll_timer_id = GLib.timeout_add_seconds(int(interval_sec), self._auto_scroll_callback)
 
-    def stop_auto_scrolling(self):
+    def stop_auto_scrolling(self, reset_position=False):
         """Stops the auto-scroll timer and any ongoing scroll animation."""
         if self._scroll_timer_id is not None:
             GLib.source_remove(self._scroll_timer_id)
@@ -869,8 +859,7 @@ class GridLayoutManager(Gtk.Fixed):
             GLib.source_remove(self._scroll_animation_id)
             self._scroll_animation_id = None
         
-        # Reset to the first page when scrolling stops
-        if self._h_adjustment and self._h_adjustment.get_value() != 0:
+        if reset_position and self._h_adjustment and self._h_adjustment.get_value() != 0:
             self._animate_scroll_to(0)
 
     def _auto_scroll_callback(self):
@@ -882,16 +871,14 @@ class GridLayoutManager(Gtk.Fixed):
         total_width = self._get_content_bounding_box()['width']
         page_width = self._h_adjustment.get_page_size()
         
-        # Re-check for overflow in case the window was resized
         if total_width <= page_width:
-            self.stop_auto_scrolling()
+            self.stop_auto_scrolling(reset_position=True)
             return GLib.SOURCE_REMOVE
 
         num_pages = math.ceil(total_width / page_width)
         self._current_scroll_page = (self._current_scroll_page + 1) % num_pages
         
         target_x = self._current_scroll_page * page_width
-        # Ensure the final scroll doesn't go past the maximum
         target_x = min(target_x, self._h_adjustment.get_upper() - page_width)
         
         self._animate_scroll_to(target_x)
