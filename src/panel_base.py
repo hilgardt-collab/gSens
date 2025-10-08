@@ -7,6 +7,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Pango", "1.0")
 from gi.repository import Gtk, Gdk, GLib, Pango
 from config_manager import config_manager
+from style_manager import style_manager # Import the new style manager
 from config_dialog import ConfigOption, build_ui_from_model, get_config_from_widgets
 from ui_helpers import ScrollingLabel, CustomDialog
 
@@ -60,6 +61,9 @@ class BasePanel(Gtk.Frame, BasePanelABC, metaclass=BasePanelMeta):
         self.config["grid_x"] = int(self.config.get("grid_x", "0"))
         self.config["grid_y"] = int(self.config.get("grid_y", "0"))
         self.config["title_text"] = str(self.config.get("title_text", self.original_title))
+        
+        self.config.setdefault("enable_collision", "True")
+        self.config.setdefault("z_order", "0")
         
         show_title_val = self.config.get("show_title", True)
         self.config["show_title"] = str(show_title_val).lower() == 'true' if isinstance(show_title_val, str) else bool(show_title_val)
@@ -274,6 +278,20 @@ class BasePanel(Gtk.Frame, BasePanelABC, metaclass=BasePanelMeta):
         menu_box.append(config_btn)
         
         menu_box.append(Gtk.Separator(margin_top=6, margin_bottom=6))
+
+        copy_style_btn = Gtk.Button(label="Copy Style"); copy_style_btn.connect("clicked", self.on_copy_style_clicked)
+        menu_box.append(copy_style_btn)
+        paste_style_btn = Gtk.Button(label="Paste Style"); paste_style_btn.connect("clicked", self.on_paste_style_clicked)
+        menu_box.append(paste_style_btn)
+
+        menu_box.append(Gtk.Separator(margin_top=6, margin_bottom=6))
+        
+        load_style_btn = Gtk.Button(label="Load Style from File..."); load_style_btn.connect("clicked", self.on_load_style_clicked)
+        menu_box.append(load_style_btn)
+        save_style_btn = Gtk.Button(label="Save Style to File..."); save_style_btn.connect("clicked", self.on_save_style_as_clicked)
+        menu_box.append(save_style_btn)
+
+        menu_box.append(Gtk.Separator(margin_top=6, margin_bottom=6))
         
         load_defaults_btn = Gtk.Button(label="Load Default Style")
         load_defaults_btn.connect("clicked", self.on_load_defaults_clicked)
@@ -285,9 +303,19 @@ class BasePanel(Gtk.Frame, BasePanelABC, metaclass=BasePanelMeta):
         
         menu_box.append(Gtk.Separator(margin_top=6, margin_bottom=6))
         
-        close_btn = Gtk.Button(label="Delete"); close_btn.add_css_class("destructive-action")
-        close_btn.connect("clicked", self.on_close_clicked)
-        menu_box.append(close_btn)
+        bring_forward_btn = Gtk.Button(label="Bring Forward")
+        bring_forward_btn.connect("clicked", self.on_bring_forward_clicked)
+        menu_box.append(bring_forward_btn)
+        
+        send_backward_btn = Gtk.Button(label="Send Backward")
+        send_backward_btn.connect("clicked", self.on_send_backward_clicked)
+        menu_box.append(send_backward_btn)
+        
+        menu_box.append(Gtk.Separator(margin_top=6, margin_bottom=6))
+        
+        delete_btn = Gtk.Button(label="Delete"); delete_btn.add_css_class("destructive-action")
+        delete_btn.connect("clicked", self.on_delete_clicked)
+        menu_box.append(delete_btn)
         
         self.popover.set_parent(self) 
 
@@ -312,7 +340,6 @@ class BasePanel(Gtk.Frame, BasePanelABC, metaclass=BasePanelMeta):
             return 
         
         if button == Gdk.BUTTON_SECONDARY and not is_multi_selecting_or_dragging:
-             # --- FIX: Create a rectangle at the click position to anchor the popover ---
              rect = Gdk.Rectangle()
              rect.x = x
              rect.y = y
@@ -338,31 +365,114 @@ class BasePanel(Gtk.Frame, BasePanelABC, metaclass=BasePanelMeta):
     def on_configure_clicked(self, button):
         self.popover.popdown(); self.configure()
 
-    def on_load_defaults_clicked(self, button):
-        self.popover.popdown()
-        print(f"DEBUG: BasePanel on_load_defaults_clicked for {self.config.get('id')}")
-
-    def on_save_defaults_clicked(self, button):
-        self.popover.popdown()
-        print(f"DEBUG: BasePanel on_save_defaults_clicked for {self.config.get('id')}")
-
-    def on_close_clicked(self, button):
+    def on_delete_clicked(self, button):
         self.popover.popdown()
         parent_grid = self.get_parent()
         
-        # Ensure the panel that was right-clicked is part of the selection
         panel_id = self.config.get("id")
         if panel_id and parent_grid and hasattr(parent_grid, 'selected_panel_ids'):
             if panel_id not in parent_grid.selected_panel_ids:
                  parent_grid.selected_panel_ids = {panel_id}
                  parent_grid._update_selected_panels_visuals()
 
-        # Call the grid manager's central deletion method
         if parent_grid and hasattr(parent_grid, 'delete_selected_panels'):
             parent_grid.delete_selected_panels()
         else:
             print(f"Error: Could not request removal. Parent grid or method not found.")
 
+    def on_bring_forward_clicked(self, button):
+        self.popover.popdown()
+        self._change_z_order(1)
+
+    def on_send_backward_clicked(self, button):
+        self.popover.popdown()
+        self._change_z_order(-1)
+
+    def _change_z_order(self, delta):
+        current_z = int(self.config.get("z_order", 0))
+        self.config["z_order"] = str(current_z + delta)
+        config_manager.update_panel_config(self.config["id"], self.config)
+        
+        # Notify the grid manager to re-sort and re-draw all panels
+        parent_grid = self.get_parent()
+        if parent_grid and hasattr(parent_grid, '_sort_and_reorder_panels'):
+            parent_grid._sort_and_reorder_panels()
+
+    # --- Style Management Handlers ---
+
+    def on_copy_style_clicked(self, button):
+        self.popover.popdown()
+        style_manager.copy_style(self)
+
+    def on_paste_style_clicked(self, button):
+        self.popover.popdown()
+        style_manager.paste_style(self, config_manager)
+
+    def on_save_style_as_clicked(self, button):
+        self.popover.popdown()
+        chooser = Gtk.FileChooserNative.new("Save Style", self.get_ancestor(Gtk.Window), Gtk.FileChooserAction.SAVE, "_Save", "_Cancel")
+        
+        file_filter = Gtk.FileFilter()
+        file_filter.set_name("gSens Style Files (*.gss)")
+        file_filter.add_pattern("*.gss")
+        chooser.add_filter(file_filter)
+        
+        chooser.set_current_name(f"{self.config.get('displayer_type', 'style')}.gss")
+        
+        def on_response(dialog, response):
+            if response == Gtk.ResponseType.ACCEPT:
+                style_manager.save_style_to_file(dialog.get_file().get_path(), self)
+            dialog.destroy()
+        chooser.connect("response", on_response)
+        chooser.show()
+
+    def on_load_style_clicked(self, button):
+        self.popover.popdown()
+        chooser = Gtk.FileChooserNative.new("Load Style", self.get_ancestor(Gtk.Window), Gtk.FileChooserAction.OPEN, "_Open", "_Cancel")
+
+        file_filter = Gtk.FileFilter()
+        file_filter.set_name("gSens Style Files (*.gss)")
+        file_filter.add_pattern("*.gss")
+        chooser.add_filter(file_filter)
+        
+        def on_response(dialog, response):
+            if response == Gtk.ResponseType.ACCEPT:
+                style_manager.load_style_from_file(dialog.get_file().get_path(), self, config_manager)
+            dialog.destroy()
+        chooser.connect("response", on_response)
+        chooser.show()
+
+    # --- Default Theme Management Handlers (Moved from DataPanel) ---
+
+    def on_load_defaults_clicked(self, button):
+        """Loads defaults from theme and applies them."""
+        self.popover.popdown()
+        displayer_key = self.config.get('displayer_type')
+        if not displayer_key: return
+        
+        defaults = config_manager.get_displayer_defaults(displayer_key)
+        if not defaults: return
+            
+        self.config.update(defaults)
+        self.apply_all_configurations()
+        config_manager.update_panel_config(self.config["id"], self.config)
+        print(f"Loaded default style for '{displayer_key}'.")
+
+    def on_save_defaults_clicked(self, button):
+        """Saves the current panel's style as the new default for its displayer type."""
+        self.popover.popdown()
+        displayer_key = self.config.get('displayer_type')
+        if not displayer_key:
+            print("Warning: Cannot save defaults, no displayer type found.")
+            return
+
+        if self.data_displayer:
+            if config_manager.save_displayer_defaults(displayer_key, self.config, self.data_displayer.__class__):
+                print(f"Saved current style as the default for '{displayer_key}'.")
+            else:
+                print(f"Error: Could not save default style for '{displayer_key}'.")
+
+    # --- End of Handlers ---
 
     def close_panel(self, widget=None):
         if self._config_dialog:
@@ -414,3 +524,4 @@ class BasePanel(Gtk.Frame, BasePanelABC, metaclass=BasePanelMeta):
 
     def configure(self, *args):
         pass
+

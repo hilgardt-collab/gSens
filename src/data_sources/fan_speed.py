@@ -48,7 +48,14 @@ class FanSpeedDataSource(DataSource):
 
         selected_key = self.config.get("selected_fan_key", "")
         if '::' not in selected_key:
-            return {"rpm": None}
+            # If no key is selected, try to select the first available one
+            cached_fans = SENSOR_CACHE.get('fan_speed', {})
+            first_valid_key = next((k for k in cached_fans if k), None)
+            if first_valid_key:
+                selected_key = first_valid_key
+                self.config["selected_fan_key"] = selected_key
+            else:
+                return {"rpm": None}
             
         try:
             chip, index_str = selected_key.split('::', 1)
@@ -134,30 +141,9 @@ class FanSpeedDataSource(DataSource):
             except KeyError as e:
                 print(f"FanSpeedDataSource _repopulate_sensor_dropdown KeyError: {e}")
 
-        def setup_auto_title_logic(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
-            is_combo_child = prefix is not None
-            key_prefix = f"{prefix}opt_" if is_combo_child else ""
-            
-            fan_combo_key = f"{key_prefix}selected_fan_key"
-            fan_combo = widgets.get(fan_combo_key)
-            if not fan_combo: return
-                
-            caption_key = f"{prefix}caption" if is_combo_child else "title_text"
-            title_entry = widgets.get(caption_key)
-            if title_entry:
-                def on_fan_changed(combo):
-                    display_name = combo.get_active_text()
-                    if not title_entry.get_text() or title_entry.get_text() == "Fan Speed":
-                        if display_name and "No fans" not in display_name and "not supported" not in display_name:
-                            simple_name = display_name.split('/')[-1].strip()
-                            title_entry.set_text(f"Fan: {simple_name}")
-                        else:
-                            title_entry.set_text("Fan Speed")
-                
-                fan_combo.connect("changed", on_fan_changed)
-                GLib.idle_add(on_fan_changed, fan_combo)
-
+        def setup_dynamic_title_logic(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
+            # This function now only handles repopulating the dropdown.
+            # The title logic is centralized in data_panel.py.
             _repopulate_sensor_dropdown(widgets, panel_config, prefix)
 
-        return setup_auto_title_logic
-
+        return setup_dynamic_title_logic

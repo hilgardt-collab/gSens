@@ -92,6 +92,8 @@ class TextDisplayer(DataDisplayer):
         align_opts = {"Left": "left", "Center": "center", "Right": "right"}
         model["Layout"] = [
             ConfigOption("text_line_count", "spinner", "Number of Lines:", "2", 1, 10, 1, 0),
+            ConfigOption("text_horizontal_align", "dropdown", "Horizontal Align:", "center", 
+                         options_dict={"Left": "start", "Center": "center", "Right": "end"}),
             ConfigOption("text_vertical_align", "dropdown", "Vertical Align:", "center", 
                          options_dict={"Top": "start", "Center": "center", "Bottom": "end"}),
             ConfigOption("text_spacing", "spinner", "Spacing (px):", 4, 0, 50, 1, 0)
@@ -179,6 +181,7 @@ class TextDisplayer(DataDisplayer):
         
         layouts_to_draw = []
         total_text_height = 0
+        max_text_width = 0
         
         for i in range(min(line_count, len(self._text_lines))):
             layout = self._layout_cache[i]
@@ -191,52 +194,49 @@ class TextDisplayer(DataDisplayer):
             layout.set_font_description(Pango.FontDescription.from_string(font_str))
             layout.set_text(self._text_lines[i], -1)
             layouts_to_draw.append(layout)
-            total_text_height += layout.get_pixel_extents()[1].height
+            
+            text_dims = layout.get_pixel_extents()[1]
+            total_text_height += text_dims.height
+            max_text_width = max(max_text_width, text_dims.width)
         
         if len(layouts_to_draw) > 1:
             total_text_height += (len(layouts_to_draw) - 1) * spacing
 
+        # --- Calculate Block Position ---
         v_align = self.config.get("text_vertical_align", "center")
-        if v_align == "start":
-            current_y = 0
-        elif v_align == "end":
-            current_y = height - total_text_height
-        else: # center
-            current_y = (height - total_text_height) / 2
+        if v_align == "start": current_y = 0
+        elif v_align == "end": current_y = height - total_text_height
+        else: current_y = (height - total_text_height) / 2 # center
 
+        h_align_block = self.config.get("text_horizontal_align", "center")
+        if h_align_block == "start": block_x = 0
+        elif h_align_block == "end": block_x = width - max_text_width
+        else: block_x = (width - max_text_width) / 2 # center
+        
+        # --- Draw each line relative to the block ---
         for i, layout in enumerate(layouts_to_draw):
             line_num = i + 1
             
             ctx.save()
 
-            rgba = Gdk.RGBA()
-            color_str = self.config.get(f"line{line_num}_color", "rgba(220,220,220,1)")
-            rgba.parse(color_str)
+            rgba = Gdk.RGBA(); rgba.parse(self.config.get(f"line{line_num}_color", "rgba(220,220,220,1)"))
             ctx.set_source_rgba(rgba.red, rgba.green, rgba.blue, rgba.alpha)
 
-            align_str = self.config.get(f"line{line_num}_align", "center")
-            text_width = layout.get_pixel_extents()[1].width
-            text_height = layout.get_pixel_extents()[1].height
+            align_str_line = self.config.get(f"line{line_num}_align", "center")
+            text_width, text_height = layout.get_pixel_extents()[1].width, layout.get_pixel_extents()[1].height
             
-            if align_str == "left":
-                current_x = 0
-            elif align_str == "right":
-                current_x = width - text_width
-            else: # center
-                current_x = (width - text_width) / 2
+            line_offset_x = 0
+            if align_str_line == "right": line_offset_x = max_text_width - text_width
+            elif align_str_line == "center": line_offset_x = (max_text_width - text_width) / 2
+            
+            current_x = block_x + line_offset_x
             
             slant_deg = float(self.config.get(f"line{line_num}_slant", "0"))
             rotation_deg = float(self.config.get(f"line{line_num}_rotation", "0"))
 
             ctx.translate(current_x + text_width / 2, current_y + text_height / 2)
-            
-            if rotation_deg != 0:
-                ctx.rotate(math.radians(rotation_deg))
-            
-            if slant_deg != 0:
-                slant_rad = math.radians(slant_deg)
-                matrix = cairo.Matrix(1, 0, math.tan(slant_rad), 1, 0, 0)
-                ctx.transform(matrix)
+            if rotation_deg != 0: ctx.rotate(math.radians(rotation_deg))
+            if slant_deg != 0: ctx.transform(cairo.Matrix(1, 0, math.tan(math.radians(slant_deg)), 1, 0, 0))
 
             ctx.move_to(-text_width / 2, -text_height / 2)
             PangoCairo.show_layout(ctx, layout)
@@ -244,4 +244,3 @@ class TextDisplayer(DataDisplayer):
             ctx.restore()
             
             current_y += text_height + spacing
-

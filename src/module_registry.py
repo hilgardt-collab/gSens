@@ -52,6 +52,7 @@ def discover_and_load_modules():
         {'key': 'memory_usage', 'class_name': 'MemoryUsageDataSource', 'name': 'Memory Usage', "displayers": ["text", "graph", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (16, 16)},
         {'key': 'network', 'class_name': 'NetworkDataSource', 'name': 'Network Activity', "displayers": ["text", "graph", "level_bar", "arc_gauge", "speedometer"], "default_size": (16, 10)},
         {'key': 'processes', 'class_name': 'ProcessDataSource', 'name': 'Process Monitor', "displayers": ["text", "table"], "default_size": (24, 16)},
+        {'key': 'static', 'class_name': 'StaticDataSource', 'name': 'Static Content', "displayers": ["static"], "default_size": (16, 8)},
         {'key': 'systemd', 'class_name': 'SystemdDataSource', 'name': 'Systemd Services', "displayers": ["text"], "default_size": (24, 8)},
         {'key': 'system_temp', 'class_name': 'SystemTempDataSource', 'name': 'System Temperature', "displayers": ["graph", "text", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (16, 16)},
     ], key=lambda x: x['name'])
@@ -68,6 +69,7 @@ def discover_and_load_modules():
         {'key': 'indicator', 'class_name': 'IndicatorDisplayer', 'name': 'Indicator'},
         {'key': 'level_bar', 'class_name': 'LevelBarDisplayer', 'name': 'Level Bar'},
         {'key': 'speedometer', 'class_name': 'SpeedometerDisplayer', 'name': 'Speedometer'},
+        {'key': 'static', 'class_name': 'StaticDisplayer', 'name': 'Static Image/Text'},
         {'key': 'text', 'class_name': 'TextDisplayer', 'name': 'Text'},
         {'key': 'table', 'class_name': 'TableDisplayer', 'name': 'Table'},
     ], key=lambda x: x['name'])

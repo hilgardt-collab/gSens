@@ -43,9 +43,12 @@ class DiskUsageDataSource(DataSource):
         return f"Mount: {data['path']}\nUsed: {data['used_gb']:.1f} GB ({data['percent']:.1f}%)\nFree: {data['free_gb']:.1f} GB\nTotal: {data['total_gb']:.1f} GB"
 
     def get_primary_label_string(self, data):
-        """Returns the disk mount path for the primary label."""
+        """Returns the disk mount path formatted according to user config."""
         if isinstance(data, dict):
-            return data.get('path', '')
+            mount_point = data.get('path', '')
+            # Use the format string from config, default if not present
+            title_format = self.config.get("disk_title_format", "Disk: {mount_point}")
+            return title_format.replace("{mount_point}", mount_point)
         return ""
 
     @staticmethod
@@ -71,8 +74,6 @@ class DiskUsageDataSource(DataSource):
         def add_disk_chooser(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
             opt_prefix = f"{prefix}opt_" if prefix else ""
             mount_path_key = f"{opt_prefix}mount_path"
-            title_format_key = f"{opt_prefix}disk_title_format"
-            caption_key = f"{prefix}caption" if prefix else "title_text"
 
             mount_path_entry = widgets.get(mount_path_key)
             if not mount_path_entry: return
@@ -96,26 +97,6 @@ class DiskUsageDataSource(DataSource):
             choose_button = Gtk.Button(label="Choose…")
             choose_button.connect("clicked", self._show_mount_chooser, dialog, path_label, mount_path_entry, panel_config, mount_path_key)
             custom_row.append(choose_button)
-            
-            def _update_caption():
-                try:
-                    title_format_entry = widgets.get(title_format_key)
-                    caption_entry = widgets.get(caption_key)
-                    if not title_format_entry or not caption_entry: return
-
-                    format_str = title_format_entry.get_text()
-                    current_path = mount_path_entry.get_text()
-                    
-                    new_caption = format_str.replace("{mount_point}", current_path)
-                    caption_entry.set_text(new_caption)
-                except KeyError:
-                    pass
-            
-            title_format_widget = widgets.get(title_format_key)
-            if title_format_widget:
-                title_format_widget.connect("changed", lambda w: _update_caption())
-            
-            GLib.idle_add(_update_caption)
 
         return add_disk_chooser
 
@@ -199,6 +180,8 @@ class DiskUsageDataSource(DataSource):
                     
                     panel_config[mount_path_key] = selected_path
                     
+                    # Apply changes to save the new mount path, which will trigger
+                    # a panel update and allow the new title logic to take effect.
                     if hasattr(parent_dlg, 'apply_button') and parent_dlg.apply_button:
                         parent_dlg.apply_button.emit("clicked")
                     break

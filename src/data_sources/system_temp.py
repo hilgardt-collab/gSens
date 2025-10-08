@@ -46,25 +46,31 @@ class SystemTempDataSource(DataSource):
         sensor_key = self.config.get("selected_sensor_key", "")
         self._available_sensors_cache = SENSOR_CACHE.get('system_temp', {})
         
-        if sensor_key and sensor_key in self._available_sensors_cache:
-            sensor_info = self._available_sensors_cache[sensor_key]
-            adapter, input_name = sensor_info.get("adapter"), sensor_info.get("input_raw")
-            if adapter and input_name:
-                try:
-                    # --- FIX: Use the new unified, on-demand caching method ---
-                    # The key is the adapter name, and the function is the subprocess call to make if the key isn't in the cache yet.
-                    command_to_run = ["sensors", "-u", adapter]
-                    sensors_output = update_manager.get_cached_data(
-                        key=adapter, 
-                        data_fetch_func=lambda: safe_subprocess(command_to_run)
-                    )
-                    
-                    if sensors_output and sensors_output != "N/A":
-                        for line in sensors_output.splitlines():
-                            if line.strip().startswith(input_name + ":"):
-                                temp_val_c = float(line.split(":")[1].strip()); break
-                except Exception as e:
-                    print(f"SystemTempDataSource: Error fetching temp for {sensor_info.get('display_name')}: {e}")
+        if not sensor_key or sensor_key not in self._available_sensors_cache:
+            # If no key is selected, try to select the first available one
+            first_valid_key = next((k for k in self._available_sensors_cache if k), None)
+            if first_valid_key:
+                sensor_key = first_valid_key
+                self.config["selected_sensor_key"] = sensor_key
+            else:
+                 return None
+
+        sensor_info = self._available_sensors_cache[sensor_key]
+        adapter, input_name = sensor_info.get("adapter"), sensor_info.get("input_raw")
+        if adapter and input_name:
+            try:
+                command_to_run = ["sensors", "-u", adapter]
+                sensors_output = update_manager.get_cached_data(
+                    key=adapter, 
+                    data_fetch_func=lambda: safe_subprocess(command_to_run)
+                )
+                
+                if sensors_output and sensors_output != "N/A":
+                    for line in sensors_output.splitlines():
+                        if line.strip().startswith(input_name + ":"):
+                            temp_val_c = float(line.split(":")[1].strip()); break
+            except Exception as e:
+                print(f"SystemTempDataSource: Error fetching temp for {sensor_info.get('display_name')}: {e}")
         return temp_val_c
 
     def get_display_string(self, value):
@@ -108,7 +114,7 @@ class SystemTempDataSource(DataSource):
         return model
 
     def get_configure_callback(self):
-        """Provides a callback to dynamically update panel title and populate sensors."""
+        """Provides a callback to dynamically populate the sensor dropdown."""
 
         def _repopulate_sensor_dropdown(widgets, panel_config, prefix):
             """Helper to fill the sensor dropdown once data is available."""
@@ -138,28 +144,7 @@ class SystemTempDataSource(DataSource):
             except KeyError as e:
                 print(f"SystemTempDataSource _repopulate_sensor_dropdown KeyError: {e}")
 
-        def setup_auto_title_logic(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
-            is_combo_child = prefix is not None
-            key_prefix = f"{prefix}opt_" if is_combo_child else ""
-            
-            sensor_combo_key = f"{key_prefix}selected_sensor_key"
-            sensor_combo = widgets.get(sensor_combo_key)
-            if not sensor_combo: return
-
-            caption_key = f"{prefix}caption" if is_combo_child else "title_text"
-            title_entry = widgets.get(caption_key)
-            if title_entry:
-                def on_sensor_changed(combo):
-                    display_name = combo.get_active_text()
-                    if not title_entry.get_text() or title_entry.get_text() == "System Temperature":
-                        if display_name and "No sensors" not in display_name:
-                            title_entry.set_text(display_name)
-                        else:
-                            title_entry.set_text("System Temperature")
-                
-                sensor_combo.connect("changed", on_sensor_changed)
-                GLib.idle_add(on_sensor_changed, sensor_combo)
-
+        def setup_dropdown_populator(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
             _repopulate_sensor_dropdown(widgets, panel_config, prefix)
 
-        return setup_auto_title_logic
+        return setup_dropdown_populator

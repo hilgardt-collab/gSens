@@ -16,7 +16,7 @@ class ConfigOption:
                  options_dict=None, tooltip=None, file_filters=None,
                  dynamic_group=None, dynamic_show_on=None):
         self.key = key
-        # Valid types: "string", "bool", "color", "font", "scale", "spinner", "dropdown", "file", "timezone_selector"
+        # Valid types: "string", "multiline", "bool", "color", "font", "scale", "spinner", "dropdown", "file", "timezone_selector"
         self.type = option_type 
         self.label = label
         self.default = default
@@ -101,7 +101,6 @@ def build_ui_from_model(parent_box, config, model, widgets=None):
                 else:
                     stack.set_visible_child_name("none")
 
-            # --- FIX: Use the correct signal for the widget type ---
             if isinstance(controller_widget, Gtk.Switch):
                 controller_widget.connect("notify::active", on_controller_changed)
             else: # Assumes Gtk.ComboBoxText or similar
@@ -119,18 +118,37 @@ def _build_option_widgets(parent_box, config, options, widgets):
     """
     for option in options:
         widget = None
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10, margin_bottom=4)
         
-        if option.type == "scale":
+        if option.type == "multiline":
+             container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, margin_bottom=4)
+             label_widget = Gtk.Label(label=option.label, xalign=0)
+             container.append(label_widget)
+             parent_box.append(container)
+        elif option.type == "scale":
             container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, margin_bottom=4)
             label_widget = Gtk.Label(label=option.label, xalign=0)
             container.append(label_widget)
         else:
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10, margin_bottom=4)
             label_widget = Gtk.Label(label=option.label, xalign=0)
             row.append(label_widget)
 
         if option.type == "string":
             widget = Gtk.Entry(text=config.get(option.key, option.default), hexpand=True)
+        
+        elif option.type == "multiline":
+            widget = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR)
+            widget.set_accepts_tab(False)
+            buffer = Gtk.TextBuffer()
+            buffer.set_text(config.get(option.key, option.default))
+            widget.set_buffer(buffer)
+            
+            scrolled_window = Gtk.ScrolledWindow()
+            scrolled_window.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+            scrolled_window.set_child(widget)
+            scrolled_window.set_min_content_height(100)
+            container.append(scrolled_window)
+
         elif option.type == "bool":
             widget = Gtk.Switch(active=str(config.get(option.key, str(option.default))).lower() == 'true', halign=Gtk.Align.END)
         elif option.type == "color":
@@ -278,10 +296,10 @@ def _build_option_widgets(parent_box, config, options, widgets):
             if option.type == "scale":
                 container.append(widget)
                 parent_box.append(container)
-            elif option.type not in ["file", "timezone_selector", "font", "color"]:
+            elif option.type not in ["file", "timezone_selector", "font", "color", "multiline"]:
                 row.append(widget)
 
-            if option.type != "scale":
+            if option.type not in ["scale", "multiline"]:
                 parent_box.append(row)
             
             if option.key in widgets:
@@ -325,6 +343,13 @@ def get_config_from_widgets(widgets, models_list):
 
         if option_def.type in ["string", "file", "timezone_selector"]:
             new_config[key] = widget.get_text()
+        
+        elif option_def.type == "multiline":
+            buffer = widget.get_buffer()
+            start_iter = buffer.get_start_iter()
+            end_iter = buffer.get_end_iter()
+            new_config[key] = buffer.get_text(start_iter, end_iter, True)
+
         elif option_def.type == "bool":
             new_config[key] = str(widget.get_active())
         elif option_def.type == "color":

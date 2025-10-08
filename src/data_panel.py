@@ -70,17 +70,17 @@ class DataPanel(BasePanel):
         if not self.data_source or not self.data_displayer:
             return
 
-        # --- DYNAMIC TITLE LOGIC ---
+        # --- UNIFIED TITLE LOGIC ---
+        # The user-set title in the config dialog takes precedence.
+        # apply_all_configurations() is responsible for setting it initially.
+        # This logic block only handles the dynamic title when the user-set title is empty.
         user_set_title = self.config.get("title_text", "").strip()
-        source_type = self.config.get('type')
-        default_source_name = self.available_sources.get(source_type, {}).get('name', 'Data Panel')
-        can_dynamically_update = not user_set_title or user_set_title == default_source_name
-
-        if can_dynamically_update and value is not None:
+        if not user_set_title:
+            # User has not set a title, so we can use the dynamic one.
             dynamic_title = self.data_source.get_primary_label_string(value)
             if dynamic_title and self.title_label.get_text() != dynamic_title:
                 self.title_label.set_text(dynamic_title)
-        # --- END DYNAMIC TITLE LOGIC ---
+        # --- END UNIFIED TITLE LOGIC ---
 
         if value is not None:
             numerical_value = self.data_source.get_numerical_value(value)
@@ -130,60 +130,6 @@ class DataPanel(BasePanel):
             self.data_source = None
             
         super().close_panel(widget)
-
-    def on_load_defaults_clicked(self, button):
-        """Loads defaults and forces the config dialog to refresh."""
-        self.popover.popdown()
-        displayer_key = self.config.get('displayer_type')
-        if not displayer_key: return
-        
-        defaults = config_manager.get_displayer_defaults(displayer_key)
-        if not defaults: return
-            
-        if self._config_dialog and self._config_dialog.get_visible():
-            self._update_widgets_from_config(self._config_dialog.all_widgets, defaults)
-            self._config_dialog.apply_button.emit("clicked")
-        else:
-            self.config.update(defaults)
-            self.apply_all_configurations()
-            config_manager.update_panel_config(self.config["id"], self.config)
-
-    def _update_widgets_from_config(self, widgets, new_config):
-        """Directly updates the values of widgets in an open dialog."""
-        for key, value in new_config.items():
-            widget = widgets.get(key)
-            if not widget: continue
-            
-            if isinstance(widget, Gtk.Switch):
-                widget.set_active(str(value).lower() == 'true')
-            elif isinstance(widget, Gtk.Entry):
-                widget.set_text(str(value))
-            elif isinstance(widget, (Gtk.SpinButton, Gtk.Scale)):
-                widget.set_value(float(value))
-            elif isinstance(widget, Gtk.ColorButton):
-                rgba = Gdk.RGBA()
-                if rgba.parse(str(value)):
-                    widget.set_rgba(rgba)
-            elif isinstance(widget, Gtk.FontButton):
-                font_desc = Pango.FontDescription.from_string(str(value))
-                widget.set_font_desc(font_desc)
-            elif isinstance(widget, Gtk.ComboBoxText):
-                widget.set_active_id(str(value))
-
-
-    def on_save_defaults_clicked(self, button):
-        """Saves the current panel's style as the new default for its displayer type."""
-        self.popover.popdown()
-        displayer_key = self.config.get('displayer_type')
-        if not displayer_key:
-            print("Warning: Cannot save defaults, no displayer type found.")
-            return
-
-        if self.data_displayer:
-            if config_manager.save_displayer_defaults(displayer_key, self.config, self.data_displayer.__class__):
-                print(f"Saved current style as the default for '{displayer_key}'.")
-            else:
-                print(f"Error: Could not save default style for '{displayer_key}'.")
 
     def configure(self, *args):
         if self._config_dialog and self._config_dialog.get_visible():
@@ -236,7 +182,11 @@ class DataPanel(BasePanel):
             ConfigOption("title_font", "font", "Title Font:", self.config.get("title_font", "Sans Bold 10")),
             ConfigOption("title_color", "color", "Title Color:", self.config.get("title_color", "#FFFFFF")),
             ConfigOption("width", "spinner", "Width (grid units):", self.config.get("width", 2), 1, 128, 1),
-            ConfigOption("height", "spinner", "Height (grid units):", self.config.get("height", 2), 1, 128, 1)
+            ConfigOption("height", "spinner", "Height (grid units):", self.config.get("height", 2), 1, 128, 1),
+            ConfigOption("enable_collision", "bool", "Enable Collision:", self.config.get("enable_collision", "True"),
+                         tooltip="If disabled, this panel can overlap with other panels."),
+            ConfigOption("z_order", "spinner", "Layer (Z-Order):", int(self.config.get("z_order", 0)), -100, 100, 1, 0,
+                         tooltip="Higher numbers appear on top of lower numbers when collision is disabled.")
         ]}
         source_model = self.data_source.get_config_model()
         display_model = self.data_displayer.get_config_model()
@@ -250,7 +200,6 @@ class DataPanel(BasePanel):
             if main_window and hasattr(main_window, 'grid_manager'):
                  main_window.grid_manager.recreate_panel(self.config['id'])
             
-            # --- FIX: Destroy the dialog asynchronously to prevent race conditions ---
             GLib.idle_add(dialog.destroy)
             print("INFO: Panel display type changed. Please re-open configuration for the new panel.")
             return
@@ -262,6 +211,18 @@ class DataPanel(BasePanel):
         build_ui_from_model(panel_tab_box, self.config, display_type_model, all_widgets)
         all_widgets['displayer_type'].connect('changed', on_display_type_changed)
         build_ui_from_model(panel_tab_box, self.config, panel_model, all_widgets)
+        
+        collision_switch = all_widgets.get('enable_collision')
+        z_order_spinner = all_widgets.get('z_order')
+        if collision_switch and z_order_spinner:
+            z_order_row = z_order_spinner.get_parent()
+            def on_collision_toggled(switch, gparam):
+                is_active = switch.get_active()
+                z_order_row.set_visible(not is_active)
+            
+            collision_switch.connect("notify::active", on_collision_toggled)
+            GLib.idle_add(on_collision_toggled, collision_switch, None)
+
         build_background_config_ui(panel_tab_box, self.config, all_widgets, dialog, prefix="panel_", title="Panel Background")
 
         source_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vscrollbar_policy=Gtk.PolicyType.AUTOMATIC, vexpand=True)
@@ -277,7 +238,9 @@ class DataPanel(BasePanel):
         build_ui_from_model(display_tab_box, self.config, display_model, all_widgets)
 
         def apply_changes(widget=None):
-            dialog_state['changes_applied'] = True 
+            dialog_state['changes_applied'] = True
+            original_z_order = original_config_on_open.get('z_order', '0')
+            
             models_to_check = [ panel_model, display_type_model, source_model, self.data_displayer.get_config_model(), *dialog.dynamic_models ]
             if hasattr(dialog, 'ui_models'): models_to_check.extend(dialog.ui_models.values())
             new_conf = get_config_from_widgets(all_widgets, models_to_check)
@@ -286,6 +249,7 @@ class DataPanel(BasePanel):
                 custom_values = dialog.custom_value_getter()
                 if custom_values: new_conf.update(custom_values)
 
+            new_z_order = new_conf.get('z_order', '0')
             final_displayer_key = new_conf.get('displayer_type', original_displayer_key_on_open)
             self.config.update(new_conf)
             self.config['displayer_type'] = final_displayer_key
@@ -297,8 +261,6 @@ class DataPanel(BasePanel):
             
             config_manager.update_panel_config(self.config["id"], self.config)
             
-            # --- FIX: Re-register the panel with the UpdateManager ---
-            # This ensures the manager has the latest config, including the update interval.
             if not self.is_clock_source:
                 update_manager.register_panel(self)
 
@@ -306,15 +268,9 @@ class DataPanel(BasePanel):
                 main_window.grid_manager.recreate_panel(self.config['id'])
             else:
                 self.apply_all_configurations()
-
-        theme_box = Gtk.Box(spacing=6, halign=Gtk.Align.START, hexpand=True)
-        load_btn = Gtk.Button(label="Load Default Style")
-        load_btn.connect("clicked", self.on_load_defaults_clicked)
-        theme_box.append(load_btn)
-        save_btn = Gtk.Button(label="Save Style as Default")
-        save_btn.connect("clicked", self.on_save_defaults_clicked)
-        theme_box.append(save_btn)
-        dialog.action_area.prepend(theme_box)
+                if str(original_z_order) != str(new_z_order):
+                    if main_window and hasattr(main_window, 'grid_manager'):
+                        main_window.grid_manager._sort_and_reorder_panels()
 
         cancel_button = dialog.add_non_modal_button("_Cancel", style_class="destructive-action")
         cancel_button.connect("clicked", lambda w: dialog.destroy())
@@ -349,3 +305,4 @@ class DataPanel(BasePanel):
 
         dialog.connect("destroy", on_dialog_destroy)
         dialog.present()
+

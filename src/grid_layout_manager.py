@@ -6,6 +6,7 @@ from config_manager import config_manager
 from utils import show_confirmation_dialog
 import os
 import uuid
+import configparser
 from config_dialog import ConfigOption, build_ui_from_model, get_config_from_widgets
 from ui_helpers import build_background_config_ui, CustomDialog
 from data_panel import DataPanel
@@ -108,6 +109,28 @@ class GridLayoutManager(Gtk.Fixed):
         
         self.fullscreen_menu_item_label = "Enter Fullscreen"
 
+    def _sort_and_reorder_panels(self):
+        """
+        Sorts all panels by their z_order config and re-adds them to the
+        Gtk.Fixed layout to enforce drawing order (higher z_order on top).
+        """
+        panel_items = []
+        for panel_id, widget in self.panel_widgets.items():
+            try:
+                z_order = int(config_manager.config.get(panel_id, "z_order", fallback="0"))
+                panel_items.append((z_order, panel_id, widget))
+            except (configparser.NoSectionError, configparser.NoOptionError):
+                panel_items.append((0, panel_id, widget))
+        
+        panel_items.sort(key=lambda x: x[0])
+
+        for _, panel_id, widget in panel_items:
+            if widget.get_parent() == self:
+                x_pos, y_pos = self.panel_positions.get(panel_id, (0, 0))
+                # Removing and re-adding to Gtk.Fixed updates the drawing order
+                self.remove(widget)
+                self.put(widget, x_pos * CELL_SIZE, y_pos * CELL_SIZE)
+
     def set_scroll_adjustments(self, hadjustment, vadjustment):
         self._h_adjustment = hadjustment
         self._v_adjustment = vadjustment
@@ -116,7 +139,6 @@ class GridLayoutManager(Gtk.Fixed):
             hadjustment.connect("value-changed", self.check_and_update_scrolling_state)
 
     def create_panel_widget(self, config_dict):
-        """Creates a DataPanel instance from a configuration dictionary."""
         type_id = config_dict.get('type')
         
         if type_id in self.AVAILABLE_DATA_SOURCES:
@@ -148,7 +170,6 @@ class GridLayoutManager(Gtk.Fixed):
         return None
 
     def create_and_add_panel_from_config(self, config_dict):
-        """Creates and adds a new panel based on a complete config dictionary."""
         panel_id = config_manager.add_panel_config(config_dict['type'], config_dict)
         full_config = dict(config_manager.config.items(panel_id))
         
@@ -163,7 +184,6 @@ class GridLayoutManager(Gtk.Fixed):
             config_manager.save()
 
     def load_panels_from_config(self):
-        """Loads all panels from the current config manager state."""
         for type_id, cfg in config_manager.get_all_panel_configs():
             panel = self.create_panel_widget(cfg)
             if panel: 
@@ -171,13 +191,11 @@ class GridLayoutManager(Gtk.Fixed):
         GLib.idle_add(self.check_and_update_scrolling_state)
 
     def clear_all_panels(self):
-        """Removes all panel widgets and their configurations."""
         for panel_id in list(self.panel_widgets.keys()):
             self.remove_panel_widget_by_id(panel_id)
         config_manager.remove_all_panel_configs()
 
     def handle_copy_config_request(self, destination_id):
-        """Copies config from the single selected panel to the destination panel."""
         if len(self.selected_panel_ids) != 1:
             print("Copy Config: Select exactly one source panel first.")
             return
@@ -217,7 +235,6 @@ class GridLayoutManager(Gtk.Fixed):
 
 
     def recreate_panel(self, panel_id):
-        """Removes and recreates a panel widget, typically used when its displayer type changes."""
         if panel_id not in self.panel_widgets:
             return
 
@@ -233,12 +250,10 @@ class GridLayoutManager(Gtk.Fixed):
             self._update_selected_panels_visuals()
 
     def delete_selected_panels(self):
-        """Initiates the process to delete all currently selected panels."""
         if self.selected_panel_ids:
             self._confirm_and_delete_selected_panels()
 
     def _confirm_and_delete_selected_panels(self):
-        """Shows a confirmation dialog and deletes selected panels if confirmed."""
         num_selected = len(self.selected_panel_ids)
         if num_selected == 0: return
         response = show_confirmation_dialog(
@@ -254,7 +269,6 @@ class GridLayoutManager(Gtk.Fixed):
                     self.remove_panel_widget_by_id(panel_id)
     
     def _on_draw_drag_preview(self, drawing_area, cr, width, height):
-        """Draws the rectangular outlines for panels being dragged."""
         if not self.drag_active or not self.selected_panel_ids: return False
         
         scroll_x_offset = self._h_adjustment.get_value() if self._h_adjustment else 0
@@ -291,7 +305,6 @@ class GridLayoutManager(Gtk.Fixed):
         return True
 
     def _apply_rubberband_style(self):
-        """Applies CSS styling to the rubberband selection widget."""
         if not hasattr(self, 'rubberband_selector_widget'): return
         grid_layout_config = config_manager.config["GridLayout"]
         css_data = f"""
@@ -315,7 +328,6 @@ class GridLayoutManager(Gtk.Fixed):
         return selector
 
     def _setup_selection_gestures(self):
-        """Sets up gestures for rubberband selection and background clicks."""
         self.rubberband_gesture = Gtk.GestureDrag.new()
         self.rubberband_gesture.set_button(Gdk.BUTTON_PRIMARY)
         self.rubberband_gesture.connect("drag-begin", self._on_rubberband_drag_begin)
@@ -329,9 +341,6 @@ class GridLayoutManager(Gtk.Fixed):
         self.add_controller(self.background_click_gesture)
 
     def _on_background_pressed(self, gesture, n_press, x, y):
-        """
-        Handles both single and double clicks on the grid background.
-        """
         if self.pick(x, y, Gtk.PickFlags.DEFAULT) != self:
             return
 
@@ -402,13 +411,11 @@ class GridLayoutManager(Gtk.Fixed):
         self._update_selected_panels_visuals()
 
     def _update_selected_panels_visuals(self):
-        """Updates the visual state of all panels to reflect current selection."""
         for panel_id, panel_widget in self.panel_widgets.items():
             if hasattr(panel_widget, 'set_selected_visual_indicator'):
                 panel_widget.set_selected_visual_indicator(panel_id in self.selected_panel_ids)
 
     def _load_and_apply_grid_config(self, config_data=None):
-        """Loads grid-wide settings from config and applies them via CSS."""
         style_context = self.get_style_context()
         if self._grid_background_css_provider:
             style_context.remove_provider(self._grid_background_css_provider)
@@ -455,7 +462,6 @@ class GridLayoutManager(Gtk.Fixed):
                 panel_widget.apply_panel_frame_style()
 
     def _setup_context_menu_and_actions(self):
-        """Sets up the right-click context menu for the grid background."""
         self.context_menu = Gio.Menu()
         self.context_menu.append("Add Panel...", "win.add_panel")
         self.context_menu.append_section(None, Gio.Menu.new()) 
@@ -481,13 +487,16 @@ class GridLayoutManager(Gtk.Fixed):
         
         self.popover_context_menu = Gtk.PopoverMenu.new_from_model(self.context_menu)
         self.popover_context_menu.set_parent(self)
+        self.popover_context_menu.connect("closed", self.check_and_update_scrolling_state)
 
 
     def _on_background_right_click_for_menu(self, gesture, n_press, x, y):
-        """Shows the context menu when the background is right-clicked."""
         if self.pick(x, y, Gtk.PickFlags.DEFAULT) == self:
             self.grab_focus()
             
+            if self._scroll_timer_id is not None:
+                self.stop_auto_scrolling(reset_position=False)
+
             main_window = self.get_ancestor(Gtk.ApplicationWindow)
             if main_window:
                 label = "Exit Fullscreen" if main_window.is_fullscreen() else "Enter Fullscreen"
@@ -503,10 +512,12 @@ class GridLayoutManager(Gtk.Fixed):
             self.popover_context_menu.popup()
 
     def _on_configure_layout_activate(self, action, param):
-        """Opens the configuration dialog for layout-wide settings."""
         if self._layout_config_dialog and self._layout_config_dialog.get_visible():
             self._layout_config_dialog.present()
             return
+
+        if self._scroll_timer_id is not None:
+            self.stop_auto_scrolling(reset_position=False)
         
         dialog = CustomDialog(parent=self.get_ancestor(Gtk.Window), title="Configure Layout & Appearance", modal=False)
         self._layout_config_dialog = dialog
@@ -580,11 +591,15 @@ class GridLayoutManager(Gtk.Fixed):
         accept = dialog.add_non_modal_button("_Accept", style_class="suggested-action", is_default=True)
         accept.connect("clicked", lambda w: (apply_changes(), dialog.destroy()))
         
-        dialog.connect("destroy", lambda d: setattr(self, '_layout_config_dialog', None))
+        dialog.connect("destroy", self._on_layout_dialog_destroy)
         dialog.present()
 
+    def _on_layout_dialog_destroy(self, dialog):
+        """Called when the layout config dialog is closed."""
+        self._layout_config_dialog = None
+        self.check_and_update_scrolling_state()
+
     def add_panel(self, widget, config):
-        """Adds a panel widget to the grid."""
         panel_id = config["id"]
         width_units, height_units = int(config.get("width", 2)), int(config.get("height", 2))
         grid_x, grid_y = int(config.get("grid_x", 0)), int(config.get("grid_y", 0))
@@ -609,9 +624,9 @@ class GridLayoutManager(Gtk.Fixed):
         
         self._recalculate_container_size()
         widget.apply_panel_frame_style()
+        self._sort_and_reorder_panels()
 
     def handle_panel_dimension_update(self, panel_id, new_width_units, new_height_units):
-        """Handles resizing a panel from its configuration dialog."""
         if panel_id not in self.panel_widgets: return
         self.panel_sizes[panel_id] = (new_width_units, new_height_units)
         widget = self.panel_widgets[panel_id]
@@ -619,7 +634,6 @@ class GridLayoutManager(Gtk.Fixed):
         self._recalculate_container_size()
         
     def _find_first_available_spot(self, w_units, h_units, exclude_id=None):
-        """Finds the first available top-left coordinate for a new panel."""
         max_x, max_y = 20, 20
         if self.panel_positions:
             for panel_id, (px, py) in self.panel_positions.items():
@@ -636,7 +650,6 @@ class GridLayoutManager(Gtk.Fixed):
         return 0, 0
 
     def _get_content_bounding_box(self):
-        """Calculates the total width and height occupied by all panels."""
         max_x = 0
         max_y = 0
         if not self.panel_positions:
@@ -651,7 +664,6 @@ class GridLayoutManager(Gtk.Fixed):
         return {'width': max_x, 'height': max_y}
 
     def _recalculate_container_size(self):
-        """Resizes the Gtk.Fixed container to tightly fit all panels."""
         bbox = self._get_content_bounding_box()
         required_width = bbox['width'] + CELL_SIZE
         required_height = bbox['height'] + CELL_SIZE
@@ -659,7 +671,6 @@ class GridLayoutManager(Gtk.Fixed):
         GLib.idle_add(self.check_and_update_scrolling_state)
     
     def remove_panel_widget_by_id(self, panel_id_to_remove):
-        """Completely removes a panel and all its associated state."""
         widget = self.panel_widgets.pop(panel_id_to_remove, None)
         if not widget:
             if panel_id_to_remove in self.selected_panel_ids:
@@ -737,15 +748,20 @@ class GridLayoutManager(Gtk.Fixed):
         
         is_valid = not (snapped_group_grid_x < 0 or snapped_group_grid_y < 0)
         if is_valid:
-            exclude = self.selected_panel_ids if not self.is_copy_drag else None
-            for pid_check in self.selected_panel_ids:
-                if pid_check not in self.drag_panel_offsets: continue
-                offset_x_grid, offset_y_grid = self.drag_panel_offsets[pid_check]
-                w_units, h_units = self.panel_sizes[pid_check]
-                target_x = snapped_group_grid_x + offset_x_grid
-                target_y = snapped_group_grid_y + offset_y_grid
-                if self.is_occupied(target_x, target_y, w_units, h_units, exclude):
-                    is_valid = False; break
+            dragged_panel_config = dict(config_manager.config.items(self.drag_primary_panel_id))
+            dragged_collision_enabled = str(dragged_panel_config.get("enable_collision", "True")).lower() == 'true'
+
+            # Only check for collisions if the primary dragged panel has it enabled.
+            if dragged_collision_enabled:
+                exclude = self.selected_panel_ids if not self.is_copy_drag else None
+                for pid_check in self.selected_panel_ids:
+                    if pid_check not in self.drag_panel_offsets: continue
+                    offset_x_grid, offset_y_grid = self.drag_panel_offsets[pid_check]
+                    w_units, h_units = self.panel_sizes[pid_check]
+                    target_x = snapped_group_grid_x + offset_x_grid
+                    target_y = snapped_group_grid_y + offset_y_grid
+                    if self.is_occupied(target_x, target_y, w_units, h_units, exclude):
+                        is_valid = False; break
         
         self.current_drop_is_valid = is_valid
         self.drag_preview_overlay_area.queue_draw()
@@ -796,18 +812,28 @@ class GridLayoutManager(Gtk.Fixed):
                     config_manager.update_panel_config(pid_move, self.panel_widgets[pid_move].config)
                 
                 self._recalculate_container_size()
+                self._sort_and_reorder_panels()
 
         self.drag_active = False
         self._update_selected_panels_visuals()
         
     def is_occupied(self, x, y, w, h, exclude_id=None):
-        """Checks if a given rectangle in grid units is occupied by other panels."""
         if x < 0 or y < 0: return True
         rect_to_check_x2, rect_to_check_y2 = x + w, y + h
         for panel_id, (current_x, current_y) in self.panel_positions.items():
             if exclude_id:
                 if isinstance(exclude_id, set) and panel_id in exclude_id: continue
                 elif panel_id == exclude_id: continue
+            
+            # Check if the panel being checked has collision enabled
+            try:
+                panel_config = dict(config_manager.config.items(panel_id))
+                collision_enabled = str(panel_config.get("enable_collision", "True")).lower() == 'true'
+                if not collision_enabled:
+                    continue # This panel doesn't collide, so skip it.
+            except Exception:
+                pass # Failsafe
+            
             current_w, current_h = self.panel_sizes.get(panel_id, (1,1))
             current_x2, current_y2 = current_x + current_w, current_y + current_h
             if (x < current_x2 and rect_to_check_x2 > current_x and
@@ -816,9 +842,6 @@ class GridLayoutManager(Gtk.Fixed):
         return False
         
     def check_and_update_scrolling_state(self, *args):
-        """
-        Central method to decide if auto-scrolling should be active.
-        """
         grid_config = config_manager.config["GridLayout"]
         is_enabled = grid_config.get("auto_scroll_on_overflow", "False").lower() == 'true'
 
@@ -841,7 +864,6 @@ class GridLayoutManager(Gtk.Fixed):
             self.stop_auto_scrolling(reset_position=True)
 
     def _start_auto_scrolling(self):
-        """Starts the timer for auto-scrolling."""
         self.stop_auto_scrolling(reset_position=False) 
         
         grid_config = config_manager.config["GridLayout"]
@@ -850,7 +872,6 @@ class GridLayoutManager(Gtk.Fixed):
         self._scroll_timer_id = GLib.timeout_add_seconds(int(interval_sec), self._auto_scroll_callback)
 
     def stop_auto_scrolling(self, reset_position=False):
-        """Stops the auto-scroll timer and any ongoing scroll animation."""
         if self._scroll_timer_id is not None:
             GLib.source_remove(self._scroll_timer_id)
             self._scroll_timer_id = None
@@ -863,7 +884,6 @@ class GridLayoutManager(Gtk.Fixed):
             self._animate_scroll_to(0)
 
     def _auto_scroll_callback(self):
-        """Called by the timer to trigger the next scroll."""
         if not self._h_adjustment:
             self._scroll_timer_id = None
             return GLib.SOURCE_REMOVE
@@ -886,7 +906,6 @@ class GridLayoutManager(Gtk.Fixed):
         return GLib.SOURCE_CONTINUE
 
     def _animate_scroll_to(self, target_x):
-        """Smoothly animates the horizontal scroll to a target position."""
         if self._scroll_animation_id is not None:
             GLib.source_remove(self._scroll_animation_id)
         
@@ -913,3 +932,4 @@ class GridLayoutManager(Gtk.Fixed):
             return GLib.SOURCE_CONTINUE
         
         self._scroll_animation_id = GLib.timeout_add(16, animation_step, None)
+
