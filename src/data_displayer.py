@@ -47,6 +47,15 @@ class DataDisplayer(ABC):
         this to find all relevant styles to save in the theme.
         """
         return []
+        
+    def get_all_style_keys(self):
+        """
+        Returns a set of all configuration keys that are considered part of
+        this displayer's style. Used for copy/paste/save operations.
+        By default, it derives keys from the config model.
+        """
+        model = self.get_config_model()
+        return {opt.key for section in model.values() for opt in section}
 
     def reset_state(self):
         """Optional method to reset any internal state when config changes."""
@@ -94,4 +103,3 @@ class DataDisplayer(ABC):
         context.new_path(); context.move_to(center_x, center_y); context.line_to(center_x+h_len*math.cos(h_angle), center_y+h_len*math.sin(h_angle)); context.set_line_width(1.5); context.set_line_cap(cairo.LINE_CAP_ROUND); context.stroke()
         context.new_path(); context.move_to(center_x, center_y); context.line_to(center_x+m_len*math.cos(m_angle), center_y+m_len*math.sin(m_angle)); context.set_line_width(1.5); context.set_line_cap(cairo.LINE_CAP_ROUND); context.stroke()
         context.restore()
-

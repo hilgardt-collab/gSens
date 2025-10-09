@@ -3,40 +3,42 @@ import gi
 import os
 import cairo
 import math
-from .text import TextDisplayer
-from config_dialog import ConfigOption, build_ui_from_model
+from data_displayer import DataDisplayer
+from config_dialog import ConfigOption
 from utils import populate_defaults_from_model
 
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk, Gdk, GLib, Pango, PangoCairo, GdkPixbuf
 
-class StaticDisplayer(TextDisplayer):
+class StaticDisplayer(DataDisplayer):
     """
-    A displayer for static content, capable of showing either a multi-line
-    text block (using TextDisplayer's logic) or an image.
+    A self-contained displayer for static content, capable of showing either a 
+    multi-line text block or an image with various scaling options.
     """
     def __init__(self, panel_ref, config):
-        # Image-related state
         self._image_pixbuf = None
         self._cached_image_path = None
+        self._text_to_draw = ""
+        self._layout_cache = None
         
-        # Initialize the parent TextDisplayer
         super().__init__(panel_ref, config)
-        
-        # Populate with image-specific defaults
-        populate_defaults_from_model(self.config, self._get_image_config_model())
+        populate_defaults_from_model(self.config, self.get_config_model())
         self.apply_styles()
 
+    def _create_widget(self):
+        drawing_area = Gtk.DrawingArea(hexpand=True, vexpand=True)
+        drawing_area.set_draw_func(self.on_draw)
+        return drawing_area
+
     def update_display(self, data):
-        """Receives data from the source, updates text lines, and triggers a redraw."""
-        # The parent TextDisplayer's update_display handles everything for text mode
-        super().update_display(data)
+        """Receives data from the source, updates internal state, and triggers a redraw."""
+        if isinstance(data, dict) and data.get("content_type") == 'text':
+            self._text_to_draw = data.get("text", "")
+        self.widget.queue_draw()
 
     def apply_styles(self):
-        """Reloads the image if the path has changed and calls parent's apply_styles."""
-        # Call parent first to handle all text-related style updates
+        """Reloads the image if the path has changed and invalidates text layout cache."""
         super().apply_styles()
-        
         image_path = self.config.get("static_image_path", "")
         if self._cached_image_path != image_path:
             self._cached_image_path = image_path
@@ -46,18 +48,17 @@ class StaticDisplayer(TextDisplayer):
                 print(f"Error loading static image: {e}")
                 self._image_pixbuf = None
         
-        # Parent already queues a draw
-        # self.widget.queue_draw()
-
+        self._layout_cache = None
+        self.widget.queue_draw()
+        
     def on_draw(self, area, ctx, width, height):
-        """Draws either the image or calls the parent to draw the text."""
+        """Draws either the image or the text based on configuration."""
         content_type = self.config.get("static_content_type", "text")
 
         if content_type == 'image' and self._image_pixbuf:
             self._draw_image(ctx, width, height)
         elif content_type == 'text':
-            # Let the parent (TextDisplayer) handle all text drawing
-            super().on_draw(area, ctx, width, height)
+            self._draw_text(ctx, width, height)
 
     def _draw_image(self, ctx, width, height):
         """Handles the logic for drawing the configured image."""
@@ -82,7 +83,7 @@ class StaticDisplayer(TextDisplayer):
             pattern = cairo.SurfacePattern(img_surface)
             pattern.set_extend(cairo.EXTEND_REPEAT)
             ctx.set_source(pattern)
-        else: # Default to zoom (cover)
+        else: # zoom (cover)
             scale = max(width / img_w, height / img_h)
             x_offset = (width / scale - img_w) / 2
             y_offset = (height / scale - img_h) / 2
@@ -91,70 +92,75 @@ class StaticDisplayer(TextDisplayer):
 
         ctx.paint_with_alpha(float(self.config.get("static_image_alpha", 1.0)))
         ctx.restore()
+
+    def _draw_text(self, ctx, width, height):
+        """Handles the logic for drawing styled, multi-line text."""
+        if not self._text_to_draw:
+            return
+
+        if self._layout_cache is None:
+            self._layout_cache = self.widget.create_pango_layout("")
         
+        layout = self._layout_cache
+        font_str = self.config.get("static_text_font", "Sans 12")
+        layout.set_font_description(Pango.FontDescription.from_string(font_str))
+        layout.set_text(self._text_to_draw, -1)
+        layout.set_width(width * Pango.SCALE) # Enable wrapping
+
+        align_str = self.config.get("static_text_align_horiz", "center")
+        pango_align_map = {"left": Pango.Alignment.LEFT, "center": Pango.Alignment.CENTER, "right": Pango.Alignment.RIGHT}
+        layout.set_alignment(pango_align_map.get(align_str, Pango.Alignment.CENTER))
+
+        text_width, text_height = layout.get_pixel_extents()[1].width, layout.get_pixel_extents()[1].height
+        
+        # Calculate position
+        v_align = self.config.get("static_text_align_vert", "center")
+        if v_align == "top": y = 0
+        elif v_align == "bottom": y = height - text_height
+        else: y = (height - text_height) / 2
+
+        # Horizontal alignment is handled by Pango, so we just start at x=0
+        x = 0
+        
+        ctx.save()
+        color_str = self.config.get("static_text_color", "rgba(220,220,220,1)")
+        rgba = Gdk.RGBA(); rgba.parse(color_str)
+        ctx.set_source_rgba(rgba.red, rgba.green, rgba.blue, rgba.alpha)
+        
+        ctx.move_to(x, y)
+        PangoCairo.show_layout(ctx, layout)
+        ctx.restore()
+
     @staticmethod
     def get_config_model():
         """
-        Returns an empty model. All UI is built in the get_configure_callback
-        to prevent the DataPanel from drawing a default UI.
+        Defines the complete, declarative configuration model for this displayer.
+        It uses dynamic groups to show either text or image options.
         """
-        return {}
+        # The data source defines 'static_content_type', which we use as the controller
+        controller_key = "static_content_type"
+        
+        text_align_horiz_opts = {"Left": "left", "Center": "center", "Right": "right"}
+        text_align_vert_opts = {"Top": "top", "Center": "center", "Bottom": "bottom"}
 
-    @staticmethod
-    def _get_image_config_model():
-        """Internal helper to define just the image-specific options."""
         return {
+            "Text Style": [
+                ConfigOption("static_text_font", "font", "Font:", "Sans 12",
+                             dynamic_group=controller_key, dynamic_show_on="text"),
+                ConfigOption("static_text_color", "color", "Color:", "rgba(220,220,220,1)",
+                             dynamic_group=controller_key, dynamic_show_on="text"),
+                ConfigOption("static_text_align_horiz", "dropdown", "Horizontal Align:", "center", options_dict=text_align_horiz_opts,
+                             dynamic_group=controller_key, dynamic_show_on="text"),
+                ConfigOption("static_text_align_vert", "dropdown", "Vertical Align:", "center", options_dict=text_align_vert_opts,
+                             dynamic_group=controller_key, dynamic_show_on="text"),
+            ],
             "Image Style": [
                 ConfigOption("static_image_style", "dropdown", "Style:", "zoom", 
-                             options_dict={"Zoom (Cover)": "zoom", "Stretch": "stretch", "Center (No Scale)": "center", "Tile": "tile"}),
+                             options_dict={"Zoom (Cover)": "zoom", "Stretch": "stretch", "Center (No Scale)": "center", "Tile": "tile"},
+                             dynamic_group=controller_key, dynamic_show_on="image"),
                 ConfigOption("static_image_alpha", "scale", "Image Opacity:", "1.0", 
-                             min_val=0.0, max_val=1.0, step=0.05, digits=2),
+                             min_val=0.0, max_val=1.0, step=0.05, digits=2,
+                             dynamic_group=controller_key, dynamic_show_on="image"),
             ]
         }
-
-    def get_configure_callback(self):
-        """
-        Builds the dynamic configuration UI for the "Display" tab, with a
-        Gtk.Stack to switch between Text and Image options.
-        """
-        def build_dynamic_display_config(dialog, content_box, widgets, available_sources, panel_config):
-            controller_widget = widgets.get("static_content_type")
-            if not controller_widget:
-                print("Warning: Could not find 'static_content_type' controller for dynamic UI.")
-                return
-
-            stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.SLIDE_UP_DOWN)
-            content_box.append(stack)
-
-            # --- Page 1: Text Options (from parent TextDisplayer) ---
-            text_page_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
-            text_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=5, margin_bottom=5, margin_start=5, margin_end=5)
-            text_page_scroll.set_child(text_page)
-            
-            text_model = TextDisplayer.get_config_model()
-            text_cb = TextDisplayer(None, panel_config).get_configure_callback()
-            build_ui_from_model(text_page, panel_config, text_model, widgets)
-            if text_cb:
-                text_cb(dialog, text_page, widgets, available_sources, panel_config)
-            
-            dialog.dynamic_models.append(text_model)
-            stack.add_titled(text_page_scroll, "text", "Text Options")
-
-            # --- Page 2: Image Options ---
-            image_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=5, margin_bottom=5, margin_start=5, margin_end=5)
-            image_model = self._get_image_config_model()
-            build_ui_from_model(image_page, panel_config, image_model, widgets)
-            dialog.dynamic_models.append(image_model)
-            stack.add_titled(image_page, "image", "Image Options")
-            
-            # --- Connect the controller to the stack ---
-            def on_controller_changed(combo):
-                active_id = combo.get_active_id()
-                if active_id and stack.get_child_by_name(active_id):
-                    stack.set_visible_child_name(active_id)
-
-            controller_widget.connect("changed", on_controller_changed)
-            GLib.idle_add(on_controller_changed, controller_widget)
-
-        return build_dynamic_display_config
 

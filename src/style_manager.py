@@ -33,12 +33,11 @@ class StyleManager:
         displayer = panel.data_displayer
         config = panel.config
         
-        # 1. Get keys from the displayer's explicit config model
-        displayer_model = displayer.get_config_model()
-        model_keys = {opt.key for section in displayer_model.values() for opt in section}
-
-        # 2. Get keys based on registered prefixes (e.g., 'gauge_', 'speedo_')
-        # This is crucial for displayers with dynamically generated keys.
+        # Use the new get_all_style_keys method for a comprehensive list
+        model_keys = displayer.get_all_style_keys()
+        
+        # Get keys based on registered prefixes. This is still useful for complex
+        # displayers that might not list every single dynamic key.
         if hasattr(displayer, 'get_config_key_prefixes'):
             prefixes = displayer.get_config_key_prefixes()
             for key in config:
@@ -47,7 +46,7 @@ class StyleManager:
                         model_keys.add(key)
                         break
         
-        # 3. Add general panel background keys
+        # Add general panel background keys
         bg_keys = [
             'panel_bg_type', 'panel_bg_color', 'panel_gradient_linear_color1', 
             'panel_gradient_linear_color2', 'panel_gradient_linear_angle_deg',
@@ -57,7 +56,7 @@ class StyleManager:
         ]
         model_keys.update(bg_keys)
 
-        # 4. Populate the style dictionary with current values from the panel config
+        # Populate the style dictionary with current values from the panel config
         for key in model_keys:
             if key in config:
                 style_dict[key] = config[key]

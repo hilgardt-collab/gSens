@@ -7,7 +7,7 @@ import math
 from data_displayer import DataDisplayer
 from config_dialog import ConfigOption, build_ui_from_model
 from utils import populate_defaults_from_model
-from ui_helpers import build_background_config_ui, draw_cairo_background
+from ui_helpers import build_background_config_ui, draw_cairo_background, get_background_config_model
 from .text import TextDisplayer
 
 gi.require_version("Gtk", "4.0")
@@ -72,6 +72,24 @@ class GraphDisplayer(TextDisplayer):
         to prevent the DataPanel from drawing a default UI.
         """
         return {}
+        
+    def get_all_style_keys(self):
+        """
+        Returns a combined set of style keys from the graph's own model
+        and its parent TextDisplayer model.
+        """
+        # Get graph-specific keys from its internal model definition
+        graph_model = self._get_graph_config_model_definition()
+        graph_keys = {opt.key for section in graph_model.values() for opt in section}
+        
+        # Get all text-related keys from the parent class
+        text_keys = super().get_all_style_keys()
+        
+        # Get background keys
+        background_keys = {opt.key for section in get_background_config_model("graph_").values() for opt in section}
+        
+        # Combine them into a single set
+        return graph_keys.union(text_keys).union(background_keys)
 
     @staticmethod
     def _get_graph_config_model_definition():
@@ -86,20 +104,20 @@ class GraphDisplayer(TextDisplayer):
             ConfigOption(controller_key, "dropdown", "Graph Type:", "line", 
                          options_dict={"Line Chart": "line", "Bar Chart": "bar"}),
             ConfigOption("graph_line_color", "color", "Line/Border Color:", "rgba(255,0,0,0.8)"),
-            ConfigOption("graph_line_width", "scale", "Line/Border Width:", "2.0", 0.5, 10.0, 0.5, 1),
+            ConfigOption("graph_line_width", "spinner", "Line/Border Width:", 2.0, 0.5, 10.0, 0.5, 1),
             ConfigOption("graph_line_style", "dropdown", "Line Style:", "sharp", 
                          options_dict={"Sharp": "sharp", "Smooth": "smooth"},
                          dynamic_group=controller_key, dynamic_show_on="line"),
             ConfigOption("graph_fill_enabled", "bool", "Fill (Line/Bar):", "True"),
             ConfigOption("graph_fill_color", "color", "Fill Color:", "rgba(255,0,0,0.2)")
         ]
-        model["Graph Data"] = [ConfigOption("max_history_points", "scale", "History Points:", "100", 10, 1000, 10, 0)]
+        model["Graph Data"] = [ConfigOption("max_history_points", "spinner", "History Points:", 100, 10, 1000, 10, 0)]
         model["Grid Lines"] = [
             ConfigOption("graph_grid_enabled", "bool", "Show Grid:", "False"),
             ConfigOption("graph_grid_x_divisions", "spinner", "Vertical Divisions:", 5, 1, 50, 1, 0),
             ConfigOption("graph_grid_y_divisions", "spinner", "Horizontal Divisions:", 4, 1, 50, 1, 0),
             ConfigOption("graph_grid_color", "color", "Grid Color:", "rgba(128,128,128,0.3)"),
-            ConfigOption("graph_grid_width", "scale", "Grid Line Width:", 1.0, 0.5, 5.0, 0.5, 1)
+            ConfigOption("graph_grid_width", "spinner", "Grid Line Width:", 1.0, 0.5, 5.0, 0.5, 1)
         ]
         return model
 

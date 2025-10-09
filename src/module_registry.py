@@ -46,11 +46,11 @@ def discover_and_load_modules():
         {'key': 'analog_clock', 'class_name': 'AnalogClockDataSource', 'name': 'Clock', "displayers": ["analog_clock", "text"], "default_size": (16, 16)},
         {'key': 'combo', 'class_name': 'ComboDataSource', 'name': 'Combo Panel', "displayers": ["arc_combo", "level_bar_combo", "lcars_combo", "dashboard_combo"], "default_size": (24, 20)},
         {'key': 'cpu', 'class_name': 'CPUDataSource', 'name': 'CPU Monitor', "displayers": ["text", "graph", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (16, 16)},
-        {'key': 'disk_usage', 'class_name': 'DiskUsageDataSource', 'name': 'Disk Usage', "displayers": ["text", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (16, 16)},
+        {'key': 'disk_usage', 'class_name': 'DiskUsageDataSource', 'name': 'Disk Usage', "displayers": ["text", "bar", "arc_gauge", "indicator", "level_bar", "speedometer", "graph"], "default_size": (16, 16)},
         {'key': 'fan_speed', 'class_name': 'FanSpeedDataSource', 'name': 'Fan Speed', "displayers": ["text", "graph", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (16, 16)},
         {'key': 'gpu', 'class_name': 'GPUDataSource', 'name': 'GPU Monitor', "displayers": ["text", "graph", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (16, 16)},
         {'key': 'memory_usage', 'class_name': 'MemoryUsageDataSource', 'name': 'Memory Usage', "displayers": ["text", "graph", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (16, 16)},
-        {'key': 'network', 'class_name': 'NetworkDataSource', 'name': 'Network Activity', "displayers": ["text", "graph", "level_bar", "arc_gauge", "speedometer"], "default_size": (16, 10)},
+        {'key': 'network', 'class_name': 'NetworkDataSource', 'name': 'Network Activity', "displayers": ["text", "graph", "level_bar", "arc_gauge", "speedometer", "bar", "indicator"], "default_size": (16, 10)},
         {'key': 'processes', 'class_name': 'ProcessDataSource', 'name': 'Process Monitor', "displayers": ["text", "table"], "default_size": (24, 16)},
         {'key': 'static', 'class_name': 'StaticDataSource', 'name': 'Static Content', "displayers": ["static"], "default_size": (16, 8)},
         {'key': 'systemd', 'class_name': 'SystemdDataSource', 'name': 'Systemd Services', "displayers": ["text"], "default_size": (24, 8)},
@@ -85,3 +85,4 @@ def discover_and_load_modules():
         if class_name in ALL_DISPLAYER_CLASSES:
             AVAILABLE_DISPLAYERS[meta['key']] = meta.copy()
             AVAILABLE_DISPLAYERS[meta['key']]['class'] = ALL_DISPLAYER_CLASSES[class_name]
+
