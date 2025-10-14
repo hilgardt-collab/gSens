@@ -73,7 +73,11 @@ class ArcComboDisplayer(ComboBase):
         possible options to prevent crashes from missing keys.
         """
         model = {
-            "Overall Layout": [ ConfigOption("combo_vertical_offset", "spinner", "Vertical Offset (px):", 0, -200, 200, 1, 0), ConfigOption("combo_scale_factor", "scale", "Manual Scale:", 1.0, 0.5, 2.0, 0.05, 2) ],
+            "Overall Layout": [
+                ConfigOption("combo_arc_count", "spinner", "Number of Arcs:", 5, 1, 16, 1, 0),
+                ConfigOption("combo_vertical_offset", "spinner", "Vertical Offset (px):", 0, -200, 200, 1, 0),
+                ConfigOption("combo_scale_factor", "scale", "Manual Scale:", 1.0, 0.5, 2.0, 0.05, 2)
+            ],
             "Center Circle Text": [ ConfigOption("center_text_vertical_offset", "spinner", "V. Offset:", 0, -100, 100, 1, 0), ConfigOption("center_text_spacing", "spinner", "Text Spacing:", 2, 0, 50, 1, 0) ],
             "Center Primary Text": [ ConfigOption("center_show_primary_text", "bool", "Show Primary Text:", "True"), ConfigOption("center_primary_text_font", "font", "Primary Font:", "Sans 10"), ConfigOption("center_primary_text_color", "color", "Primary Color:", "rgba(200,200,200,1)") ],
             "Center Secondary Text": [ ConfigOption("center_show_secondary_text", "bool", "Show Secondary Text:", "True"), ConfigOption("center_secondary_text_font", "font", "Secondary Font:", "Sans Bold 18"), ConfigOption("center_secondary_text_color", "color", "Secondary Color:", "rgba(255,255,255,1)") ],
