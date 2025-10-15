@@ -4,7 +4,7 @@ import os
 import cairo
 import math
 from data_displayer import DataDisplayer
-from config_dialog import ConfigOption
+from config_dialog import ConfigOption, build_ui_from_model
 from utils import populate_defaults_from_model
 
 gi.require_version("Gtk", "4.0")
@@ -22,7 +22,8 @@ class StaticDisplayer(DataDisplayer):
         self._layout_cache = None
         
         super().__init__(panel_ref, config)
-        populate_defaults_from_model(self.config, self.get_config_model())
+        # Populate defaults using the internal method, not the empty one
+        populate_defaults_from_model(self.config, self._get_full_config_model_definition())
         self.apply_styles()
 
     def _create_widget(self):
@@ -134,10 +135,14 @@ class StaticDisplayer(DataDisplayer):
     @staticmethod
     def get_config_model():
         """
-        Defines the complete, declarative configuration model for this displayer.
-        It uses dynamic groups to show either text or image options.
+        Returns an empty model. All UI is now built in the get_configure_callback
+        to ensure it runs after the controller widget is created.
         """
-        # The data source defines 'static_content_type', which we use as the controller
+        return {}
+
+    @staticmethod
+    def _get_full_config_model_definition():
+        """Internal helper to define the complete model for this displayer."""
         controller_key = "static_content_type"
         
         text_align_horiz_opts = {"Left": "left", "Center": "center", "Right": "right"}
@@ -158,9 +163,27 @@ class StaticDisplayer(DataDisplayer):
                 ConfigOption("static_image_style", "dropdown", "Style:", "zoom", 
                              options_dict={"Zoom (Cover)": "zoom", "Stretch": "stretch", "Center (No Scale)": "center", "Tile": "tile"},
                              dynamic_group=controller_key, dynamic_show_on="image"),
-                ConfigOption("static_image_alpha", "scale", "Image Opacity:", "1.0", 
+                ConfigOption("static_image_alpha", "spinner", "Image Opacity:", "1.0", 
                              min_val=0.0, max_val=1.0, step=0.05, digits=2,
                              dynamic_group=controller_key, dynamic_show_on="image"),
             ]
         }
+
+    def get_configure_callback(self):
+        """
+        Builds the dynamic configuration UI for the "Display" tab.
+        """
+        def build_dynamic_display_config(dialog, content_box, widgets, available_sources, panel_config):
+            # Find the controller widget, which was built in the "Data Source" tab
+            controller_widget = widgets.get("static_content_type")
+            if not controller_widget:
+                print("Warning (StaticDisplayer): Could not find 'static_content_type' controller for dynamic UI.")
+                return
+
+            # Build the UI using the full model, which will create the dynamic Gtk.Stack
+            model = self._get_full_config_model_definition()
+            build_ui_from_model(content_box, panel_config, model, widgets)
+            dialog.dynamic_models.append(model)
+
+        return build_dynamic_display_config
 

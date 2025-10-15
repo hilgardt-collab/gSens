@@ -157,6 +157,11 @@ class ComboDataSource(DataSource):
                         custom_cb(dialog, parent_box, widgets, available_sources, panel_config, prefix)
 
         def _build_arc_config_ui(dialog, content_box, widgets, available_sources, panel_config, source_opts):
+            # --- FIX: Add the arc count spinner here, in the Data Source tab ---
+            arc_count_model = {"": [ConfigOption("combo_arc_count", "spinner", "Number of Arcs:", 5, 1, 16, 1, 0)]}
+            build_ui_from_model(content_box, panel_config, arc_count_model, widgets)
+            dialog.dynamic_models.append(arc_count_model)
+
             content_box.append(Gtk.Label(label="<b>Center Data Source</b>", use_markup=True, xalign=0, margin_top=10))
             center_source_model = {"": [ ConfigOption("center_source", "dropdown", "Source:", "none", options_dict=source_opts), ConfigOption("center_caption", "string", "Label Override:", "", tooltip="Overrides the default source name.") ]}
             build_ui_from_model(content_box, panel_config, center_source_model, widgets)

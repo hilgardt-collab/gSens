@@ -40,76 +40,90 @@ def build_ui_from_model(parent_box, config, model, widgets=None):
     if widgets is None:
         widgets = {}
 
+    all_static_options = {}
+    all_dynamic_options = {}
+    
+    # First, collect and group ALL options from the entire model
     for section_title, options in model.items():
+        static_group = all_static_options.setdefault(section_title, [])
+        for option in options:
+            if option.dynamic_group:
+                controller_key = option.dynamic_group
+                dynamic_controller_group = all_dynamic_options.setdefault(controller_key, {})
+                page_key = option.dynamic_show_on
+                page_group = dynamic_controller_group.setdefault(page_key, {})
+                # Use a blank section title if none is provided in the model
+                page_section_title = section_title if section_title else ""
+                page_section = page_group.setdefault(page_section_title, [])
+                page_section.append(option)
+            else:
+                static_group.append(option)
+
+    # Build all static options first
+    for section_title, options in all_static_options.items():
+        if not options: continue
+        
         if section_title:
             sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL, margin_top=10, margin_bottom=5)
             parent_box.append(sep)
             header_label = Gtk.Label(xalign=0)
             header_label.set_markup(f"<b>{GLib.markup_escape_text(section_title)}</b>")
             parent_box.append(header_label)
-
-        # --- NEW: Dynamic UI Generation Logic ---
-        dynamic_groups = {}
-        static_options = []
-        controller_option_key = None
-
-        # First, separate static options from dynamic ones
-        for option in options:
-            if option.dynamic_group:
-                controller_option_key = option.dynamic_group
-                if option.dynamic_show_on not in dynamic_groups:
-                    dynamic_groups[option.dynamic_show_on] = []
-                dynamic_groups[option.dynamic_show_on].append(option)
-            else:
-                static_options.append(option)
         
-        # Build static options first
-        _build_option_widgets(parent_box, config, static_options, widgets)
+        _build_option_widgets(parent_box, config, options, widgets)
 
-        # If dynamic groups were found, build the Stack UI
-        if dynamic_groups and controller_option_key:
-            controller_widget = widgets.get(controller_option_key)
-            if not controller_widget:
-                print(f"Error: Dynamic UI controller '{controller_option_key}' not found or built yet.")
-                # Build the dynamic options statically as a fallback
-                for group_options in dynamic_groups.values():
-                    _build_option_widgets(parent_box, config, group_options, widgets)
-                continue
-
-            stack = Gtk.Stack()
-            stack.set_transition_type(Gtk.StackTransitionType.SLIDE_UP_DOWN)
+    # Build one Gtk.Stack for each dynamic controller
+    for controller_key, pages in all_dynamic_options.items():
+        controller_widget = widgets.get(controller_key)
+        if not controller_widget:
+            print(f"Error: Dynamic UI controller '{controller_key}' not found or built yet. Skipping dynamic sections.")
+            continue
             
-            # Create a blank page for when no option is matched
-            stack.add_titled(Gtk.Box(), "none", "None")
+        stack = Gtk.Stack()
+        stack.set_transition_type(Gtk.StackTransitionType.SLIDE_UP_DOWN)
+        
+        # Create a blank page for when no option is matched
+        stack.add_titled(Gtk.Box(), "none", "None")
 
-            for show_on_value, group_options in dynamic_groups.items():
-                page_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=5)
-                _build_option_widgets(page_box, config, group_options, widgets)
-                stack.add_titled(page_box, str(show_on_value), str(show_on_value).replace("_", " ").title())
+        for show_on_value, sections in pages.items():
+            page_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=5)
             
-            parent_box.append(stack)
-            
-            def on_controller_changed(widget, *args):
-                active_id = "none"
-                if isinstance(widget, Gtk.ComboBoxText):
-                    active_id = widget.get_active_id()
-                elif isinstance(widget, Gtk.Switch):
-                    active_id = str(widget.get_active())
+            # Build the content of the page without recursion
+            for section_title, options in sections.items():
+                if section_title:
+                    sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL, margin_top=10, margin_bottom=5)
+                    page_box.append(sep)
+                    header_label = Gtk.Label(xalign=0)
+                    header_label.set_markup(f"<b>{GLib.markup_escape_text(section_title)}</b>")
+                    page_box.append(header_label)
+                _build_option_widgets(page_box, config, options, widgets)
 
-                if active_id and stack.get_child_by_name(active_id):
-                    stack.set_visible_child_name(active_id)
-                else:
-                    stack.set_visible_child_name("none")
+            stack.add_titled(page_box, str(show_on_value), str(show_on_value).replace("_", " ").title())
+        
+        parent_box.append(stack)
+        
+        def on_controller_changed(widget, *args):
+            active_id = "none"
+            if isinstance(widget, Gtk.ComboBoxText):
+                active_id = widget.get_active_id()
+            elif isinstance(widget, Gtk.Switch):
+                active_id = str(widget.get_active())
 
-            if isinstance(controller_widget, Gtk.Switch):
-                controller_widget.connect("notify::active", on_controller_changed)
-            else: # Assumes Gtk.ComboBoxText or similar
-                controller_widget.connect("changed", on_controller_changed)
-            
-            # Set initial state
-            GLib.idle_add(on_controller_changed, controller_widget)
+            if active_id and stack.get_child_by_name(active_id):
+                stack.set_visible_child_name(active_id)
+            else:
+                stack.set_visible_child_name("none")
+
+        if isinstance(controller_widget, Gtk.Switch):
+            controller_widget.connect("notify::active", on_controller_changed)
+        else: # Assumes Gtk.ComboBoxText or similar
+            controller_widget.connect("changed", on_controller_changed)
+        
+        # Set initial state
+        GLib.idle_add(on_controller_changed, controller_widget)
 
     return widgets
+
 
 def _build_option_widgets(parent_box, config, options, widgets):
     """

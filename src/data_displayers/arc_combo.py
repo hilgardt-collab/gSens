@@ -74,7 +74,6 @@ class ArcComboDisplayer(ComboBase):
         """
         model = {
             "Overall Layout": [
-                ConfigOption("combo_arc_count", "spinner", "Number of Arcs:", 5, 1, 16, 1, 0),
                 ConfigOption("combo_vertical_offset", "spinner", "Vertical Offset (px):", 0, -200, 200, 1, 0),
                 ConfigOption("combo_scale_factor", "scale", "Manual Scale:", 1.0, 0.5, 2.0, 0.05, 2)
             ],
@@ -235,7 +234,9 @@ class ArcComboDisplayer(ComboBase):
                 build_ui_from_model(tab_box, panel_config, arc_model, widgets)
 
             def update_destination_checkboxes():
-                count = widgets["combo_arc_count"].get_value_as_int()
+                arc_count_spinner = widgets.get("combo_arc_count")
+                if not arc_count_spinner: return
+                count = arc_count_spinner.get_value_as_int()
                 dest_arc_checkboxes.clear()
                 child = dest_flowbox.get_first_child()
                 while child: dest_flowbox.remove(child); child = dest_flowbox.get_first_child()
@@ -265,6 +266,7 @@ class ArcComboDisplayer(ComboBase):
 
                 update_destination_checkboxes()
 
+            # --- This is the crucial part that finds the spinner from the other tab ---
             arc_count_spinner = widgets.get("combo_arc_count")
             if arc_count_spinner: 
                 arc_count_spinner.connect("value-changed", on_arc_count_changed)
@@ -580,3 +582,4 @@ class ArcComboDisplayer(ComboBase):
     def close(self):
         self._stop_animation_timer()
         super().close()
+
