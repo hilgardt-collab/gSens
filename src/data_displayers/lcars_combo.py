@@ -30,6 +30,9 @@ class LCARSComboDisplayer(ComboBase):
         self._bar_values = {}
         self._history_buffers = {}
 
+        # --- OPTIMIZATION: Caching for Pango Layouts ---
+        self._static_layout_cache = {}
+
         super().__init__(panel_ref, config)
         populate_defaults_from_model(self.config, self._get_full_config_model())
         
@@ -100,7 +103,8 @@ class LCARSComboDisplayer(ComboBase):
         lb_model = LevelBarDisplayer.get_config_model()
         model["Level Bar Style"] = [ConfigOption(f"{prefix}_{opt.key}", opt.type, opt.label, opt.default, opt.min_val, opt.max_val, opt.step, opt.digits, opt.options_dict, opt.tooltip, opt.file_filters) for section in lb_model.values() for opt in section if section != "Level Bar Range"]
         
-        g_model = GraphDisplayer.get_config_model()
+        # --- BUG FIX: Call the correct static method to get the model ---
+        g_model = GraphDisplayer._get_graph_config_model_definition()
         graph_style_options = [ConfigOption(f"{prefix}_{opt.key}", opt.type, opt.label, opt.default, opt.min_val, opt.max_val, opt.step, opt.digits, opt.options_dict, opt.tooltip, opt.file_filters) for section in g_model.values() for opt in section]
         graph_style_options.insert(0, ConfigOption(f"{prefix}_graph_lcars_bg_color", "color", "Background Color:", "rgba(0,0,0,1)"))
         model["Graph Style"] = graph_style_options
@@ -273,6 +277,7 @@ class LCARSComboDisplayer(ComboBase):
             seg_count_spinner.connect("value-changed", on_segment_count_changed)
             GLib.idle_add(on_segment_count_changed, seg_count_spinner)
 
+            # --- Tab 2: Content ---
             content_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
             content_box_tab = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
             content_scroll.set_child(content_box_tab)
@@ -313,10 +318,80 @@ class LCARSComboDisplayer(ComboBase):
                 for i, content_widget in enumerate(secondary_tabs_content):
                     content_widget.set_visible(i < count)
 
+            # --- NEW: Find spinner from the other tab and connect it ---
             sec_count_spinner = widgets.get("number_of_secondary_sources")
             if sec_count_spinner:
                 sec_count_spinner.connect("value-changed", on_secondary_count_changed)
                 GLib.idle_add(on_secondary_count_changed, sec_count_spinner)
+
+            # --- NEW: Effects Tab for Content Items ---
+            effects_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
+            effects_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin_top=15, margin_bottom=15, margin_start=15, margin_end=15)
+            effects_scroll.set_child(effects_box)
+            display_notebook.append_page(effects_scroll, Gtk.Label(label="Effects"))
+
+            effects_box.append(Gtk.Label(label="<b>Copy Item Style</b>", xalign=0, use_markup=True))
+            copy_grid = Gtk.Grid(column_spacing=10, row_spacing=10)
+            effects_box.append(copy_grid)
+            source_item_combo = Gtk.ComboBoxText()
+            copy_grid.attach(Gtk.Label(label="Source Item:", xalign=1), 0, 0, 1, 1); copy_grid.attach(source_item_combo, 1, 0, 1, 1)
+            
+            copy_checkboxes = {
+                "Content": Gtk.CheckButton(label="Content Style (Display As, Height)"),
+                "Text": Gtk.CheckButton(label="Text Style (Fonts, Colors, Visibility)"),
+                "Bar": Gtk.CheckButton(label="Bar Style (Colors, Radius, Layout)"),
+            }
+            for i, (key, chk) in enumerate(copy_checkboxes.items()):
+                chk.set_active(True); copy_grid.attach(chk, 0, i + 1, 2, 1)
+            
+            apply_style_button = Gtk.Button(label="Apply Selected Style to All Other Items")
+            copy_grid.attach(apply_style_button, 0, len(copy_checkboxes) + 2, 2, 1)
+
+            property_map = {
+                "Content": ["display_as", "item_height"],
+                "Text": ["show_label", "label_font", "label_color", "show_value", "value_font", "value_color"],
+                "Bar": ["bar_bg_color", "bar_fg_color", "bar_corner_radius", "bar_text_layout", "bar_text_split_ratio"],
+            }
+
+            def on_apply_same_style_clicked(button):
+                sec_count = widgets["number_of_secondary_sources"].get_value_as_int()
+                source_id_str = source_item_combo.get_active_id()
+                if not source_id_str: return
+                
+                keys_to_copy = []
+                for key, chk in copy_checkboxes.items():
+                    if chk.get_active(): keys_to_copy.extend(property_map.get(key, []))
+
+                all_prefixes = ["primary"] + [f"secondary{i}" for i in range(1, sec_count + 1)]
+                for dest_prefix in all_prefixes:
+                    if dest_prefix == source_id_str: continue
+                    for key_suffix in keys_to_copy:
+                        source_widget = widgets.get(f"{source_id_str}_{key_suffix}")
+                        dest_widget = widgets.get(f"{dest_prefix}_{key_suffix}")
+                        if source_widget and dest_widget:
+                            if isinstance(source_widget, (Gtk.SpinButton, Gtk.Scale)): dest_widget.set_value(source_widget.get_value())
+                            elif isinstance(source_widget, Gtk.ColorButton): dest_widget.set_rgba(source_widget.get_rgba())
+                            elif isinstance(source_widget, Gtk.FontButton): dest_widget.set_font(source_widget.get_font())
+                            elif isinstance(source_widget, Gtk.ComboBoxText): dest_widget.set_active_id(source_widget.get_active_id())
+                            elif isinstance(source_widget, Gtk.Switch): dest_widget.set_active(source_widget.get_active())
+                
+                # --- BUG FIX: After applying styles, we must also apply the changes to the panel ---
+                if hasattr(dialog, 'apply_button') and dialog.apply_button:
+                    dialog.apply_button.emit("clicked")
+
+            apply_style_button.connect("clicked", on_apply_same_style_clicked)
+
+            def on_sec_count_changed_for_effects(spinner):
+                count = spinner.get_value_as_int()
+                source_item_combo.remove_all()
+                source_item_combo.append(id="primary", text="Primary")
+                for i in range(1, count + 1):
+                    source_item_combo.append(id=f"secondary{i}", text=f"Item {i}")
+                source_item_combo.set_active(0)
+
+            if sec_count_spinner:
+                sec_count_spinner.connect("value-changed", on_sec_count_changed_for_effects)
+                GLib.idle_add(on_sec_count_changed_for_effects, sec_count_spinner)
 
         return build_display_ui
         
@@ -367,6 +442,8 @@ class LCARSComboDisplayer(ComboBase):
 
     def apply_styles(self):
         super().apply_styles()
+        # --- OPTIMIZATION / BUG FIX: Clear the correct layout cache ---
+        self._static_layout_cache.clear()
         self.widget.queue_draw()
 
     def update_display(self, value):
@@ -441,10 +518,15 @@ class LCARSComboDisplayer(ComboBase):
         self._draw_content_widgets(ctx, width, height)
 
     def _create_pango_layout(self, ctx, text, font_str):
-        layout = PangoCairo.create_layout(ctx)
-        font_str = font_str or "Sans 12"
-        layout.set_font_description(Pango.FontDescription.from_string(font_str))
-        layout.set_text(text, -1)
+        # --- OPTIMIZATION: This method is now a wrapper around the cache ---
+        cache_key = f"{text}_{font_str}"
+        layout = self._static_layout_cache.get(cache_key)
+        if layout is None:
+            layout = PangoCairo.create_layout(ctx)
+            font_str = font_str or "Sans 12"
+            layout.set_font_description(Pango.FontDescription.from_string(font_str))
+            layout.set_text(text, -1)
+            self._static_layout_cache[cache_key] = layout
         return layout
 
     def _draw_frame_and_sidebar(self, ctx, width, height):
@@ -711,7 +793,7 @@ class LCARSComboDisplayer(ComboBase):
     def _draw_secondary_graph(self, ctx, x, y, w, h, prefix, data):
         padding = 10
         ctx.save(); ctx.rectangle(x+padding, y, w-2*padding, h); ctx.clip(); ctx.translate(x+padding,y)
-        drawer_config = {}; populate_defaults_from_model(drawer_config, GraphDisplayer.get_config_model())
+        drawer_config = {}; populate_defaults_from_model(drawer_config, GraphDisplayer._get_graph_config_model_definition())
         
         for key, value in self.config.items():
             if key.startswith(f"{prefix}_"):
@@ -731,11 +813,10 @@ class LCARSComboDisplayer(ComboBase):
         self._graph_drawer.config = drawer_config
         self._graph_drawer.history = self._history_buffers.get(f"{prefix}_graph", [])
         
-        caption = data.get("primary_label", "")
-        value_str = data.get("display_string", "")
-        combined_text = f"{caption}: {value_str}" if caption and value_str else caption or value_str
-        self._graph_drawer.secondary_text = combined_text
-
+        # --- BUG FIX: Call update_display on the drawer to correctly populate text ---
+        child_source_instance = self.panel_ref.data_source.child_sources.get(f"{prefix}_source")
+        self._graph_drawer.update_display(data.get('raw_data'), source_override=child_source_instance)
+        
         self._graph_drawer.on_draw(None, ctx, w-2*padding, h)
         ctx.restore()
 

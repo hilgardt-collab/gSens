@@ -29,7 +29,11 @@ class ArcComboDisplayer(ComboBase):
         # Caching state
         self._static_surface = None
         self._last_draw_width, self._last_draw_height = -1, -1
-        self._ring_layout = [] # Add instance variable for cached layout
+        self._ring_layout = [] 
+
+        # --- OPTIMIZATION: Cache for geometric properties ---
+        self._last_angle_config = {}
+        self._last_arc_count = -1
 
         super().__init__(panel_ref, config)
         populate_defaults_from_model(self.config, self._get_full_config_model())
@@ -281,8 +285,22 @@ class ArcComboDisplayer(ComboBase):
         if self._cached_image_path != image_path:
             self._cached_image_path = image_path
             self._cached_center_pixbuf = GdkPixbuf.Pixbuf.new_from_file(image_path) if image_path and os.path.exists(image_path) else None
+        
         self._static_surface = None
-        self._calculate_ring_layout() # Recalculate layout only when styles change
+        
+        # --- OPTIMIZATION: Conditionally recalculate the ring layout ---
+        num_arcs = int(self.config.get("combo_arc_count", 5))
+        current_angle_config = {}
+        for i in range(1, num_arcs + 1):
+            start = self.config.get(f"arc{i}_start_angle", -225)
+            end = self.config.get(f"arc{i}_end_angle", 45)
+            current_angle_config[i] = (start, end)
+        
+        if self._last_arc_count != num_arcs or self._last_angle_config != current_angle_config:
+            self._calculate_ring_layout()
+            self._last_angle_config = current_angle_config
+            self._last_arc_count = num_arcs
+
         self.widget.queue_draw()
 
     def _start_animation_timer(self, widget=None):
@@ -582,4 +600,3 @@ class ArcComboDisplayer(ComboBase):
     def close(self):
         self._stop_animation_timer()
         super().close()
-

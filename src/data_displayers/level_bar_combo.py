@@ -229,6 +229,7 @@ class LevelBarComboDisplayer(ComboBase):
                 for i, content_widget in enumerate(bar_tabs_content):
                     content_widget.set_visible(i < count)
 
+            # --- NEW: Find the spinner from the other tab and connect to it ---
             bar_count_spinner = widgets.get("number_of_bars")
             if bar_count_spinner:
                 bar_count_spinner.connect("value-changed", on_bar_count_changed)

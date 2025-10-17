@@ -206,6 +206,12 @@ class ComboDataSource(DataSource):
             GLib.idle_add(_build_slot_config_ui, panel_config.get("center_source", "none"), center_sub_config_box, "center_", dialog, widgets, available_sources, panel_config)
 
         def _build_level_bar_config_ui(dialog, content_box, widgets, available_sources, panel_config, source_opts):
+            # --- NEW: Add the bar count spinner ---
+            bar_count_model = {"": [ConfigOption("number_of_bars", "spinner", "Number of Bars:", 3, 1, 12, 1, 0)]}
+            build_ui_from_model(content_box, panel_config, bar_count_model, widgets)
+            dialog.dynamic_models.append(bar_count_model)
+            
+            content_box.append(Gtk.Separator(margin_top=10, margin_bottom=5))
             content_box.append(Gtk.Label(label="<b>Bar Data Sources</b>", use_markup=True, xalign=0))
             bar_notebook = Gtk.Notebook(); bar_notebook.set_scrollable(True); content_box.append(bar_notebook)
 
@@ -238,6 +244,11 @@ class ComboDataSource(DataSource):
                 on_bar_count_changed(None)
 
         def _build_lcars_config_ui(dialog, content_box, widgets, available_sources, panel_config, source_opts):
+            # --- NEW: Add the secondary item count spinner ---
+            secondary_count_model = {"": [ConfigOption("number_of_secondary_sources", "spinner", "Number of Secondary Items:", 4, 0, 16, 1, 0)]}
+            build_ui_from_model(content_box, panel_config, secondary_count_model, widgets)
+            dialog.dynamic_models.append(secondary_count_model)
+
             content_box.append(Gtk.Label(label="<b>Primary Data Source</b>", use_markup=True, xalign=0, margin_top=10))
             primary_model = {"": [ConfigOption("primary_source", "dropdown", "Source:", "none", options_dict=source_opts), ConfigOption("primary_caption", "string", "Label Override:", "")]}
             build_ui_from_model(content_box, panel_config, primary_model, widgets); dialog.dynamic_models.append(primary_model)

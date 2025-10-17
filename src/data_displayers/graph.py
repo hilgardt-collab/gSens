@@ -277,4 +277,3 @@ class GraphDisplayer(TextDisplayer):
         line_rgba = Gdk.RGBA(); line_rgba.parse(self.config.get("graph_line_color"))
         ctx.set_source_rgba(line_rgba.red, line_rgba.green, line_rgba.blue, line_rgba.alpha)
         ctx.set_line_width(float(self.config.get("graph_line_width", 2.0))); ctx.stroke()
-
