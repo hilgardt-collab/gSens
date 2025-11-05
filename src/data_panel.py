@@ -293,8 +293,23 @@ class DataPanel(BasePanel):
         if display_custom_builder:
             display_custom_builder(dialog, display_tab_box, all_widgets, AVAILABLE_DATA_SOURCES, self.config)
 
+        # --- NEW: Handle the close button (X) to act as Cancel ---
+        # For non-modal dialogs, we need to override CustomDialog's close-request handler
+        # which tries to call respond(). Instead, we'll just close the dialog.
+        def on_close_request(d):
+            # Simply destroy the dialog without marking changes as applied
+            # This triggers the destroy handler which will revert changes
+            d.destroy()
+            return True  # Return True to stop the signal propagation and prevent default handler
+        
+        # Disconnect the default CustomDialog close-request handler first
+        # Then connect our own handler
+        dialog.disconnect_by_func(dialog._on_close_request)
+        dialog.connect("close-request", on_close_request)
+
         def on_dialog_destroy(d):
             if not dialog_state['changes_applied']:
+                # User cancelled or closed the dialog without applying
                 if self.data_displayer is not original_displayer_on_open:
                     self.data_displayer.close()
                     self.data_displayer = original_displayer_on_open
@@ -305,4 +320,3 @@ class DataPanel(BasePanel):
 
         dialog.connect("destroy", on_dialog_destroy)
         dialog.present()
-

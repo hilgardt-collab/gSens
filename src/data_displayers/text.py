@@ -31,7 +31,8 @@ class TextDisplayer(DataDisplayer):
             self.config.setdefault(f"line{i}_font", "Sans Italic 12" if i == 1 else "Sans Bold 18")
             self.config.setdefault(f"line{i}_color", "rgba(220,220,220,1)")
             self.config.setdefault(f"line{i}_slant", "0")
-            self.config.setdefault(f"line{i}_rotation", "0") 
+            self.config.setdefault(f"line{i}_rotation", "0")
+            self.config.setdefault(f"line{i}_consolidate", "False")
         
         self._initialize_text_lines()
 
@@ -147,6 +148,7 @@ class TextDisplayer(DataDisplayer):
                         ConfigOption(f"{prefix_}line{i}_color", "color", "Color:", "rgba(220,220,220,1)"),
                         ConfigOption(f"{prefix_}line{i}_slant", "spinner", "Slant (deg):", 0, -45, 45, 1, 0),
                         ConfigOption(f"{prefix_}line{i}_rotation", "spinner", "Rotation (deg):", 0, -180, 180, 5, 0),
+                        ConfigOption(f"{prefix_}line{i}_consolidate", "bool", "Consolidate with Previous Line:", "False"),
                     ]}
                     
                     build_ui_from_model(line_box, panel_config, line_model, widgets)
@@ -154,6 +156,11 @@ class TextDisplayer(DataDisplayer):
                     
                     source_combo = widgets[f"{prefix_}line{i}_source"]
                     custom_text_row = widgets[f"{prefix_}line{i}_custom_text"].get_parent()
+                    consolidate_row = widgets[f"{prefix_}line{i}_consolidate"].get_parent()
+                    
+                    # Hide consolidate option for first line
+                    if i == 1:
+                        consolidate_row.set_visible(False)
                     
                     def on_source_changed(combo, row):
                         row.set_visible(combo.get_active_id() == "custom_text")
@@ -179,68 +186,135 @@ class TextDisplayer(DataDisplayer):
         line_count = int(self.config.get("text_line_count", "2"))
         spacing = int(self.config.get("text_spacing", 4))
         
-        layouts_to_draw = []
-        total_text_height = 0
-        max_text_width = 0
+        # Group lines by consolidation
+        line_groups = []
+        current_group = []
         
         for i in range(min(line_count, len(self._text_lines))):
+            line_num = i + 1
+            consolidate = str(self.config.get(f"line{line_num}_consolidate", "False")).lower() == 'true'
+            
+            # Create layout for this line
             layout = self._layout_cache[i]
             if layout is None:
                 layout = self.widget.create_pango_layout("")
                 self._layout_cache[i] = layout
 
-            line_num = i + 1
             font_str = self.config.get(f"line{line_num}_font", "Sans 12")
             layout.set_font_description(Pango.FontDescription.from_string(font_str))
             layout.set_text(self._text_lines[i], -1)
-            layouts_to_draw.append(layout)
             
-            text_dims = layout.get_pixel_extents()[1]
-            total_text_height += text_dims.height
-            max_text_width = max(max_text_width, text_dims.width)
+            line_info = {
+                'line_num': line_num,
+                'layout': layout,
+                'align': self.config.get(f"line{line_num}_align", "center"),
+                'color': self.config.get(f"line{line_num}_color", "rgba(220,220,220,1)"),
+                'slant': float(self.config.get(f"line{line_num}_slant", "0")),
+                'rotation': float(self.config.get(f"line{line_num}_rotation", "0")),
+            }
+            
+            if i == 0 or not consolidate:
+                # Start a new group
+                if current_group:
+                    line_groups.append(current_group)
+                current_group = [line_info]
+            else:
+                # Add to current group (consolidate with previous)
+                current_group.append(line_info)
         
-        if len(layouts_to_draw) > 1:
-            total_text_height += (len(layouts_to_draw) - 1) * spacing
-
-        # --- Calculate Block Position ---
+        # Add the last group
+        if current_group:
+            line_groups.append(current_group)
+        
+        # Calculate total height needed
+        total_height = 0
+        for group in line_groups:
+            max_height = 0
+            for line_info in group:
+                text_dims = line_info['layout'].get_pixel_extents()[1]
+                max_height = max(max_height, text_dims.height)
+            total_height += max_height
+        
+        # Add spacing between groups (not within groups)
+        if len(line_groups) > 1:
+            total_height += (len(line_groups) - 1) * spacing
+        
+        # Calculate vertical starting position
         v_align = self.config.get("text_vertical_align", "center")
-        if v_align == "start": current_y = 0
-        elif v_align == "end": current_y = height - total_text_height
-        else: current_y = (height - total_text_height) / 2 # center
-
-        h_align_block = self.config.get("text_horizontal_align", "center")
-        if h_align_block == "start": block_x = 0
-        elif h_align_block == "end": block_x = width - max_text_width
-        else: block_x = (width - max_text_width) / 2 # center
+        if v_align == "start":
+            current_y = 0
+        elif v_align == "end":
+            current_y = height - total_height
+        else:
+            current_y = (height - total_height) / 2
         
-        # --- Draw each line relative to the block ---
-        for i, layout in enumerate(layouts_to_draw):
-            line_num = i + 1
+        # Draw each group
+        for group in line_groups:
+            # Find max height in this group for baseline alignment
+            max_group_height = 0
+            for line_info in group:
+                text_dims = line_info['layout'].get_pixel_extents()[1]
+                max_group_height = max(max_group_height, text_dims.height)
             
-            ctx.save()
-
-            rgba = Gdk.RGBA(); rgba.parse(self.config.get(f"line{line_num}_color", "rgba(220,220,220,1)"))
-            ctx.set_source_rgba(rgba.red, rgba.green, rgba.blue, rgba.alpha)
-
-            align_str_line = self.config.get(f"line{line_num}_align", "center")
-            text_width, text_height = layout.get_pixel_extents()[1].width, layout.get_pixel_extents()[1].height
+            # Determine if this group is consolidated (has more than one line)
+            is_consolidated = len(group) > 1
             
-            line_offset_x = 0
-            if align_str_line == "right": line_offset_x = max_text_width - text_width
-            elif align_str_line == "center": line_offset_x = (max_text_width - text_width) / 2
+            if is_consolidated:
+                # For consolidated groups, use full panel width
+                available_width = width
+                block_x = 0
+            else:
+                # For single-line groups, calculate width based on text and apply block alignment
+                max_group_width = 0
+                for line_info in group:
+                    text_dims = line_info['layout'].get_pixel_extents()[1]
+                    max_group_width = max(max_group_width, text_dims.width)
+                
+                available_width = max_group_width
+                
+                # Get horizontal block alignment
+                h_align_block = self.config.get("text_horizontal_align", "center")
+                if h_align_block == "start":
+                    block_x = 0
+                elif h_align_block == "end":
+                    block_x = width - max_group_width
+                else:
+                    block_x = (width - max_group_width) / 2
             
-            current_x = block_x + line_offset_x
+            # Draw each line in the group
+            for line_info in group:
+                ctx.save()
+                
+                rgba = Gdk.RGBA()
+                rgba.parse(line_info['color'])
+                ctx.set_source_rgba(rgba.red, rgba.green, rgba.blue, rgba.alpha)
+                
+                text_width = line_info['layout'].get_pixel_extents()[1].width
+                text_height = line_info['layout'].get_pixel_extents()[1].height
+                
+                # Calculate x position based on alignment within available width
+                if line_info['align'] == "left":
+                    line_x = block_x
+                elif line_info['align'] == "right":
+                    line_x = block_x + available_width - text_width
+                else:  # center
+                    line_x = block_x + (available_width - text_width) / 2
+                
+                # Vertical centering within group height
+                line_y = current_y + (max_group_height - text_height) / 2
+                
+                # Apply transformations
+                ctx.translate(line_x + text_width / 2, line_y + text_height / 2)
+                
+                if line_info['rotation'] != 0:
+                    ctx.rotate(math.radians(line_info['rotation']))
+                if line_info['slant'] != 0:
+                    ctx.transform(cairo.Matrix(1, 0, math.tan(math.radians(line_info['slant'])), 1, 0, 0))
+                
+                ctx.move_to(-text_width / 2, -text_height / 2)
+                PangoCairo.show_layout(ctx, line_info['layout'])
+                
+                ctx.restore()
             
-            slant_deg = float(self.config.get(f"line{line_num}_slant", "0"))
-            rotation_deg = float(self.config.get(f"line{line_num}_rotation", "0"))
-
-            ctx.translate(current_x + text_width / 2, current_y + text_height / 2)
-            if rotation_deg != 0: ctx.rotate(math.radians(rotation_deg))
-            if slant_deg != 0: ctx.transform(cairo.Matrix(1, 0, math.tan(math.radians(slant_deg)), 1, 0, 0))
-
-            ctx.move_to(-text_width / 2, -text_height / 2)
-            PangoCairo.show_layout(ctx, layout)
-            
-            ctx.restore()
-            
-            current_y += text_height + spacing
+            # Move to next group
+            current_y += max_group_height + spacing
