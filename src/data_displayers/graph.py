@@ -201,7 +201,8 @@ class GraphDisplayer(TextDisplayer):
         
         # --- 3. Draw Text Overlay ---
         # Call the parent TextDisplayer's on_draw method to render the text on top
-        if not self.is_drawer :
+        # FIX: Check the is_drawer flag before rendering text
+        if not self.is_drawer:
             super().on_draw(area, ctx, width, height)
 
     def _draw_grid(self, ctx, width, height):

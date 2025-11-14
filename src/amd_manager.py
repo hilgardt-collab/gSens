@@ -47,8 +47,10 @@ class AMDManager:
                     if device_info:
                         self.devices.append(device_info)
             except Exception as e:
-                print(f"Could not probe {card_path} for AMD GPU: {e}")
+                print(".", end = ".")
+                #print(f"Could not probe {card_path} for AMD GPU: {e}")
 
+        print(".")
         self.device_count = len(self.devices)
         if self.device_count > 0:
             self.amd_gpus_found = True

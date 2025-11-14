@@ -23,6 +23,7 @@ class LCARSComboDisplayer(ComboBase):
     def __init__(self, panel_ref, config):
         self._level_bar_drawer = LevelBarDisplayer(None, config)
         self._graph_drawer = GraphDisplayer(None, config)
+        # Fix: Ensure graph drawer doesn't draw its own text when embedded
         self._graph_drawer.is_drawer = True
         self._cached_primary_image = None
         self._cached_primary_image_path = None
@@ -140,7 +141,8 @@ class LCARSComboDisplayer(ComboBase):
                 ConfigOption("lcars_sidebar_width", "spinner", "Side Bar Width (px):", 150, 20, 500, 5, 0),
                 ConfigOption("lcars_corner_radius", "spinner", "Corner Radius (px):", 60, 10, 500, 5, 0),
                 ConfigOption("lcars_extension_corner_style", "dropdown", "Extension Corner Style:", "square", options_dict={"Square": "square", "Round": "round"}),
-                ConfigOption("lcars_extension_corner_radius", "spinner", "Extension Corner Radius (px):", 20, 0, 100, 1, 0),
+                # This option is no longer used, radius is derived from bar height
+                # ConfigOption("lcars_extension_corner_radius", "spinner", "Extension Corner Radius (px):", 20, 0, 100, 1, 0),
                 ConfigOption("lcars_frame_color", "color", "Frame Color:", "rgba(255,153,102,1)"),
                 ConfigOption("lcars_content_bg_color", "color", "Content BG Color:", "rgba(0,0,0,1)"),
                 ConfigOption("lcars_content_padding", "spinner", "Content Padding (px):", 5, 0, 100, 1, 0),
@@ -212,6 +214,9 @@ class LCARSComboDisplayer(ComboBase):
                 "Header Bar (Bottom)": full_model["Header Bar (Bottom)"],
                 "Animation": full_model["Animation"]
             }
+            # Remove the now-unused corner radius option
+            frame_ui_model["Frame Style"] = [opt for opt in frame_ui_model["Frame Style"] if opt.key != "lcars_extension_corner_radius"]
+
             build_ui_from_model(frame_box, panel_config, frame_ui_model, widgets)
             dialog.dynamic_models.append(frame_ui_model)
             
@@ -672,61 +677,80 @@ class LCARSComboDisplayer(ComboBase):
         frame_color_str = self.config.get("lcars_frame_color", "rgba(255,153,102,1)")
         mode = self.config.get("lcars_sidebar_extension_mode", "top")
         ext_style = self.config.get("lcars_extension_corner_style", "square")
-        ext_radius = float(self.config.get("lcars_extension_corner_radius", 20))
-
+        
         top_bar_h = float(self.config.get("lcars_top_bar_height", 40))
         bottom_ext_h = float(self.config.get("lcars_bottom_extension_height", 40))
         
         has_top_ext = mode in ["top", "both"]
         has_bottom_ext = mode in ["bottom", "both"]
         
-        ctx.new_path()
-        ctx.move_to(0, radius) 
-        ctx.arc(radius, radius, radius, math.pi, 1.5 * math.pi)
-        
-        if ext_style == "round" and has_top_ext:
-            ctx.line_to(width - ext_radius, 0)
-            ctx.arc(width - ext_radius, ext_radius, ext_radius, 1.5 * math.pi, 2 * math.pi)
-        else:
-            ctx.line_to(width, 0)
-
-        if ext_style == "round" and has_bottom_ext:
-            ctx.line_to(width, height - ext_radius)
-            ctx.arc(width - ext_radius, height - ext_radius, ext_radius, 0, 0.5 * math.pi)
-        else:
-            ctx.line_to(width, height)
-
-        ctx.line_to(radius, height)
-        ctx.arc(radius, height - radius, radius, 0.5 * math.pi, math.pi)
-        ctx.close_path()
-
         content_y_start = top_bar_h if has_top_ext else 0
         content_y_end = height - bottom_ext_h if has_bottom_ext else height
         
-        ctx.move_to(width, content_y_start)
+        # Radii for round extensions are half the bar height
+        r_top = top_bar_h / 2
+        r_bot = bottom_ext_h / 2
+
+        ctx.new_path()
         
+        # --- Outer Path (as a single, continuous line) ---
+        ctx.move_to(0, radius) 
+        ctx.arc(radius, radius, radius, math.pi, 1.5 * math.pi) # 1. Top-Left
+
+        # 2. Top Edge and Extension
+        if ext_style == "round" and has_top_ext and r_top > 0:
+            ctx.line_to(width - r_top, 0)
+            # Use arc (CCW) from -90 deg (1.5*pi) to 0 deg (0) for top-right convex QUARTER
+            ctx.arc(width - r_top, r_top, r_top, 1.5 * math.pi, 0) # Ends at (width, r_top)
+        else:
+            ctx.line_to(width, 0) # Square top
+        
+        # 3. Right Edge
+        y_before_bottom_arc = height
+        if has_bottom_ext:
+             y_before_bottom_arc = height - r_bot if (ext_style == "round" and r_bot > 0) else height
+        
+        ctx.line_to(width, y_before_bottom_arc)
+
+        # 4. Bottom Edge and Extension
+        if ext_style == "round" and has_bottom_ext and r_bot > 0:
+            # Use arc (CCW) from 0 deg to 90 deg (0.5*pi) for bottom-right convex QUARTER
+            ctx.arc(width - r_bot, height - r_bot, r_bot, 0, 0.5 * math.pi) # Ends at (width - r_bot, height)
+        else:
+            ctx.line_to(width, height) # Square bottom
+            
+        # 5. Bottom-Left corner
+        ctx.line_to(radius, height)
+        ctx.arc(radius, height - radius, radius, 0.5 * math.pi, math.pi) # Ends at (0, height - radius)
+        
+        # 6. Close Outer Path
+        ctx.close_path()
+
+        # --- Inner Cutout Path ---
+        ctx.move_to(width, content_y_start)
         if has_top_ext:
             ctx.line_to(sidebar_w + radius, content_y_start)
-            ctx.arc_negative(sidebar_w + radius, content_y_start + radius, radius, 1.5 * math.pi, math.pi)
+            ctx.arc_negative(sidebar_w + radius, content_y_start + radius, radius, 1.5 * math.pi, math.pi) # Top-inner cutout
         else:
             ctx.line_to(sidebar_w, content_y_start)
 
         ctx.line_to(sidebar_w, content_y_end - (radius if has_bottom_ext else 0))
 
         if has_bottom_ext:
-            ctx.arc_negative(sidebar_w + radius, content_y_end - radius, radius, math.pi, 0.5 * math.pi)
+            ctx.arc_negative(sidebar_w + radius, content_y_end - radius, radius, math.pi, 0.5 * math.pi) # Bottom-inner cutout
             ctx.line_to(width, content_y_end)
         else:
             ctx.line_to(width, content_y_end)
-
         ctx.close_path()
 
+        # Fill the combined path
         frame_color = Gdk.RGBA(); frame_color.parse(frame_color_str)
         ctx.set_source_rgba(frame_color.red, frame_color.green, frame_color.blue, frame_color.alpha)
         ctx.set_fill_rule(cairo.FILL_RULE_EVEN_ODD)
         ctx.fill()
         ctx.set_fill_rule(cairo.FILL_RULE_WINDING)
         
+        # --- Draw Headers (on top of the filled frame) ---
         top_header_pos = self.config.get("lcars_top_header_position", "top")
         bottom_header_pos = self.config.get("lcars_bottom_header_position", "none")
 

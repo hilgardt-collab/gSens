@@ -6,6 +6,64 @@ from gi.repository import Gtk, Gdk, GLib, Pango
 # Import the clipboard singletons from the new unified module
 from ui_clipboard import font_clipboard, color_clipboard
 
+# --- Singleton Font Dialog ---
+# We create one shared dialog instance for the entire application.
+# This avoids the multi-second lag of Gtk.FontButton creating a
+# new native dialog and re-scanning all system fonts *every single time* it's clicked.
+_global_font_dialog = None
+_active_font_button = None # Stores the Gtk.Button that was clicked
+
+def get_global_font_dialog(parent_window):
+    """
+    Gets (or creates) the singleton Gtk.FontChooserDialog.
+    """
+    global _global_font_dialog
+    if _global_font_dialog is None:
+        # --- FIX: Removed the invalid 'parent' argument from the constructor ---
+        _global_font_dialog = Gtk.FontChooserDialog(title="Select Font")
+        # --- END FIX ---
+        _global_font_dialog.connect("response", on_global_font_dialog_response)
+        # Hide the dialog on close instead of destroying it
+        _global_font_dialog.connect("close-request", lambda d: d.hide() or True)
+    
+    # Always update the transient parent to the window that's currently active
+    if parent_window:
+        _global_font_dialog.set_transient_for(parent_window)
+    return _global_font_dialog
+
+def on_global_font_dialog_response(dialog, response_id):
+    """
+    Called when the user clicks OK or Cancel in the shared font dialog.
+    """
+    global _active_font_button
+    if response_id == Gtk.ResponseType.OK and _active_font_button:
+        font_desc = dialog.get_font_desc()
+        if font_desc:
+            # Store the new font description on the button
+            _active_font_button.font_desc = font_desc
+            # Update the button's label to show the new font
+            _active_font_button.set_label(font_desc.to_string())
+    
+    if dialog:
+        dialog.hide()
+    _active_font_button = None # Clear the active button
+
+def on_custom_font_button_clicked(button):
+    """
+    Called when one of our new Gtk.Buttons (acting as a font button) is clicked.
+    """
+    global _active_font_button
+    _active_font_button = button
+    
+    dialog = get_global_font_dialog(button.get_ancestor(Gtk.Window))
+    # Set the dialog to show the button's current font
+    if hasattr(button, 'font_desc') and button.font_desc:
+        dialog.set_font_desc(button.font_desc)
+        
+    dialog.present()
+# --- End Singleton Font Dialog ---
+
+
 class ConfigOption:
     """
     A data class to define a single configuration option.
@@ -44,20 +102,21 @@ def build_ui_from_model(parent_box, config, model, widgets=None):
     all_dynamic_options = {}
     
     # First, collect and group ALL options from the entire model
-    for section_title, options in model.items():
-        static_group = all_static_options.setdefault(section_title, [])
-        for option in options:
-            if option.dynamic_group:
-                controller_key = option.dynamic_group
-                dynamic_controller_group = all_dynamic_options.setdefault(controller_key, {})
-                page_key = option.dynamic_show_on
-                page_group = dynamic_controller_group.setdefault(page_key, {})
-                # Use a blank section title if none is provided in the model
-                page_section_title = section_title if section_title else ""
-                page_section = page_group.setdefault(page_section_title, [])
-                page_section.append(option)
-            else:
-                static_group.append(option)
+    if model:
+        for section_title, options in model.items():
+            static_group = all_static_options.setdefault(section_title, [])
+            for option in options:
+                if option.dynamic_group:
+                    controller_key = option.dynamic_group
+                    dynamic_controller_group = all_dynamic_options.setdefault(controller_key, {})
+                    page_key = option.dynamic_show_on
+                    page_group = dynamic_controller_group.setdefault(page_key, {})
+                    # Use a blank section title if none is provided in the model
+                    page_section_title = section_title if section_title else ""
+                    page_section = page_group.setdefault(page_section_title, [])
+                    page_section.append(option)
+                else:
+                    static_group.append(option)
 
     # Build all static options first
     for section_title, options in all_static_options.items():
@@ -195,26 +254,45 @@ def _build_option_widgets(parent_box, config, options, widgets):
             row.append(color_box)
 
         elif option.type == "font":
+            # --- FONT BUTTON PERFORMANCE FIX ---
+            # Replaced slow Gtk.FontButton with a Gtk.Button that uses
+            # a single, shared Gtk.FontChooserDialog instance.
             font_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, hexpand=True)
             
-            font_desc = Pango.FontDescription.from_string(str(config.get(option.key, option.default)))
-            widget = Gtk.FontButton()
-            widget.set_font_desc(font_desc)
+            font_desc_str = str(config.get(option.key, option.default))
+            font_desc = Pango.FontDescription.from_string(font_desc_str)
+            
+            # Create a regular button that will act as our font button
+            widget = Gtk.Button()
+            widget.set_label(font_desc.to_string())
             widget.set_hexpand(True)
+            
+            # Store the font_desc on the widget so we can retrieve it
+            widget.font_desc = font_desc 
+            
+            # Connect to our custom singleton dialog launcher
+            widget.connect("clicked", on_custom_font_button_clicked)
+            
             font_box.append(widget)
+            # --- END FONT BUTTON FIX ---
 
             copy_button = Gtk.Button(icon_name="edit-copy-symbolic", tooltip_text="Copy Font")
             paste_button = Gtk.Button(icon_name="edit-paste-symbolic", tooltip_text="Paste Font")
 
-            copy_button.connect("clicked", lambda btn, font_btn=widget: font_clipboard.copy_font(font_btn.get_font_desc().to_string()))
+            # --- FONT BUTTON FIX: Update copy/paste handlers ---
+            # Read from our custom 'font_desc' attribute
+            copy_button.connect("clicked", lambda btn, font_btn=widget: font_clipboard.copy_font(font_btn.font_desc.to_string()))
             
             def on_paste_clicked(btn, font_btn=widget):
                 font_to_paste_str = font_clipboard.get_font()
                 if font_to_paste_str:
                     new_font_desc = Pango.FontDescription.from_string(font_to_paste_str)
-                    font_btn.set_font_desc(new_font_desc)
+                    # Store the new description and update the button label
+                    font_btn.font_desc = new_font_desc
+                    font_btn.set_label(new_font_desc.to_string())
             
             paste_button.connect("clicked", on_paste_clicked)
+            # --- END FONT BUTTON FIX ---
             
             font_box.append(copy_button)
             font_box.append(paste_button)
@@ -369,12 +447,13 @@ def get_config_from_widgets(widgets, models_list):
         elif option_def.type == "color":
             new_config[key] = widget.get_rgba().to_string()
         elif option_def.type == "font":
-            font_desc = widget.get_font_desc()
-            if font_desc:
-                new_config[key] = font_desc.to_string()
+            # --- FONT BUTTON FIX: Read from our custom 'font_desc' attribute ---
+            if hasattr(widget, 'font_desc') and widget.font_desc:
+                new_config[key] = widget.font_desc.to_string()
             else:
                 # Fallback in case something is very wrong
                 new_config[key] = option_def.default
+            # --- END FONT BUTTON FIX ---
         elif option_def.type == "scale" or option_def.type == "spinner":
             new_config[key] = f"{widget.get_value():.{option_def.digits}f}"
         elif option_def.type == "dropdown":
@@ -384,4 +463,3 @@ def get_config_from_widgets(widgets, models_list):
             else:
                 new_config[key] = option_def.default
     return new_config
-

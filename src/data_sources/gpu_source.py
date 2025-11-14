@@ -30,15 +30,23 @@ class GPUDataSource(DataSource):
         """
         Returns the numerical value for the metric selected for display.
         """
-        # --- FIX: Handle the case where data might be None on initial draw ---
         if data is None:
             return None
             
         metric = self.config.get("gpu_metric_to_display", "utilization")
+        
         if metric == "vram":
             vram_data = data.get("vram")
             return vram_data.get("percent") if vram_data else None
-        return data.get(metric)
+        
+        # --- FIX: Handle dict vs. number ---
+        value = data.get(metric)
+        if isinstance(value, dict):
+            # Handle cases like frequency {'current': 1500}
+            return value.get('current')
+        # Handle cases like utilization (which is just a number)
+        return value
+        # --- END FIX ---
 
     @staticmethod
     def _format_metric(metric_key, value, config, data):
@@ -47,37 +55,48 @@ class GPUDataSource(DataSource):
             return "N/A"
 
         if metric_key == "utilization":
+            # value is a number
             return f"{value:.0f}%"
         elif metric_key == "temperature":
+            # value is a number
             unit = config.get("display_unit_temp", "C")
             val_display, unit_suffix = value, "°C"
             if unit == "F": val_display, unit_suffix = (value * 9/5) + 32, "°F"
             elif unit == "K": val_display, unit_suffix = value + 273.15, "K"
             return f"{val_display:.1f}{unit_suffix}"
         elif metric_key == "frequency":
+            # --- FIX: Handle dict vs. number ---
+            # value might be a dict {'current': 1500} or just a number
+            freq_mhz = value.get('current') if isinstance(value, dict) else value
+            if freq_mhz is None:
+                return "N/A"
+            # --- END FIX ---
             unit = config.get("display_unit_freq", "GHz")
             if unit == "GHz":
-                return f"{value / 1000:.2f} GHz"
+                return f"{freq_mhz / 1000:.2f} GHz"
             else:
-                return f"{value:.0f} MHz"
+                return f"{freq_mhz:.0f} MHz"
         elif metric_key == "vram":
+            # value is a dict
             if not isinstance(value, dict): return "N/A"
             style = config.get("text_content_style_vram", "gb_and_percent")
             if style == "gb_only": return f"{value['used_gb']:.1f}/{value['total_gb']:.1f} GB"
             if style == "percent_only": return f"{value['percent']:.1f}%"
             return f"{value['used_gb']:.1f}/{value['total_gb']:.1f} GB ({value['percent']:.1f}%)"
         elif metric_key == "power":
+            # value is a number
             return f"{value:.1f} W"
         elif metric_key == "fan_speed":
+            # value is a number
             return f"{value:.0f}%"
         elif metric_key == "processes":
+            # value is a number
             return f"{value} Process{'es' if value != 1 else ''}"
         
         return "N/A"
 
     def get_display_string(self, data):
         """Formats the display string for the primary metric."""
-        # --- FIX: Handle the case where data might be None on initial draw ---
         if data is None:
             return "N/A"
         primary_metric = self.config.get("gpu_metric_to_display", "utilization")
@@ -167,4 +186,3 @@ class GPUDataSource(DataSource):
         # The alarm callback is inherited from the base DataSource.
         # This method can be safely removed.
         return super().get_configure_callback()
-

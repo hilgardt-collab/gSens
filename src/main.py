@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version('GdkPixbuf', '2.0')
+# Import Gdk for monitor information
 from gi.repository import Gtk, Gio, GLib, Gdk, GdkPixbuf
 
 # --- Centralized Module & Data Loading ---
@@ -35,6 +36,9 @@ from data_sources.fan_speed import FanSpeedDataSource
 from data_sources.system_temp import SystemTempDataSource
 from sensor_cache import SENSOR_CACHE
 
+# --- Import config_dialog to pre-load the font dialog ---
+import config_dialog
+
 DEFAULT_PANEL_LAYOUT = [
     {'type': 'cpu', 'displayer_type': 'arc_gauge', 'width': '16', 'height': '16', 'grid_x': '0', 'grid_y': '0', 'title_text': 'CPU Usage', 'cpu_metric_to_display': 'usage'},
     {'type': 'cpu', 'displayer_type': 'arc_gauge', 'width': '16', 'height': '16', 'grid_x': '16', 'grid_y': '0', 'title_text': 'CPU Temperature', 'cpu_metric_to_display': 'temperature'},
@@ -45,10 +49,12 @@ DEFAULT_PANEL_LAYOUT = [
 ]
 
 class MainWindow(Gtk.ApplicationWindow):
-    def __init__(self, app, sensors_ready_event=None):
+    def __init__(self, app, sensors_ready_event=None, cli_options=None):
         super().__init__(title="gSens System Monitor", application=app)
         self.app = app
         self.sensors_ready_event = sensors_ready_event
+        # Store command-line options
+        self.cli_options = cli_options or {}
 
         # --- NEW: Add a flag to prevent resize signal recursion ---
         self._is_snapping = False
@@ -88,6 +94,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self._setup_key_press_controller()
         GLib.timeout_add(100, self._check_sensors_ready)
         
+        # Apply fullscreen settings based on CLI args and config
         GLib.idle_add(self._apply_startup_fullscreen_settings)
         
     def _check_sensors_ready(self):
@@ -144,22 +151,59 @@ class MainWindow(Gtk.ApplicationWindow):
         # Reset the flag after the current GTK main loop iteration is done
         GLib.idle_add(self._reset_snapping_flag)
 
+    def _fullscreen_on_monitor_index(self, monitor_index):
+        """Helper function to fullscreen on a specific monitor index."""
+        try:
+            display = self.get_display()
+            monitors = display.get_monitors()
+            num_monitors = monitors.get_n_items()
+            if 0 <= monitor_index < num_monitors:
+                monitor = monitors.get_item(monitor_index)
+                self.fullscreen_on_monitor(monitor)
+            else:
+                print(f"Warning: Monitor index {monitor_index} is out of range (0-{num_monitors-1}). Defaulting to primary.")
+                self.fullscreen()
+        except Exception as e:
+            print(f"Error applying fullscreen to monitor {monitor_index}: {e}. Defaulting.")
+            self.fullscreen()
+
     def _apply_startup_fullscreen_settings(self):
+        """
+        Applies fullscreen settings, prioritizing command-line arguments
+        over saved configuration.
+        """
+        # 1. Check for --windowed override
+        if 'windowed' in self.cli_options:
+            return GLib.SOURCE_REMOVE # Do nothing, stay windowed
+
+        # 2. Check for --fullscreen-monitor=N
+        if 'fullscreen-monitor' in self.cli_options:
+            try:
+                monitor_index = int(self.cli_options['fullscreen-monitor'])
+                self._fullscreen_on_monitor_index(monitor_index)
+            except (ValueError, TypeError):
+                print(f"Invalid monitor index: '{self.cli_options['fullscreen-monitor']}'. Defaulting to primary.")
+                self.fullscreen()
+            return GLib.SOURCE_REMOVE
+
+        # 3. Check for -f or --fullscreen
+        if 'fullscreen' in self.cli_options:
+            self.fullscreen()
+            return GLib.SOURCE_REMOVE
+
+        # 4. If no CLI args, use config file settings
         grid_config = config_manager.config["GridLayout"] if config_manager.config.has_section("GridLayout") else {}
         if grid_config.get("launch_fullscreen", "False").lower() == 'true':
             try:
                 monitor_index = int(grid_config.get("fullscreen_display_index", -1))
-                display = self.get_display()
-                monitors = display.get_monitors()
-                num_monitors = monitors.get_n_items()
-                if 0 <= monitor_index < num_monitors:
-                    monitor = monitors.get_item(monitor_index)
-                    self.fullscreen_on_monitor(monitor)
-                else:
+                if monitor_index == -1:
                     self.fullscreen()
+                else:
+                    self._fullscreen_on_monitor_index(monitor_index)
             except (ValueError, TypeError) as e:
-                print(f"Error applying fullscreen setting: {e}. Defaulting to current monitor.")
+                print(f"Error applying config fullscreen setting: {e}. Defaulting.")
                 self.fullscreen()
+        
         return GLib.SOURCE_REMOVE
 
     def _on_fullscreen_changed(self, window, pspec):
@@ -285,18 +329,110 @@ class MainWindow(Gtk.ApplicationWindow):
 class SystemMonitorApp(Gtk.Application):
     def __init__(self, **kwargs):
         super().__init__(application_id="com.example.gtk-system-monitor", 
-                         flags=Gio.ApplicationFlags.NON_UNIQUE, **kwargs)
+                         # Add HANDLES_COMMAND_LINE flag
+                         flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE | Gio.ApplicationFlags.NON_UNIQUE, 
+                         **kwargs)
         self.window = None
         self.sensors_ready_event = threading.Event()
+        self.command_line_options = {} # To store parsed options
+        
+        # --- FIX: Register options in __init__ ---
+        # This must be done *before* app.run() is called.
+        
+        # Gtk automatically handles --help
+        self.add_main_option(
+            "fullscreen", ord("f"), GLib.OptionFlags.NONE, GLib.OptionArg.NONE, 
+            "Launch in fullscreen mode on the primary monitor", None)
+        self.add_main_option(
+            "fullscreen-monitor", 0, GLib.OptionFlags.NONE, GLib.OptionArg.STRING,
+            "Launch fullscreen on a specific monitor (e.g., '1')", "MONITOR_INDEX")
+        self.add_main_option(
+            "windowed", 0, GLib.OptionFlags.NONE, GLib.OptionArg.NONE,
+            "Launch in windowed mode (overrides config file)", None)
+        self.add_main_option(
+            "list-monitors", ord("l"), GLib.OptionFlags.NONE, GLib.OptionArg.NONE,
+            "List available monitors and exit", None)
+        self.add_main_option(
+            "config", 0, GLib.OptionFlags.NONE, GLib.OptionArg.STRING,
+            "Load a specific config file", "FILEPATH")
+        self.add_main_option(
+            "version", ord("v"), GLib.OptionFlags.NONE, GLib.OptionArg.NONE,
+            "Show application version and exit", None)
 
     def do_activate(self):
+        """
+        Called when the application is activated without command-line args,
+        or after do_command_line finishes.
+        """
         if not self.window or not self.window.is_visible():
-            self.window = MainWindow(self, sensors_ready_event=self.sensors_ready_event)
+            self.window = MainWindow(self, 
+                                     sensors_ready_event=self.sensors_ready_event,
+                                     cli_options=self.command_line_options)
         self.window.present()
+        # Clear options after passing them to the window
+        self.command_line_options = {}
 
     def do_command_line(self, command_line):
+        """Handles command-line argument processing."""
+        options = command_line.get_options_dict()
+        # Convert GVariantDict to a Python dict
+        options = options.end().unpack()
+
+        # Handle --version
+        # --- FIX: Only check for the long name 'version' ---
+        if 'version' in options:
+            print("gSens System Monitor 1.0.0") # You can update this version
+            return 0 # Exit successfully
+
+        # Handle --list-monitors
+        # --- FIX: Only check for the long name 'list-monitors' ---
+        if 'list-monitors' in options:
+            self._list_monitors()
+            return 0 # Exit successfully
+        
+        # Gtk.Application handles --help and -h automatically
+        
+        # Handle --config
+        if 'config' in options:
+            config_path = options['config']
+            if os.path.exists(config_path) and os.path.isfile(config_path):
+                print(f"Loading configuration from: {config_path}")
+                # Load the user-specified config. This will overwrite the default
+                # one loaded by config_manager's __init__.
+                if not config_manager.load(config_path):
+                    print(f"Error: Could not parse config file: {config_path}. Exiting.")
+                    return 1 # Exit with error
+            else:
+                print(f"Error: Config file not found: {config_path}. Exiting.")
+                return 1 # Exit with error
+        else:
+            # No config specified, load default (which config_manager already did)
+            pass
+
+        # Store other options to be passed to MainWindow
+        self.command_line_options = options
+        
+        # Call do_activate() to build and show the window
         self.activate()
         return 0
+
+    def _list_monitors(self):
+        """Prints available monitors to the console."""
+        print("Available Monitors:")
+        # We need a display to list monitors, Gtk.Application might not be
+        # fully initialized, but Gdk.Display.get_default() should be safe.
+        display = Gdk.Display.get_default()
+        if not display:
+            print("  Could not get display information.")
+            return
+        
+        monitors = display.get_monitors()
+        for i in range(monitors.get_n_items()):
+            monitor = monitors.get_item(i)
+            manufacturer = monitor.get_manufacturer() or "Unknown"
+            model = monitor.get_model() or "Unknown"
+            rect = monitor.get_geometry()
+            print(f"  Monitor {i}: {manufacturer} {model} ({rect.width}x{rect.height} at {rect.x},{rect.y})")
 
     def do_startup(self):
         Gtk.Application.do_startup(self)
@@ -315,6 +451,12 @@ class SystemMonitorApp(Gtk.Application):
                                                    args=(self.sensors_ready_event,), 
                                                    daemon=True)
         sensor_discovery_thread.start()
+
+        # --- NEW: Pre-load the font dialog in the background ---
+        font_cache_thread = threading.Thread(target=self._initialize_font_dialog_background,
+                                             daemon=True)
+        font_cache_thread.start()
+        # --- END NEW ---
         
         for sig in [signal.SIGINT, signal.SIGTERM]:
             GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, sig, self.on_signal, sig)
@@ -323,6 +465,23 @@ class SystemMonitorApp(Gtk.Application):
         action.connect("activate", self.on_quit)
         self.add_action(action)
         self.set_accels_for_action("app.quit", ["<Control>q"])
+
+    def _initialize_font_dialog_background(self):
+        """
+        In a background thread, creates the singleton font dialog.
+        This pre-caches the system font list, so the first time
+        the user clicks a font button, it appears instantly.
+        """
+        print("Starting background font cache initialization...")
+        try:
+            # Calling this function will create the singleton instance
+            # in the background, triggering the initial (slow) font scan.
+            # We pass None for the parent, which is fine for creation.
+            config_dialog.get_global_font_dialog(None)
+            print("Background font cache initialized.")
+        except Exception as e:
+            # This might fail in headless environments, but shouldn't crash the app
+            print(f"Warning: Background font cache initialization failed: {e}")
 
     def _discover_sensors_background(self, ready_event):
         """
@@ -364,4 +523,3 @@ class SystemMonitorApp(Gtk.Application):
 if __name__ == "__main__":
     app = SystemMonitorApp()
     sys.exit(app.run(sys.argv))
-

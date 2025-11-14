@@ -25,7 +25,6 @@ class IntelManager:
         self.intel_gpus_found = False
         self.device_count = 0
         self.devices = []
-        # --- PERF OPT 1: Add a cache for sensor data ---
         self.cached_data = []
         self._initialized = True
 
@@ -48,7 +47,9 @@ class IntelManager:
                     if device_info:
                         self.devices.append(device_info)
             except Exception as e:
-                print(f"Could not probe {card_path} for Intel GPU: {e}")
+                print(".", end = ".")
+                #print(f"Could not probe {card_path} for Intel GPU: {e}")
+        print(".")
 
         self.device_count = len(self.devices)
         if self.device_count > 0:
@@ -57,7 +58,7 @@ class IntelManager:
             self.cached_data = [{} for _ in range(self.device_count)]
             print(f"IntelManager initialized successfully. Found {self.device_count} Intel GPU(s).")
 
-    # --- PERF OPT 1: New method to perform a bulk update of all sensor data ---
+
     def update(self):
         """
         Reads all sensor files for all detected Intel GPUs at once and caches
