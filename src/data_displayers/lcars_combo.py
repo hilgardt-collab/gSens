@@ -23,6 +23,7 @@ class LCARSComboDisplayer(ComboBase):
     def __init__(self, panel_ref, config):
         self._level_bar_drawer = LevelBarDisplayer(None, config)
         self._graph_drawer = GraphDisplayer(None, config)
+        self._graph_drawer.is_drawer = True
         self._cached_primary_image = None
         self._cached_primary_image_path = None
         

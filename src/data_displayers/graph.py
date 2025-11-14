@@ -27,6 +27,7 @@ class GraphDisplayer(TextDisplayer):
         self._cached_bg_pixbuf = None
         self._cached_image_path = None
         self.alarm_config_prefix = "data_"
+        self.is_drawer = False
         
         # Initialize the parent TextDisplayer, which sets up all text handling
         super().__init__(panel_ref, config)
@@ -200,7 +201,8 @@ class GraphDisplayer(TextDisplayer):
         
         # --- 3. Draw Text Overlay ---
         # Call the parent TextDisplayer's on_draw method to render the text on top
-        super().on_draw(area, ctx, width, height)
+        if not self.is_drawer :
+            super().on_draw(area, ctx, width, height)
 
     def _draw_grid(self, ctx, width, height):
         grid_rgba = Gdk.RGBA(); grid_rgba.parse(self.config.get("graph_grid_color"))
