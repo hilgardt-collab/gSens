@@ -1,6 +1,7 @@
 import configparser
 import os
 import uuid
+import threading
 from gi.repository import GLib
 
 config_home = GLib.get_user_config_dir()
@@ -26,6 +27,10 @@ class ConfigManager:
         self.theme_config.optionxform = str
         if os.path.exists(THEME_CONFIG_FILE):
             self.theme_config.read(THEME_CONFIG_FILE, encoding='utf-8')
+            
+        # --- Debounce State ---
+        self._save_timer = None
+        self._save_lock = threading.Lock()
 
     def load(self, filepath=None):
         load_path = filepath if filepath else DEFAULT_CONFIG_FILE
@@ -53,20 +58,40 @@ class ConfigManager:
             print("A new default configuration will be created on save.")
             return True
 
-    def save(self, filepath=None):
-        save_path = filepath if filepath else DEFAULT_CONFIG_FILE
-        try:
-            if filepath:
-                os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    def save(self, filepath=None, immediate=False):
+        """
+        Saves configuration. 
+        If immediate=False, debounces the save to prevent disk thrashing.
+        """
+        if filepath:
+            # Always save immediately if a specific path is provided (Save As...)
+            return self._write_to_disk(filepath)
+        
+        if immediate:
+            with self._save_lock:
+                if self._save_timer:
+                    self._save_timer.cancel()
+                    self._save_timer = None
+            return self._write_to_disk(DEFAULT_CONFIG_FILE)
+            
+        # Debounce logic for default file
+        with self._save_lock:
+            if self._save_timer:
+                self._save_timer.cancel()
+            self._save_timer = threading.Timer(1.0, self._write_to_disk, args=[DEFAULT_CONFIG_FILE])
+            self._save_timer.start()
+        return True
 
+    def _write_to_disk(self, save_path):
+        """Helper to perform the actual synchronous write operation."""
+        try:
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
             with open(save_path, "w", encoding='utf-8') as f:
                 self.config.write(f)
             print(f"Configuration saved to {save_path}")
             return True
         except IOError as e:
             print(f"Error writing config file {save_path}: {e}")
-            if filepath:
-                self._show_error_dialog(f"Could not save layout to file: {os.path.basename(save_path)}\n\n{e}")
             return False
 
     def is_valid_layout_file(self, filepath):

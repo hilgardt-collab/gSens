@@ -67,7 +67,26 @@ class ComboDataSource(DataSource):
                 num_bars = int(self.config.get("number_of_bars", 3))
                 for i in range(1, num_bars + 1): create_child(f"bar{i}_")
             elif mode == 'lcars':
-                create_child("primary_")
+                # --- UPDATED: Support multiple primary sources ---
+                num_primary = int(self.config.get("number_of_primary_sources", 1))
+                
+                # Legacy Check: If user has old config with just 'primary_', map it to 'primary1_' logic
+                # but since we are iterating, we just check if the specific key exists in create_child.
+                # However, config.get(primary1_source) will return None if not set.
+                # We handle the fallback in create_child if needed, or rely on migration in the displayer config.
+                
+                # Note: If upgrading, 'primary1_source' won't exist, but 'primary_source' will.
+                # We explicitly check for legacy key for index 1.
+                if num_primary >= 1 and not self.config.get("primary1_source") and self.config.get("primary_source"):
+                    self.config["primary1_source"] = self.config.get("primary_source")
+                    # Copy options too
+                    for k, v in list(self.config.items()):
+                        if k.startswith("primaryopt_"):
+                            self.config[k.replace("primaryopt_", "primary1_opt_")] = v
+
+                for i in range(1, num_primary + 1): 
+                    create_child(f"primary{i}_")
+
                 num_secondary = int(self.config.get("number_of_secondary_sources", 4))
                 for i in range(1, num_secondary + 1): create_child(f"secondary{i}_")
             elif mode == 'dashboard':
@@ -110,7 +129,6 @@ class ComboDataSource(DataSource):
         model = DataSource.get_config_model()
         model.pop("Alarm", None) 
         return model
-
 
     def get_configure_callback(self):
         """
@@ -157,7 +175,6 @@ class ComboDataSource(DataSource):
                         custom_cb(dialog, parent_box, widgets, available_sources, panel_config, prefix)
 
         def _build_arc_config_ui(dialog, content_box, widgets, available_sources, panel_config, source_opts):
-            # --- FIX: Add the arc count spinner here, in the Data Source tab ---
             arc_count_model = {"": [ConfigOption("combo_arc_count", "spinner", "Number of Arcs:", 5, 1, 16, 1, 0)]}
             build_ui_from_model(content_box, panel_config, arc_count_model, widgets)
             dialog.dynamic_models.append(arc_count_model)
@@ -206,7 +223,6 @@ class ComboDataSource(DataSource):
             GLib.idle_add(_build_slot_config_ui, panel_config.get("center_source", "none"), center_sub_config_box, "center_", dialog, widgets, available_sources, panel_config)
 
         def _build_level_bar_config_ui(dialog, content_box, widgets, available_sources, panel_config, source_opts):
-            # --- NEW: Add the bar count spinner ---
             bar_count_model = {"": [ConfigOption("number_of_bars", "spinner", "Number of Bars:", 3, 1, 12, 1, 0)]}
             build_ui_from_model(content_box, panel_config, bar_count_model, widgets)
             dialog.dynamic_models.append(bar_count_model)
@@ -244,16 +260,41 @@ class ComboDataSource(DataSource):
                 on_bar_count_changed(None)
 
         def _build_lcars_config_ui(dialog, content_box, widgets, available_sources, panel_config, source_opts):
-            # --- NEW: Add the secondary item count spinner ---
-            secondary_count_model = {"": [ConfigOption("number_of_secondary_sources", "spinner", "Number of Secondary Items:", 4, 0, 16, 1, 0)]}
-            build_ui_from_model(content_box, panel_config, secondary_count_model, widgets)
-            dialog.dynamic_models.append(secondary_count_model)
+            # --- UPDATED: Config for multiple primary sources and secondary sources ---
+            count_model = {"": [
+                ConfigOption("number_of_primary_sources", "spinner", "Number of Primary Items:", 1, 1, 16, 1, 0),
+                ConfigOption("number_of_secondary_sources", "spinner", "Number of Secondary Items:", 4, 0, 16, 1, 0)
+            ]}
+            build_ui_from_model(content_box, panel_config, count_model, widgets)
+            dialog.dynamic_models.append(count_model)
 
-            content_box.append(Gtk.Label(label="<b>Primary Data Source</b>", use_markup=True, xalign=0, margin_top=10))
-            primary_model = {"": [ConfigOption("primary_source", "dropdown", "Source:", "none", options_dict=source_opts), ConfigOption("primary_caption", "string", "Label Override:", "")]}
-            build_ui_from_model(content_box, panel_config, primary_model, widgets); dialog.dynamic_models.append(primary_model)
-            primary_sub_config_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=20); content_box.append(primary_sub_config_box)
+            # --- Primary Data Sources Notebook ---
+            content_box.append(Gtk.Label(label="<b>Primary Data Sources</b>", use_markup=True, xalign=0, margin_top=10))
+            prim_notebook = Gtk.Notebook(); prim_notebook.set_scrollable(True); content_box.append(prim_notebook)
             
+            primary_tabs_content = []
+            for i in range(1, 17):
+                scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True, min_content_height=300)
+                tab_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10); scroll.set_child(tab_box)
+                page_num = prim_notebook.append_page(scroll, Gtk.Label(label=f"Primary {i}"))
+                primary_tabs_content.append(prim_notebook.get_nth_page(page_num))
+                
+                prefix, slot_key = f"primary{i}_", f"primary{i}_source"
+                # Use legacy "primary_source" for the first item if present in config and no "primary1_source"
+                initial_source = panel_config.get(slot_key, "none")
+                if i == 1 and initial_source == "none":
+                     initial_source = panel_config.get("primary_source", "none")
+
+                prim_source_model = {f"Primary {i}": [ConfigOption(slot_key, "dropdown", "Source:", "none", options_dict=source_opts), ConfigOption(f"{prefix}caption", "string", "Label Override:", "")]}
+                build_ui_from_model(tab_box, panel_config, prim_source_model, widgets); dialog.dynamic_models.append(prim_source_model)
+                sub_config_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=20); tab_box.append(sub_config_box)
+
+                combo = widgets[slot_key]
+                callback = partial(_build_slot_config_ui, parent_box=sub_config_box, prefix=prefix, dialog=dialog, widgets=widgets, available_sources=available_sources, panel_config=panel_config)
+                combo.connect("changed", lambda c, cb=callback: cb(source_key=c.get_active_id()))
+                GLib.idle_add(_build_slot_config_ui, initial_source, sub_config_box, prefix, dialog, widgets, available_sources, panel_config)
+
+            # --- Secondary Data Sources Notebook ---
             content_box.append(Gtk.Separator(margin_top=15, margin_bottom=5))
             content_box.append(Gtk.Label(label="<b>Secondary Data Sources</b>", use_markup=True, xalign=0))
             sec_notebook = Gtk.Notebook(); sec_notebook.set_scrollable(True); content_box.append(sec_notebook)
@@ -262,11 +303,11 @@ class ComboDataSource(DataSource):
             for i in range(1, 17):
                 scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True, min_content_height=300)
                 tab_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10); scroll.set_child(tab_box)
-                page_num = sec_notebook.append_page(scroll, Gtk.Label(label=f"Item {i}"))
+                page_num = sec_notebook.append_page(scroll, Gtk.Label(label=f"Secondary {i}"))
                 secondary_tabs_content.append(sec_notebook.get_nth_page(page_num))
                 
                 prefix, slot_key = f"secondary{i}_", f"secondary{i}_source"
-                sec_source_model = {f"Item {i}": [ConfigOption(slot_key, "dropdown", "Source:", "none", options_dict=source_opts), ConfigOption(f"{prefix}caption", "string", "Label Override:", "")]}
+                sec_source_model = {f"Secondary {i}": [ConfigOption(slot_key, "dropdown", "Source:", "none", options_dict=source_opts), ConfigOption(f"{prefix}caption", "string", "Label Override:", "")]}
                 build_ui_from_model(tab_box, panel_config, sec_source_model, widgets); dialog.dynamic_models.append(sec_source_model)
                 sub_config_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=20); tab_box.append(sub_config_box)
 
@@ -275,24 +316,20 @@ class ComboDataSource(DataSource):
                 combo.connect("changed", lambda c, cb=callback: cb(source_key=c.get_active_id()))
                 GLib.idle_add(_build_slot_config_ui, panel_config.get(slot_key, "none"), sub_config_box, prefix, dialog, widgets, available_sources, panel_config)
 
-            def on_secondary_count_changed(spinner):
-                count = spinner.get_value_as_int() if spinner else int(panel_config.get("number_of_secondary_sources", 4))
-                for i, content_widget in enumerate(secondary_tabs_content): content_widget.set_visible(i < count)
+            def on_counts_changed(spinner):
+                prim_count = widgets.get("number_of_primary_sources").get_value_as_int()
+                sec_count = widgets.get("number_of_secondary_sources").get_value_as_int()
+                for i, content in enumerate(primary_tabs_content): content.set_visible(i < prim_count)
+                for i, content in enumerate(secondary_tabs_content): content.set_visible(i < sec_count)
 
+            prim_count_spinner = widgets.get("number_of_primary_sources")
             sec_count_spinner = widgets.get("number_of_secondary_sources")
-            if sec_count_spinner:
-                sec_count_spinner.connect("value-changed", on_secondary_count_changed)
-                GLib.idle_add(on_secondary_count_changed, sec_count_spinner)
-            else:
-                on_secondary_count_changed(None)
-
-            primary_combo = widgets["primary_source"]
-            callback = partial(_build_slot_config_ui, parent_box=primary_sub_config_box, prefix="primary_", dialog=dialog, widgets=widgets, available_sources=available_sources, panel_config=panel_config)
-            primary_combo.connect("changed", lambda c, cb=callback: cb(source_key=c.get_active_id()))
-            GLib.idle_add(_build_slot_config_ui, panel_config.get("primary_source", "none"), primary_sub_config_box, "primary_", dialog, widgets, available_sources, panel_config)
+            
+            if prim_count_spinner: prim_count_spinner.connect("value-changed", on_counts_changed)
+            if sec_count_spinner: sec_count_spinner.connect("value-changed", on_counts_changed)
+            GLib.idle_add(on_counts_changed, None)
 
         def _build_dashboard_config_ui(dialog, content_box, widgets, available_sources, panel_config, source_opts):
-            """Builds the configuration UI for the Dashboard Combo's data sources."""
             content_box.append(Gtk.Label(label="<b>Center Display Sources</b>", use_markup=True, xalign=0, margin_top=10))
             center_notebook = Gtk.Notebook(); center_notebook.set_scrollable(True); content_box.append(center_notebook)
             center_tabs = []
@@ -363,4 +400,3 @@ class ComboDataSource(DataSource):
                 _build_arc_config_ui(dialog, content_box, widgets, available_sources, panel_config, source_opts)
 
         return build_main_config_ui
-

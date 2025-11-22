@@ -82,11 +82,16 @@ class ArcGaugeDisplayer(DataDisplayer):
             self.display_value_text = "N/A"
             self.unit_text = ""
             
+        # FIX: Always queue a draw to ensure immediate visual update,
+        # even if the animation loop hasn't ticked or values haven't 'changed' enough for the loop.
+        self.drawing_area.queue_draw()
+            
     def reset_state(self):
         """Resets the animation state when the panel is reconfigured."""
+        # FIX: Do not zero out the values. Preserve the last known value
+        # so the gauge doesn't flash to 0 while waiting for the next update cycle.
         self._first_update = True
-        self._target_value = 0.0
-        self._current_display_value = 0.0
+        # We keep self._current_display_value and self._target_value as is.
 
     @staticmethod
     def get_config_model():
@@ -315,6 +320,12 @@ class ArcGaugeDisplayer(DataDisplayer):
         total_angle = end_angle - start_angle; 
         if total_angle <= 0: total_angle += 2 * math.pi
         
+        # --- FIX: Apply line cap style to inactive elements too ---
+        line_cap_map = {"square": cairo.LINE_CAP_SQUARE, "butt": cairo.LINE_CAP_BUTT, "round": cairo.LINE_CAP_ROUND}
+        line_cap_style = self.config.get("gauge_line_cap_style", "round")
+        ctx.set_line_cap(line_cap_map.get(line_cap_style, cairo.LINE_CAP_ROUND))
+        # ---------------------------------------------------------
+        
         if style == "lines":
             ctx.set_line_width(inactive_width)
             angle_step = total_angle / (num_items - 1) if num_items > 1 else 0
@@ -437,4 +448,3 @@ class ArcGaugeDisplayer(DataDisplayer):
     def close(self):
         self._stop_animation_timer()
         super().close()
-

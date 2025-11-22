@@ -84,6 +84,7 @@ class GridLayoutManager(Gtk.Fixed):
         grid_layout_config.setdefault("drag_preview_invalid_color", "rgba(200, 0, 0, 0.7)")
         grid_layout_config.setdefault("drag_preview_line_style", "dashed")
         grid_layout_config.setdefault("selected_panel_border_color", "rgba(0, 120, 212, 0.9)")
+        grid_layout_config.setdefault("window_borderless", "False") # New Default
         grid_layout_config.setdefault("launch_fullscreen", "False")
         grid_layout_config.setdefault("fullscreen_display_index", "-1") 
         grid_layout_config.setdefault("auto_scroll_on_overflow", "False")
@@ -364,6 +365,44 @@ class GridLayoutManager(Gtk.Fixed):
         if self.pick(start_x, start_y, Gtk.PickFlags.DEFAULT) != self: 
             gesture.set_state(Gtk.EventSequenceState.DENIED)
             return
+        
+        # --- NEW: Check for Borderless Window Move ---
+        grid_config = config_manager.config["GridLayout"]
+        is_borderless = str(grid_config.get("window_borderless", "False")).lower() == 'true'
+        
+        # Check if Control key is pressed
+        state = event.get_modifier_state()
+        is_ctrl = (state & Gdk.ModifierType.CONTROL_MASK)
+        
+        if is_borderless and is_ctrl:
+            main_window = self.get_ancestor(Gtk.Window)
+            if main_window:
+                surface = main_window.get_surface()
+                if surface:
+                    # Translate widget coordinates (start_x, start_y) to window-relative coordinates
+                    # FIX: Handle variable return signatures (bool, x, y) vs (x, y)
+                    trans_ret = self.translate_coordinates(main_window, start_x, start_y)
+                    
+                    success = False
+                    win_x, win_y = 0, 0
+
+                    if isinstance(trans_ret, (tuple, list)):
+                        if len(trans_ret) == 3:
+                             success, win_x, win_y = trans_ret
+                        elif len(trans_ret) == 2:
+                             # Some bindings return just (x, y) implying success
+                             win_x, win_y = trans_ret
+                             success = True
+                    
+                    if success:
+                        surface.begin_move(
+                            gesture.get_device(),
+                            gesture.get_current_button(),
+                            int(win_x), int(win_y),
+                            event.get_time()
+                        )
+                        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+                        return
 
         self.rubberband_active = True
         self.rubberband_start_coords = (start_x, start_y)
@@ -552,7 +591,8 @@ class GridLayoutManager(Gtk.Fixed):
                 ConfigOption("panel_border_radius", "scale", "Corner Roundness (px):", "4", 0, 20, 1),
                 ConfigOption("selected_panel_border_color", "color", "Selected Border Color:", "rgba(0, 120, 212, 0.9)"),
             ],
-            "Fullscreen & Scrolling": [
+            "Window & Scrolling": [
+                ConfigOption("window_borderless", "bool", "Borderless Window:", "False"),
                 ConfigOption("launch_fullscreen", "bool", "Launch in Fullscreen:", "False"),
                 ConfigOption("fullscreen_display_index", "dropdown", "Fullscreen on Display:", "-1", 
                              options_dict=monitor_options, 
@@ -582,6 +622,13 @@ class GridLayoutManager(Gtk.Fixed):
                 grid_config_section[key] = str(value)
             
             self._load_and_apply_grid_config(final_conf)
+            
+            # Apply borderless setting immediately
+            main_window = self.get_ancestor(Gtk.Window)
+            if main_window:
+                is_borderless = str(final_conf.get("window_borderless", "False")).lower() == 'true'
+                main_window.set_decorated(not is_borderless)
+
             self.check_and_update_scrolling_state()
 
         cancel = dialog.add_non_modal_button("_Cancel", style_class="destructive-action")
@@ -932,4 +979,3 @@ class GridLayoutManager(Gtk.Fixed):
             return GLib.SOURCE_CONTINUE
         
         self._scroll_animation_id = GLib.timeout_add(16, animation_step, None)
-

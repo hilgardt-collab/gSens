@@ -45,25 +45,27 @@ class GraphDisplayer(TextDisplayer):
         """
         Updates both the graph history and the text lines for the overlay.
         """
-        # Let the parent TextDisplayer handle updating the text lines based on its config
+        # 1. Update History (Graph specific)
+        # This logic must happen separately to ensure we extract the numerical value
+        # correctly regardless of what the parent class expects.
+        source = kwargs.get('source_override', self.panel_ref.data_source if self.panel_ref else None)
+        if source:
+            # Use the specific alarm prefix from the source
+            self.alarm_config_prefix = getattr(source, 'alarm_config_prefix', 'data_')
+            
+            num_val = source.get_numerical_value(value)
+            max_hist = int(self.config.get("max_history_points", 100))
+            
+            if num_val is not None:
+                self.history.append((time.time(), num_val))
+                if len(self.history) > max_hist:
+                    self.history = self.history[-max_hist:]
+
+        # 2. Update Text Overlay (Parent logic)
+        # Pass the full data packet so TextDisplayer can extract strings for display.
         super().update_display(value, **kwargs)
 
-        # Now, handle the graph-specific data
-        source = kwargs.get('source_override', self.panel_ref.data_source if self.panel_ref else None)
-        if source is None: return
-        
-        # Store the alarm prefix from the specific source for this update cycle
-        self.alarm_config_prefix = getattr(source, 'alarm_config_prefix', 'data_')
-
-        num_val = source.get_numerical_value(value)
-        
-        max_hist = int(self.config.get("max_history_points", 100))
-        if num_val is not None:
-            self.history.append((time.time(), num_val))
-            if len(self.history) > max_hist:
-                self.history = self.history[-max_hist:]
-            
-        # The parent's update_display already queues a draw, so this is redundant
+        # The parent's update_display already queues a draw, so explicit queue is redundant
         # self.graph_area.queue_draw()
 
     @staticmethod

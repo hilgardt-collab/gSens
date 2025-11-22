@@ -63,6 +63,12 @@ class MainWindow(Gtk.ApplicationWindow):
         self.AVAILABLE_DATA_SOURCES = AVAILABLE_DATA_SOURCES
         self.AVAILABLE_DISPLAYERS = AVAILABLE_DISPLAYERS
         self.ALL_SOURCE_CLASSES = ALL_SOURCE_CLASSES
+        
+        # --- Apply borderless setting immediately on startup ---
+        if config_manager.config.has_section("GridLayout"):
+            grid_config = config_manager.config["GridLayout"]
+            is_borderless = str(grid_config.get("window_borderless", "False")).lower() == 'true'
+            self.set_decorated(not is_borderless)
 
         self.load_window_dimensions()
         
@@ -268,7 +274,7 @@ class MainWindow(Gtk.ApplicationWindow):
 
         def save_layout_now_cb(action, parameter):
             self.save_window_dimensions()
-            config_manager.save()
+            config_manager.save(immediate=True) # Explicit user action should save immediately
             print("Layout saved.")
         
         save_now_action = Gio.SimpleAction.new("save_layout_now", None)
@@ -319,7 +325,8 @@ class MainWindow(Gtk.ApplicationWindow):
         
         if response == Gtk.ResponseType.YES:
             self.save_window_dimensions()
-            config_manager.save()
+            # Force immediate save on exit to bypass debounce timer
+            config_manager.save(immediate=True)
             self.app.quit()
         elif response == Gtk.ResponseType.NO:
             self.app.quit()

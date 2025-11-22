@@ -16,6 +16,8 @@ class TableDisplayer(DataDisplayer):
     def __init__(self, panel_ref, config):
         self._process_data = []
         self._header_layout_cache = {} 
+        # OPTIMIZATION: Reuse a single layout object for cell rendering to avoid thrashing
+        self._reusable_cell_layout = None 
         super().__init__(panel_ref, config)
         populate_defaults_from_model(self.config, self.get_config_model())
         self._set_initial_defaults()
@@ -44,6 +46,8 @@ class TableDisplayer(DataDisplayer):
     def apply_styles(self):
         """Invalidates caches and triggers a redraw when styles change."""
         self._header_layout_cache.clear()
+        # Clear the cell layout so it picks up new contexts/settings if needed
+        self._reusable_cell_layout = None
         self.widget.queue_draw()
 
     def on_draw(self, area, ctx, width, height):
@@ -129,7 +133,14 @@ class TableDisplayer(DataDisplayer):
         row_bg1 = Gdk.RGBA(); row_bg1.parse(row_color_str1)
         row_bg2 = Gdk.RGBA(); row_bg2.parse(row_color_str2)
         
-        cell_layout = PangoCairo.create_layout(ctx)
+        # --- OPTIMIZATION: Create reusable layout once per draw call ---
+        if self._reusable_cell_layout is None:
+            self._reusable_cell_layout = PangoCairo.create_layout(ctx)
+        elif self._reusable_cell_layout.get_context() != ctx:
+            # If the Cairo context changed (e.g. window resized/moved), recreate layout
+            self._reusable_cell_layout = PangoCairo.create_layout(ctx)
+        
+        cell_layout = self._reusable_cell_layout
 
         for i, p_info in enumerate(self._process_data):
             if current_y + row_height > height: break
@@ -157,6 +168,7 @@ class TableDisplayer(DataDisplayer):
                 item_color = Gdk.RGBA(); item_color.parse(item_color_str)
                 ctx.set_source_rgba(item_color.red, item_color.green, item_color.blue, item_color.alpha)
 
+                # Reuse the layout by just updating properties
                 cell_layout.set_font_description(Pango.FontDescription.from_string(item_font))
                 cell_layout.set_text(text, -1)
                 text_width, text_height = cell_layout.get_pixel_extents()[1].width, cell_layout.get_pixel_extents()[1].height
@@ -284,4 +296,3 @@ class TableDisplayer(DataDisplayer):
                 GLib.idle_add(update_visibility, alt_row_switch, None)
 
         return build_dynamic_ui
-

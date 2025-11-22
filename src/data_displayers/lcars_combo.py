@@ -100,7 +100,7 @@ class LCARSComboDisplayer(ComboBase):
                 ConfigOption(f"{prefix}_bar_corner_radius", "spinner", "Bar Corner Radius (px):", 8, 0, 50, 1, 0),
                 ConfigOption(f"{prefix}_bar_text_layout", "dropdown", "Text Layout:", "superimposed",
                              options_dict={"Superimposed": "superimposed", "Text Left, Bar Right": "left", "Bar Left, Text Right": "right"}),
-                ConfigOption(f"{prefix}_bar_text_split_ratio", "scale", "Text/Bar Split Ratio:", "0.4", 0.1, 0.9, 0.05, 2,
+                ConfigOption(f"{prefix}_bar_text_split_ratio", "spinner", "Text/Bar Split Ratio:", 0.4, 0.1, 0.9, 0.05, 2,
                              tooltip="The proportion of space given to the text when layout is not superimposed."),
             ]
         }
@@ -141,13 +141,24 @@ class LCARSComboDisplayer(ComboBase):
                 ConfigOption("lcars_sidebar_width", "spinner", "Side Bar Width (px):", 150, 20, 500, 5, 0),
                 ConfigOption("lcars_corner_radius", "spinner", "Corner Radius (px):", 60, 10, 500, 5, 0),
                 ConfigOption("lcars_extension_corner_style", "dropdown", "Extension Corner Style:", "square", options_dict={"Square": "square", "Round": "round"}),
-                # This option is no longer used, radius is derived from bar height
-                # ConfigOption("lcars_extension_corner_radius", "spinner", "Extension Corner Radius (px):", 20, 0, 100, 1, 0),
                 ConfigOption("lcars_frame_color", "color", "Frame Color:", "rgba(255,153,102,1)"),
                 ConfigOption("lcars_content_bg_color", "color", "Content BG Color:", "rgba(0,0,0,1)"),
                 ConfigOption("lcars_content_padding", "spinner", "Content Padding (px):", 5, 0, 100, 1, 0),
                 ConfigOption("lcars_secondary_spacing_mode", "dropdown", "Secondary Item Spacing:", "auto", options_dict={"Automatic": "auto", "Manual": "manual"}),
                 ConfigOption("lcars_secondary_spacing_value", "spinner", "Manual Spacing (px):", 5, 0, 50, 1, 0),
+            ],
+            "Split View (Divider)": [
+                ConfigOption("lcars_split_screen_enabled", "bool", "Enable Split View:", "False"),
+                ConfigOption("lcars_split_screen_orientation", "dropdown", "Split Orientation:", "vertical", options_dict={"Vertical (Left/Right)": "vertical", "Horizontal (Top/Bottom)": "horizontal"}),
+                ConfigOption("lcars_split_screen_ratio", "spinner", "Split Ratio:", 0.5, 0.1, 0.9, 0.05, 2, tooltip="Adjusts the relative size of the Primary vs Secondary area."),
+                ConfigOption("lcars_split_screen_divider_width", "spinner", "Divider Thickness (px):", 10, 1, 50, 1, 0),
+                ConfigOption("lcars_split_screen_divider_color", "color", "Divider Color:", "rgba(255,153,102,1)", 
+                             tooltip="Defaults to frame color if not set."),
+                ConfigOption("lcars_split_screen_spacing_before", "spinner", "Spacing Before Divider (px):", 0, 0, 100, 1, 0),
+                ConfigOption("lcars_split_screen_spacing_after", "spinner", "Spacing After Divider (px):", 0, 0, 100, 1, 0),
+                # --- UPDATED: Individual Cap Styles ---
+                ConfigOption("lcars_split_screen_divider_cap_start", "dropdown", "Start Cap Style:", "square", options_dict={"Square": "square", "Round": "round"}),
+                ConfigOption("lcars_split_screen_divider_cap_end", "dropdown", "End Cap Style:", "square", options_dict={"Square": "square", "Round": "round"}),
             ],
             "Header Bar (Top)": [
                 ConfigOption("lcars_top_header_position", "dropdown", "Header Position:", "top", options_dict={"Top Bar": "top", "None": "none"}),
@@ -173,14 +184,15 @@ class LCARSComboDisplayer(ComboBase):
             ],
             "Animation": [
                 ConfigOption("lcars_animation_enabled", "bool", "Enable Bar Animation:", "True"),
-                ConfigOption("lcars_animation_speed", "scale", "Animation Speed:", "0.1", 0.01, 0.5, 0.01, 2, 
+                ConfigOption("lcars_animation_speed", "spinner", "Animation Speed:", 0.1, 0.01, 0.5, 0.01, 2, 
                              tooltip="Controls how quickly the bar moves to its target. Smaller is faster."),
             ]
         }
         
-        primary_model = cls._get_content_item_model("primary")
-        for section, options in primary_model.items():
-            model[f"Primary {section}"] = options
+        for i in range(1, 17):
+            prim_model = cls._get_content_item_model(f"primary{i}")
+            for section, options in prim_model.items():
+                model[f"Primary {i} {section}"] = options
 
         for i in range(1, 17):
             sec_model = cls._get_content_item_model(f"secondary{i}")
@@ -210,6 +222,7 @@ class LCARSComboDisplayer(ComboBase):
             full_model = self._get_full_config_model()
             frame_ui_model = {
                 "Frame Style": full_model["Frame Style"],
+                "Split View (Divider)": full_model["Split View (Divider)"],
                 "Header Bar (Top)": full_model["Header Bar (Top)"],
                 "Header Bar (Bottom)": full_model["Header Bar (Bottom)"],
                 "Animation": full_model["Animation"]
@@ -306,17 +319,25 @@ class LCARSComboDisplayer(ComboBase):
             content_notebook.set_scrollable(True)
             content_box_tab.append(content_notebook)
 
-            primary_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
-            primary_scroll.set_min_content_height(300)
-            primary_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
-            primary_scroll.set_child(primary_box)
-            content_notebook.append_page(primary_scroll, Gtk.Label(label="Primary"))
-            
-            primary_model = self._get_content_item_model("primary")
-            build_ui_from_model(primary_box, panel_config, primary_model, widgets)
-            self._setup_dynamic_content_ui(dialog, primary_box, widgets, panel_config, "primary")
-            dialog.dynamic_models.append(primary_model)
+            # --- Primary Items Tabs ---
+            primary_tabs_content = []
+            for i in range(1, 17):
+                prefix = f"primary{i}"
+                tab_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
+                tab_scroll.set_min_content_height(300)
+                tab_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
+                tab_scroll.set_child(tab_box)
+                content_notebook.append_page(tab_scroll, Gtk.Label(label=f"Prim {i}"))
+                primary_tabs_content.append(tab_scroll)
+                
+                # Use logic to fallback to 'primary' model if it's the first item for compat
+                model_to_use = self._get_content_item_model(prefix)
+                
+                build_ui_from_model(tab_box, panel_config, model_to_use, widgets)
+                self._setup_dynamic_content_ui(dialog, tab_box, widgets, panel_config, prefix)
+                dialog.dynamic_models.append(model_to_use)
 
+            # --- Secondary Items Tabs ---
             secondary_tabs_content = []
             for i in range(1, 17):
                 prefix = f"secondary{i}"
@@ -324,7 +345,7 @@ class LCARSComboDisplayer(ComboBase):
                 tab_scroll.set_min_content_height(300)
                 tab_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
                 tab_scroll.set_child(tab_box)
-                content_notebook.append_page(tab_scroll, Gtk.Label(label=f"Item {i}"))
+                content_notebook.append_page(tab_scroll, Gtk.Label(label=f"Sec {i}"))
                 secondary_tabs_content.append(tab_scroll)
                 
                 sec_model = self._get_content_item_model(prefix)
@@ -332,15 +353,22 @@ class LCARSComboDisplayer(ComboBase):
                 self._setup_dynamic_content_ui(dialog, tab_box, widgets, panel_config, prefix)
                 dialog.dynamic_models.append(sec_model)
 
-            def on_secondary_count_changed(spinner):
-                count = spinner.get_value_as_int()
+            def on_content_counts_changed(spinner):
+                prim_count = widgets.get("number_of_primary_sources").get_value_as_int()
+                sec_count = widgets.get("number_of_secondary_sources").get_value_as_int()
+                
+                for i, content_widget in enumerate(primary_tabs_content):
+                    content_widget.set_visible(i < prim_count)
+                
                 for i, content_widget in enumerate(secondary_tabs_content):
-                    content_widget.set_visible(i < count)
+                    content_widget.set_visible(i < sec_count)
 
+            prim_count_spinner = widgets.get("number_of_primary_sources")
             sec_count_spinner = widgets.get("number_of_secondary_sources")
-            if sec_count_spinner:
-                sec_count_spinner.connect("value-changed", on_secondary_count_changed)
-                GLib.idle_add(on_secondary_count_changed, sec_count_spinner)
+            
+            if prim_count_spinner: prim_count_spinner.connect("value-changed", on_content_counts_changed)
+            if sec_count_spinner: sec_count_spinner.connect("value-changed", on_content_counts_changed)
+            GLib.idle_add(on_content_counts_changed, None)
 
             # --- Effects Tab ---
             effects_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
@@ -372,6 +400,7 @@ class LCARSComboDisplayer(ComboBase):
             }
 
             def on_apply_same_style_clicked(button):
+                prim_count = widgets["number_of_primary_sources"].get_value_as_int()
                 sec_count = widgets["number_of_secondary_sources"].get_value_as_int()
                 source_id_str = source_item_combo.get_active_id()
                 if not source_id_str: return
@@ -380,7 +409,8 @@ class LCARSComboDisplayer(ComboBase):
                 for key, chk in copy_checkboxes.items():
                     if chk.get_active(): keys_to_copy.extend(property_map.get(key, []))
 
-                all_prefixes = ["primary"] + [f"secondary{i}" for i in range(1, sec_count + 1)]
+                all_prefixes = [f"primary{i}" for i in range(1, prim_count + 1)] + [f"secondary{i}" for i in range(1, sec_count + 1)]
+                
                 for dest_prefix in all_prefixes:
                     if dest_prefix == source_id_str: continue
                     for key_suffix in keys_to_copy:
@@ -398,17 +428,19 @@ class LCARSComboDisplayer(ComboBase):
 
             apply_style_button.connect("clicked", on_apply_same_style_clicked)
 
-            def on_sec_count_changed_for_effects(spinner):
-                count = spinner.get_value_as_int()
+            def on_counts_changed_for_effects(spinner):
+                prim_count = widgets["number_of_primary_sources"].get_value_as_int()
+                sec_count = widgets["number_of_secondary_sources"].get_value_as_int()
                 source_item_combo.remove_all()
-                source_item_combo.append(id="primary", text="Primary")
-                for i in range(1, count + 1):
-                    source_item_combo.append(id=f"secondary{i}", text=f"Item {i}")
+                for i in range(1, prim_count + 1):
+                    source_item_combo.append(id=f"primary{i}", text=f"Primary {i}")
+                for i in range(1, sec_count + 1):
+                    source_item_combo.append(id=f"secondary{i}", text=f"Secondary {i}")
                 source_item_combo.set_active(0)
 
-            if sec_count_spinner:
-                sec_count_spinner.connect("value-changed", on_sec_count_changed_for_effects)
-                GLib.idle_add(on_sec_count_changed_for_effects, sec_count_spinner)
+            if prim_count_spinner: prim_count_spinner.connect("value-changed", on_counts_changed_for_effects)
+            if sec_count_spinner: sec_count_spinner.connect("value-changed", on_counts_changed_for_effects)
+            GLib.idle_add(on_counts_changed_for_effects, None)
 
         return build_display_ui
         
@@ -559,7 +591,18 @@ class LCARSComboDisplayer(ComboBase):
     def update_display(self, value):
         super().update_display(value) 
         
-        all_prefixes = ["primary"] + [f"secondary{i}" for i in range(1, 17)]
+        # Support up to 16 primary and 16 secondary items
+        all_prefixes = [f"primary{i}" for i in range(1, 17)] + [f"secondary{i}" for i in range(1, 17)]
+        
+        # Also try legacy "primary" for backward compatibility
+        # In combo_source.py, we now map legacy "primary_" to "primary1_" if needed, or load it directly.
+        # If combo_source loads "primary_" and we look for "primary1_", we might miss it if we don't check.
+        # But combo_base.py stores the bundle.
+        
+        # Hack: If "primary1_source" is missing but "primary_source" exists in bundle, use it for primary1
+        if "primary1_source" not in self.data_bundle and "primary_source" in self.data_bundle:
+            self.data_bundle["primary1_source"] = self.data_bundle["primary_source"]
+
         for prefix in all_prefixes:
             source_key = f"{prefix}_source"
             bar_anim_key = f"{prefix}_bar"
@@ -694,61 +737,83 @@ class LCARSComboDisplayer(ComboBase):
         ctx.new_path()
         
         # --- Outer Path (as a single, continuous line) ---
+        # 1. Top-Left Corner
         ctx.move_to(0, radius) 
-        ctx.arc(radius, radius, radius, math.pi, 1.5 * math.pi) # 1. Top-Left
+        ctx.arc(radius, radius, radius, math.pi, 1.5 * math.pi)
 
         # 2. Top Edge and Extension
-        if ext_style == "round" and has_top_ext and r_top > 0:
+        if has_top_ext:
             ctx.line_to(width - r_top, 0)
-            # Use arc (CCW) from -90 deg (1.5*pi) to 0 deg (0) for top-right convex QUARTER
-            ctx.arc(width - r_top, r_top, r_top, 1.5 * math.pi, 0) # Ends at (width, r_top)
-        else:
-            ctx.line_to(width, 0) # Square top
-        
-        # 3. Right Edge
-        y_before_bottom_arc = height
-        if has_bottom_ext:
-             y_before_bottom_arc = height - r_bot if (ext_style == "round" and r_bot > 0) else height
-        
-        ctx.line_to(width, y_before_bottom_arc)
-
-        # 4. Bottom Edge and Extension
-        if ext_style == "round" and has_bottom_ext and r_bot > 0:
-            # Use arc (CCW) from 0 deg to 90 deg (0.5*pi) for bottom-right convex QUARTER
-            ctx.arc(width - r_bot, height - r_bot, r_bot, 0, 0.5 * math.pi) # Ends at (width - r_bot, height)
-        else:
-            ctx.line_to(width, height) # Square bottom
             
+            if ext_style == "round" and r_top > 0:
+                # Draw full semi-circle end (180 degrees)
+                # Center is at (width - r_top, r_top)
+                # Start at -90 deg (1.5*pi), go to +90 deg (0.5*pi)
+                ctx.arc(width - r_top, r_top, r_top, 1.5 * math.pi, 0.5 * math.pi)
+                # Ends at (width - r_top, top_bar_h)
+            else:
+                ctx.line_to(width, 0) # Square top edge
+                ctx.line_to(width, top_bar_h) # Down to content start
+                # Ends at (width, top_bar_h)
+                
+            # Trace back along the inner edge of the top bar
+            ctx.line_to(sidebar_w + radius, top_bar_h)
+            
+            # Inner Top-Left Corner (Negative Arc)
+            ctx.arc_negative(sidebar_w + radius, top_bar_h + radius, radius, 1.5 * math.pi, math.pi)
+        else:
+            # No top extension: Close the top of the sidebar
+            ctx.line_to(sidebar_w, 0)
+            # We are now at top-right of sidebar (x=sidebar_w, y=0)
+            # But wait, the outer path started at x=0.
+            # We need to get to the inner edge of the sidebar.
+            
+        # 3. Down the Sidebar Inner Edge
+        # Start y depends on top extension
+        start_y_inner = top_bar_h + radius if has_top_ext else 0
+        # End y depends on bottom extension
+        end_y_inner = height - bottom_ext_h - radius if has_bottom_ext else height
+        
+        # If no top ext, we are at (sidebar_w, 0).
+        # If top ext, we are at (sidebar_w, top_bar_h + radius) due to negative arc.
+        
+        ctx.line_to(sidebar_w, end_y_inner)
+
+        # 4. Bottom Extension and Inner Corner
+        if has_bottom_ext:
+            # Inner Bottom-Left Corner (Negative Arc)
+            ctx.arc_negative(sidebar_w + radius, height - bottom_ext_h - radius, radius, math.pi, 0.5 * math.pi)
+            
+            # Trace along the inner edge of the bottom bar
+            if ext_style == "round" and r_bot > 0:
+                ctx.line_to(width - r_bot, height - bottom_ext_h)
+                # Draw bottom semi-circle end
+                # Center is at (width - r_bot, height - r_bot)
+                # Start at -90 (1.5pi - relative? no absolute).
+                # We arrive at angle -90 (top of circle).
+                # We need to go to +90 (bottom of circle).
+                ctx.arc(width - r_bot, height - r_bot, r_bot, 1.5 * math.pi, 0.5 * math.pi)
+            else:
+                ctx.line_to(width, height - bottom_ext_h)
+                ctx.line_to(width, height)
+                
+            # Trace back along the outer edge of the bottom bar
+            ctx.line_to(radius, height)
+        else:
+            # No bottom extension: Close bottom of sidebar
+            ctx.line_to(sidebar_w, height)
+            ctx.line_to(radius, height)
+
         # 5. Bottom-Left corner
-        ctx.line_to(radius, height)
         ctx.arc(radius, height - radius, radius, 0.5 * math.pi, math.pi) # Ends at (0, height - radius)
         
-        # 6. Close Outer Path
+        # 6. Close Outer Path (Left Edge)
         ctx.close_path()
 
-        # --- Inner Cutout Path ---
-        ctx.move_to(width, content_y_start)
-        if has_top_ext:
-            ctx.line_to(sidebar_w + radius, content_y_start)
-            ctx.arc_negative(sidebar_w + radius, content_y_start + radius, radius, 1.5 * math.pi, math.pi) # Top-inner cutout
-        else:
-            ctx.line_to(sidebar_w, content_y_start)
-
-        ctx.line_to(sidebar_w, content_y_end - (radius if has_bottom_ext else 0))
-
-        if has_bottom_ext:
-            ctx.arc_negative(sidebar_w + radius, content_y_end - radius, radius, math.pi, 0.5 * math.pi) # Bottom-inner cutout
-            ctx.line_to(width, content_y_end)
-        else:
-            ctx.line_to(width, content_y_end)
-        ctx.close_path()
-
-        # Fill the combined path
+        # Fill
         frame_color = Gdk.RGBA(); frame_color.parse(frame_color_str)
         ctx.set_source_rgba(frame_color.red, frame_color.green, frame_color.blue, frame_color.alpha)
-        ctx.set_fill_rule(cairo.FILL_RULE_EVEN_ODD)
         ctx.fill()
-        ctx.set_fill_rule(cairo.FILL_RULE_WINDING)
         
         # --- Draw Headers (on top of the filled frame) ---
         top_header_pos = self.config.get("lcars_top_header_position", "top")
@@ -885,57 +950,210 @@ class LCARSComboDisplayer(ComboBase):
         bg_color = Gdk.RGBA(); bg_color.parse(self.config.get("lcars_content_bg_color"))
         ctx.set_source_rgba(bg_color.red, bg_color.green, bg_color.blue, bg_color.alpha); ctx.paint()
 
+        num_primary = int(self.config.get("number_of_primary_sources", 1))
         num_secondary = int(self.config.get("number_of_secondary_sources", 4))
-        current_y = content_y
         
-        primary_data = self.data_bundle.get("primary_source", {})
-        if primary_data:
-            primary_h = float(self.config.get("primary_item_height", 60))
-            self._draw_content_item(ctx, content_x, current_y, content_w, primary_h, "primary", primary_data)
-            current_y += primary_h
-            content_h -= primary_h
+        # --- Split View (Divider) Logic ---
+        show_split_view = str(self.config.get("lcars_split_screen_enabled", "False")).lower() == 'true'
+        
+        if show_split_view:
+            divider_orientation = self.config.get("lcars_split_screen_orientation", "vertical")
+            sb_width = float(self.config.get("lcars_split_screen_divider_width", 10))
+            split_ratio = float(self.config.get("lcars_split_screen_ratio", 0.5))
             
-        if num_secondary > 0 and content_h > 0:
-            secondary_items = []
-            total_weight = 0
-            fixed_height_total = 0
+            # New config
+            cap_style_start = self.config.get("lcars_split_screen_divider_cap_start", "square")
+            cap_style_end = self.config.get("lcars_split_screen_divider_cap_end", "square")
+            spacing_before = float(self.config.get("lcars_split_screen_spacing_before", 0))
+            spacing_after = float(self.config.get("lcars_split_screen_spacing_after", 0))
 
-            spacing_mode = self.config.get("lcars_secondary_spacing_mode", "auto")
-            spacing_value = float(self.config.get("lcars_secondary_spacing_value", 5))
-            
-            for i in range(1, num_secondary + 1):
-                prefix = f"secondary{i}"
-                display_as = self.config.get(f"{prefix}_display_as")
-                item = {"prefix": prefix, "data": self.data_bundle.get(f"{prefix}_source", {})}
-                if display_as in ["level_bar", "graph"]:
-                    item["height"] = float(self.config.get(f"{prefix}_item_height", 60))
-                    fixed_height_total += item["height"]
-                else:
-                    item["weight"] = 1 
-                    total_weight += 1
-                secondary_items.append(item)
-            
-            auto_spacing = 5
-            if spacing_mode == "manual":
-                total_spacing_needed = (num_secondary - 1) * spacing_value if num_secondary > 1 else 0
-                remaining_h = content_h - fixed_height_total - total_spacing_needed
-            else:
-                total_spacing_needed = (num_secondary - 1) * auto_spacing if num_secondary > 1 else 0
-                remaining_h = content_h - fixed_height_total - total_spacing_needed
-                spacing_value = auto_spacing
+            sb_color_str = self.config.get("lcars_split_screen_divider_color")
+            if not sb_color_str: sb_color_str = self.config.get("lcars_frame_color", "rgba(255,153,102,1)")
+            sb_color = Gdk.RGBA(); sb_color.parse(sb_color_str)
+            ctx.set_source_rgba(sb_color.red, sb_color.green, sb_color.blue, sb_color.alpha)
 
-            for i, item in enumerate(secondary_items):
-                item_h = 0
-                if "height" in item:
-                    item_h = item["height"]
-                elif total_weight > 0 and remaining_h > 0:
-                    item_h = (item["weight"] / total_weight) * remaining_h
+            if divider_orientation == "horizontal":
+                # Top/Bottom Split
+                total_divider_height = sb_width + spacing_before + spacing_after
+                available_h = content_h - total_divider_height
                 
-                if item_h > 0:
-                    self._draw_content_item(ctx, content_x, current_y, content_w, item_h, item["prefix"], item["data"])
-                    if i < len(secondary_items) - 1:
-                        current_y += item_h + spacing_value
+                top_h = available_h * split_ratio
+                bottom_h = available_h - top_h
+                
+                top_y = content_y
+                divider_y = top_y + top_h + spacing_before
+                bottom_y = divider_y + sb_width + spacing_after
+                
+                # Draw Horizontal Divider
+                # We pass specific cap styles for left (start) and right (end)
+                self._draw_divider_rect(ctx, content_x, divider_y, content_w, sb_width, cap_style_start, cap_style_end, "horizontal")
+                ctx.fill()
+                
+                # Render Top Area (Primary)
+                self._draw_list_of_items(ctx, content_x, top_y, content_w, top_h, "primary", num_primary)
+                
+                # Render Bottom Area (Secondary)
+                self._draw_list_of_items(ctx, content_x, bottom_y, content_w, bottom_h, "secondary", num_secondary)
+                
+            else:
+                # Left/Right Split
+                total_divider_width = sb_width + spacing_before + spacing_after
+                available_w = content_w - total_divider_width
+                
+                left_w = available_w * split_ratio
+                right_w = available_w - left_w
+                
+                left_x = content_x
+                divider_x = left_x + left_w + spacing_before
+                right_x = divider_x + sb_width + spacing_after
+                
+                # Draw Vertical Divider
+                # We pass specific cap styles for top (start) and bottom (end)
+                self._draw_divider_rect(ctx, divider_x, content_y, sb_width, content_h, cap_style_start, cap_style_end, "vertical")
+                ctx.fill()
+
+                # Render Left Column (Primary)
+                self._draw_list_of_items(ctx, left_x, content_y, left_w, content_h, "primary", num_primary)
+                
+                # Render Right Column (Secondary)
+                self._draw_list_of_items(ctx, right_x, content_y, right_w, content_h, "secondary", num_secondary)
+        
+        else:
+            # Standard Vertical Stack (No Divider)
+            current_y = content_y
+            
+            # Render Primary Items (Stacked)
+            used_height = self._draw_list_of_items(ctx, content_x, current_y, content_w, content_h, "primary", num_primary)
+            current_y += used_height
+            remaining_h = content_h - used_height
+            
+            # Render Secondary Items (Stacked) below
+            if remaining_h > 0:
+                self._draw_list_of_items(ctx, content_x, current_y, content_w, remaining_h, "secondary", num_secondary)
+
         ctx.restore()
+
+    def _draw_divider_rect(self, ctx, x, y, w, h, cap_start, cap_end, orientation):
+        """Draws a rectangle for the divider with individually configurable start/end caps."""
+        # 'Start' is Left for horizontal, Top for vertical
+        # 'End' is Right for horizontal, Bottom for vertical
+        
+        radius = min(w, h) / 2
+        
+        ctx.new_path()
+        
+        if orientation == "horizontal":
+            # Start (Left) Cap
+            if cap_start == "round":
+                ctx.arc(x + radius, y + radius, radius, 0.5 * math.pi, 1.5 * math.pi)
+            else:
+                ctx.move_to(x, y + h)
+                ctx.line_to(x, y)
+            
+            # Top edge
+            ctx.line_to(x + w - (radius if cap_end == "round" else 0), y)
+            
+            # End (Right) Cap
+            if cap_end == "round":
+                ctx.arc(x + w - radius, y + radius, radius, 1.5 * math.pi, 0.5 * math.pi)
+            else:
+                ctx.line_to(x + w, y + h)
+
+            # Bottom edge to close
+            ctx.line_to(x + (radius if cap_start == "round" else 0), y + h)
+            
+        else: # Vertical
+            # Start (Top) Cap
+            if cap_start == "round":
+                ctx.arc(x + radius, y + radius, radius, math.pi, 0)
+            else:
+                ctx.move_to(x, y)
+                ctx.line_to(x + w, y)
+
+            # Right edge
+            ctx.line_to(x + w, y + h - (radius if cap_end == "round" else 0))
+
+            # End (Bottom) Cap
+            if cap_end == "round":
+                ctx.arc(x + radius, y + h - radius, radius, 0, math.pi)
+            else:
+                ctx.line_to(x, y + h)
+            
+            # Left edge to close
+            ctx.line_to(x, y + (radius if cap_start == "round" else 0))
+            
+        ctx.close_path()
+
+    def _draw_list_of_items(self, ctx, x, y, w, h, base_prefix, count):
+        """Helper to render a list of configured items (primary or secondary) vertically."""
+        if count <= 0: return 0
+        
+        # Gather item configs
+        items = []
+        total_weight = 0
+        fixed_height_total = 0
+        
+        for i in range(1, count + 1):
+            prefix = f"{base_prefix}{i}"
+            # Handle legacy "primary_" mapping for index 1
+            if base_prefix == "primary" and i == 1 and f"primary1_source" not in self.data_bundle and "primary_source" in self.data_bundle:
+                 # Temporary hack: the item render method uses data_bundle keys.
+                 # We need to ensure the right data is grabbed.
+                 # Actually, we should just pass the right data dict.
+                 pass
+
+            display_as = self.config.get(f"{prefix}_display_as", "bar")
+            
+            # Data Retrieval Logic
+            source_key = f"{prefix}_source"
+            if base_prefix == "primary" and i == 1 and source_key not in self.data_bundle and "primary_source" in self.data_bundle:
+                 source_key = "primary_source"
+
+            item_data = self.data_bundle.get(source_key, {})
+            
+            item = {"prefix": prefix, "data": item_data}
+            
+            if display_as in ["level_bar", "graph"]:
+                item["height"] = float(self.config.get(f"{prefix}_item_height", 60))
+                fixed_height_total += item["height"]
+            else:
+                item["weight"] = 1
+                total_weight += 1
+            items.append(item)
+
+        spacing_mode = self.config.get("lcars_secondary_spacing_mode", "auto")
+        spacing_value = float(self.config.get("lcars_secondary_spacing_value", 5))
+        
+        auto_spacing = 5
+        total_spacing = (count - 1) * (spacing_value if spacing_mode == "manual" else auto_spacing)
+        
+        available_flex_h = h - fixed_height_total - total_spacing
+        # If flex height is negative, we might overflow. Just clip.
+        
+        current_y = y
+        drawn_height = 0
+        
+        for i, item in enumerate(items):
+            item_h = 0
+            if "height" in item:
+                item_h = item["height"]
+            elif total_weight > 0:
+                # Distribute remaining height among weighted items
+                # Ensure we don't have negative heights
+                item_h = max(0, (item["weight"] / total_weight) * available_flex_h)
+            
+            if item_h > 0:
+                # Clip to ensure we don't draw outside the designated area
+                if current_y + item_h > y + h:
+                     item_h = y + h - current_y
+                
+                self._draw_content_item(ctx, x, current_y, w, item_h, item["prefix"], item["data"])
+                
+                step = item_h + (spacing_value if spacing_mode == "manual" else auto_spacing)
+                current_y += step
+                drawn_height += step
+
+        return drawn_height
 
     def _draw_content_item(self, ctx, x, y, w, h, prefix, data):
         display_as = self.config.get(f"{prefix}_display_as", "bar")
