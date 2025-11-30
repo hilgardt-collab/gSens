@@ -14,6 +14,8 @@ from .arc_gauge import ArcGaugeDisplayer
 from .indicator import IndicatorDisplayer
 from .bar import BarDisplayer
 from .text import TextDisplayer
+from .cpu_multicore import CpuMultiCoreDisplayer
+from .static import StaticDisplayer
 from ui_helpers import build_background_config_ui, get_background_config_model
 
 gi.require_version("Gtk", "4.0")
@@ -25,22 +27,24 @@ class DashboardComboDisplayer(ComboBase):
     in a configurable dashboard layout.
     """
     def __init__(self, panel_ref, config):
-        self._drawers = {
-            "speedometer": SpeedometerDisplayer(None, config),
-            "arc_gauge": ArcGaugeDisplayer(None, config),
-            "bar": BarDisplayer(None, config),
-            "level_bar": LevelBarDisplayer(None, config),
-            "indicator": IndicatorDisplayer(None, config),
-            "graph": GraphDisplayer(None, config),
-            "text": TextDisplayer(None, config),
+        # FIX: Maintain a unique drawer instance for every slot to preserve animation state.
+        self._drawer_instances = {} 
+        
+        # Mapping of type strings to classes
+        self._drawer_classes = {
+            "speedometer": SpeedometerDisplayer,
+            "arc_gauge": ArcGaugeDisplayer,
+            "bar": BarDisplayer,
+            "level_bar": LevelBarDisplayer,
+            "indicator": IndicatorDisplayer,
+            "graph": GraphDisplayer,
+            "text": TextDisplayer,
+            "static": StaticDisplayer,
+            "cpu_multicore": CpuMultiCoreDisplayer
         }
-        if self._drawers.get("level_bar"):
-            self._drawers["level_bar"].is_drawer = True
 
         self._animation_timer_id = None
-        self._drawer_configs = {}
-        self._animation_values = {}
-
+        
         super().__init__(panel_ref, config)
         populate_defaults_from_model(self.config, self._get_full_config_model())
         
@@ -54,7 +58,7 @@ class DashboardComboDisplayer(ComboBase):
     @panel_ref.setter
     def panel_ref(self, value):
         self._panel_ref = value
-        for drawer in self._drawers.values():
+        for drawer in self._drawer_instances.values():
             if drawer: drawer.panel_ref = value
     
     @staticmethod
@@ -80,7 +84,11 @@ class DashboardComboDisplayer(ComboBase):
                 ConfigOption(f"center_{i}_width_ratio", "scale", "Width (% of available space):", 1.0, 0.1, 1.0, 0.05, 2),
             ]
         
-        sat_display_opts = {"Arc Gauge": "arc_gauge", "Speedometer": "speedometer", "Bar": "bar", "Level Bar": "level_bar", "Indicator": "indicator", "Graph": "graph", "Text": "text"}
+        sat_display_opts = {
+            "Arc Gauge": "arc_gauge", "Speedometer": "speedometer", "Bar": "bar", 
+            "Level Bar": "level_bar", "Indicator": "indicator", "Graph": "graph", 
+            "Text": "text", "Static": "static", "Multi-Core": "cpu_multicore"
+        }
         for i in range(1, 13):
             model[f"Satellite {i} Style"] = [
                 ConfigOption(f"satellite_{i}_display_as", "dropdown", "Display Type:", "arc_gauge", options_dict=sat_display_opts),
@@ -112,14 +120,23 @@ class DashboardComboDisplayer(ComboBase):
             def build_style_ui_for_item(parent_box, item_prefix):
                 child = parent_box.get_first_child()
                 while child: parent_box.remove(child); child = parent_box.get_first_child()
-                display_type_key = f"{item_prefix}_display_as"
-                display_as_widget = widgets.get(display_type_key); 
-                if not display_as_widget: return
-                display_as = display_as_widget.get_active_id(); drawer_instance = self._drawers.get(display_as)
-                if not drawer_instance: return
                 
+                display_type_key = f"{item_prefix}_display_as"
+                display_as_widget = widgets.get(display_type_key)
+                if not display_as_widget: return
+                display_as = display_as_widget.get_active_id()
+                
+                DrawerClass = self._drawer_classes.get(display_as)
+                if not DrawerClass: return
+                
+                if display_as == "graph":
+                    drawer_model = GraphDisplayer._get_graph_config_model_definition()
+                elif display_as == "static":
+                    drawer_model = StaticDisplayer._get_full_config_model_definition()
+                else:
+                    drawer_model = DrawerClass.get_config_model()
+
                 sub_model = {}
-                drawer_model = drawer_instance.get_config_model()
                 for s_title, s_opts in drawer_model.items():
                     prefixed_opts = []
                     for opt in s_opts:
@@ -130,11 +147,15 @@ class DashboardComboDisplayer(ComboBase):
                 
                 build_ui_from_model(parent_box, panel_config, sub_model, widgets)
                 dialog.dynamic_models.append(sub_model)
-                bg_prefixes = drawer_instance.get_config_key_prefixes()
+                
+                bg_prefixes = DrawerClass.get_config_key_prefixes()
                 if bg_prefixes:
                     full_bg_prefix = f"{item_prefix}_{bg_prefixes[0]}"
                     build_background_config_ui(parent_box, panel_config, widgets, dialog, prefix=full_bg_prefix, title=f"Background Style")
-                custom_builder = drawer_instance.get_configure_callback()
+                
+                # Instantiate temp drawer to get callback
+                temp_drawer = DrawerClass(None, panel_config)
+                custom_builder = temp_drawer.get_configure_callback()
                 if custom_builder: custom_builder(dialog, parent_box, widgets, available_sources, panel_config, prefix=item_prefix)
 
             center_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER); center_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=10, margin_bottom=10, margin_start=10, margin_end=10)
@@ -196,52 +217,106 @@ class DashboardComboDisplayer(ComboBase):
             
         return build_display_ui
 
+    def _ensure_drawers(self):
+        """
+        Ensures that for every active center and satellite slot, a unique
+        displayer instance of the correct type exists in self._drawer_instances.
+        """
+        center_count = int(self.config.get("dashboard_center_count", 1))
+        satellite_count = int(self.config.get("dashboard_satellite_count", 4))
+        
+        required_slots = [f"center_{i}" for i in range(1, center_count + 1)] + \
+                         [f"satellite_{i}" for i in range(1, satellite_count + 1)]
+        
+        # 1. Remove unused drawers
+        active_keys = set(required_slots)
+        keys_to_remove = [k for k in self._drawer_instances if k not in active_keys]
+        for k in keys_to_remove:
+            self._drawer_instances[k].close()
+            del self._drawer_instances[k]
+            
+        # 2. Update/Create needed drawers
+        for slot in required_slots:
+            desired_type = self.config.get(f"{slot}_display_as", "speedometer" if "center" in slot else "arc_gauge")
+            DrawerClass = self._drawer_classes.get(desired_type)
+            
+            if not DrawerClass: continue
+            
+            # Check if existing drawer matches type
+            existing = self._drawer_instances.get(slot)
+            if existing:
+                if not isinstance(existing, DrawerClass):
+                    existing.close()
+                    self._drawer_instances[slot] = DrawerClass(self.panel_ref, self.config.copy())
+                    if isinstance(self._drawer_instances[slot], GraphDisplayer):
+                        self._drawer_instances[slot].is_drawer = True
+            else:
+                self._drawer_instances[slot] = DrawerClass(self.panel_ref, self.config.copy())
+                if isinstance(self._drawer_instances[slot], GraphDisplayer):
+                    self._drawer_instances[slot].is_drawer = True
+
     def _update_drawer_configs(self):
-        self._drawer_configs.clear()
-        all_prefixes = [f"center_{i}" for i in range(1, 5)] + [f"satellite_{i}" for i in range(1, 13)]
-        for prefix in all_prefixes:
-            display_as = self.config.get(f"{prefix}_display_as"); drawer = self._drawers.get(display_as)
-            if not drawer: continue
-            instance_config = {}; drawer_model = drawer.get_config_model(); populate_defaults_from_model(instance_config, drawer_model)
-            bg_prefixes = drawer.get_config_key_prefixes()
-            if bg_prefixes:
-                full_bg_prefix = f"{prefix}_{bg_prefixes[0]}"; temp_model = get_background_config_model(full_bg_prefix)
-                for section in temp_model.values():
-                    for opt in section:
-                        unprefixed_key = opt.key.replace(f"{prefix}_", ""); instance_config.setdefault(unprefixed_key, opt.default)
+        """Updates the configuration of each individual drawer instance."""
+        for slot, drawer in self._drawer_instances.items():
+            # Build config for this specific instance
+            instance_config = self.config.copy()
+            
+            # Filter configs prefixed with "{slot}_" and strip prefix
+            prefix = f"{slot}_"
             for key, value in self.config.items():
-                if key.startswith(f"{prefix}_"): unprefixed_key = key[len(prefix) + 1:]; instance_config[unprefixed_key] = value
-            self._drawer_configs[prefix] = instance_config
+                if key.startswith(prefix):
+                    unprefixed_key = key[len(prefix):]
+                    instance_config[unprefixed_key] = value
+            
+            drawer.config = instance_config
+            drawer.apply_styles()
 
     def apply_styles(self):
-        super().apply_styles(); self._update_drawer_configs(); self.widget.queue_draw()
+        super().apply_styles()
+        self._ensure_drawers()
+        self._update_drawer_configs()
+        self.widget.queue_draw()
 
     def update_display(self, value):
         super().update_display(value)
         if not isinstance(value, dict) or not self.panel_ref: return
-        all_prefixes = [f"center_{i}" for i in range(1,5)] + [f"satellite_{i}" for i in range(1,13)]
-        for prefix in all_prefixes:
-            source_key = f"{prefix}_source"; data_packet = self.data_bundle.get(source_key, {})
-            num_val = data_packet.get('numerical_value', 0.0) or 0.0
-            if prefix not in self._animation_values: self._animation_values[prefix] = {'current': num_val, 'target': num_val, 'current_level': 0, 'target_level': 0}
-            self._animation_values[prefix]['target'] = num_val
-            display_as = self.config.get(f"{prefix}_display_as")
-            if display_as == "level_bar":
-                drawer_config = self._drawer_configs.get(prefix, {}); num_segments = int(drawer_config.get("level_bar_segment_count", 30))
-                min_v = float(data_packet.get('min_value', 0.0)); max_v = float(data_packet.get('max_value', 100.0)); v_range = max_v - min_v if max_v > min_v else 1
-                self._animation_values[prefix]['target_level'] = int(round(((min(max(num_val, min_v), max_v) - min_v) / v_range) * num_segments))
+        
+        # Iterate over instantiated drawers instead of just prefixes
+        for slot, drawer in self._drawer_instances.items():
+            source_key = f"{slot}_source"
+            data_packet = self.data_bundle.get(source_key, {})
+            
+            if 'min_value' in data_packet:
+                drawer.config['graph_min_value'] = data_packet['min_value']
+            if 'max_value' in data_packet:
+                drawer.config['graph_max_value'] = data_packet['max_value']
+            
+            child_source_instance = self.panel_ref.data_source.child_sources.get(source_key)
+            caption_text = self.config.get(f"{slot}_caption") or data_packet.get('primary_label', '')
+            
+            drawer.update_display(data_packet.get('raw_data'), source_override=child_source_instance, caption=caption_text)
 
     def on_draw(self, area, ctx, width, height):
-        width, height = int(width), int(height); 
+        width, height = int(width), int(height)
         if width <= 0 or height <= 0: return
         
-        satellite_count = int(self.config.get("dashboard_satellite_count", 4))
-
-        scale = float(self.config.get("dashboard_scale_factor", 1.0)); h_trans = float(self.config.get("dashboard_h_translate", 0.0)); v_trans = float(self.config.get("dashboard_v_translate", 0.0))
-        ctx.save(); ctx.translate(width/2 + h_trans, height/2 + v_trans); ctx.scale(scale, scale); ctx.translate(-width/2, -height/2)
-        center_positions = self._calculate_center_positions(width, height); satellite_positions = self._calculate_satellite_positions(width, height, center_positions)
-        for prefix, pos in center_positions.items(): self._draw_sub_display(ctx, pos['x'], pos['y'], pos['w'], pos['h'], prefix, self.data_bundle)
-        for prefix, pos in satellite_positions.items(): self._draw_sub_display(ctx, pos['x'], pos['y'], pos['w'], pos['h'], prefix, self.data_bundle)
+        scale = float(self.config.get("dashboard_scale_factor", 1.0))
+        h_trans = float(self.config.get("dashboard_h_translate", 0.0))
+        v_trans = float(self.config.get("dashboard_v_translate", 0.0))
+        
+        ctx.save()
+        ctx.translate(width/2 + h_trans, height/2 + v_trans)
+        ctx.scale(scale, scale)
+        ctx.translate(-width/2, -height/2)
+        
+        center_positions = self._calculate_center_positions(width, height)
+        satellite_positions = self._calculate_satellite_positions(width, height, center_positions)
+        
+        for prefix, pos in center_positions.items():
+            self._draw_sub_display(ctx, pos['x'], pos['y'], pos['w'], pos['h'], prefix)
+        for prefix, pos in satellite_positions.items():
+            self._draw_sub_display(ctx, pos['x'], pos['y'], pos['w'], pos['h'], prefix)
+            
         ctx.restore()
 
     def _calculate_center_positions(self, width, height):
@@ -285,16 +360,15 @@ class DashboardComboDisplayer(ComboBase):
             positions[prefix] = {'x': x, 'y': y, 'w': size_w, 'h': size_h}
         return positions
 
-    def _draw_sub_display(self, ctx, x, y, w, h, prefix, data_bundle):
-        display_as = self.config.get(f"{prefix}_display_as"); drawer = self._drawers.get(display_as)
+    def _draw_sub_display(self, ctx, x, y, w, h, prefix):
+        # Use the specific drawer instance for this slot
+        drawer = self._drawer_instances.get(prefix)
         if not drawer: return
-        drawer.config = self._drawer_configs.get(prefix, {}); source_key = f"{prefix}_source"; data_packet = data_bundle.get(source_key, {})
-        child_source_instance = self.panel_ref.data_source.child_sources.get(source_key); caption_text = self.config.get(f"bar{prefix.split('_')[1]}_caption") or data_packet.get('primary_label', '')
-        drawer.config['graph_min_value'] = data_packet.get('min_value', drawer.config.get('graph_min_value', 0.0)); drawer.config['graph_max_value'] = data_packet.get('max_value', drawer.config.get('graph_max_value', 100.0))
-        drawer.apply_styles(); anim_state = self._animation_values.get(prefix, {}); drawer._current_display_value = anim_state.get('current', 0.0)
-        if display_as == "level_bar": drawer.current_on_level = anim_state.get('current_level', 0)
-        drawer.update_display(data_packet.get('raw_data'), source_override=child_source_instance, caption=caption_text)
-        ctx.save(); ctx.translate(x, y); drawer.on_draw(None, ctx, w, h); ctx.restore()
+        
+        ctx.save()
+        ctx.translate(x, y)
+        drawer.on_draw(None, ctx, w, h)
+        ctx.restore()
 
     def _start_animation_timer(self, widget=None):
         self._stop_animation_timer(); self._animation_timer_id = GLib.timeout_add(16, self._animation_tick)
@@ -302,22 +376,19 @@ class DashboardComboDisplayer(ComboBase):
         if self._animation_timer_id is not None: GLib.source_remove(self._animation_timer_id); self._animation_timer_id = None
 
     def _animation_tick(self):
-        if not self.widget.get_realized(): self._animation_timer_id = None; return GLib.SOURCE_REMOVE
-        needs_redraw = False
-        for prefix, values in self._animation_values.items():
-            diff = values['target'] - values['current']
-            if abs(diff) < 0.01:
-                if values['current'] != values['target']: values['current'] = values['target']; needs_redraw = True
-            else: values['current'] += diff * 0.1; needs_redraw = True
-            level_diff = values.get('target_level', 0) - values.get('current_level', 0)
-            if level_diff > 0: values['current_level'] += 1; needs_redraw = True
-            elif level_diff < 0: values['current_level'] = values['target_level']; needs_redraw = True
-        if needs_redraw: self.widget.queue_draw()
+        # This ticks the animations for sub-displayers that don't have their own widget realized
+        if not self.widget.get_realized(): return GLib.SOURCE_REMOVE
+        
+        for drawer in self._drawer_instances.values():
+            if hasattr(drawer, '_animation_tick'):
+                drawer._animation_tick()
+        
+        self.widget.queue_draw()
         return GLib.SOURCE_CONTINUE
 
     def close(self):
         self._stop_animation_timer()
-        for drawer in self._drawers.values():
+        for drawer in self._drawer_instances.values():
             if drawer: drawer.close()
-        self._drawers.clear(); super().close()
-
+        self._drawer_instances.clear()
+        super().close()

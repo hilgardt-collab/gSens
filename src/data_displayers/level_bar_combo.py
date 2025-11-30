@@ -19,7 +19,7 @@ class LevelBarComboDisplayer(ComboBase):
     def __init__(self, panel_ref, config):
         self._animation_timer_id = None
         self._bar_values = {}
-        # --- FIX: Use a dictionary of drawers to encapsulate state ---
+        # Use a dictionary of drawers to encapsulate state
         self._drawers = {}
         self._drawer_configs = {}
 
@@ -36,7 +36,7 @@ class LevelBarComboDisplayer(ComboBase):
     @panel_ref.setter
     def panel_ref(self, value):
         self._panel_ref = value
-        # --- FIX: Update panel_ref for all drawer instances ---
+        # Update panel_ref for all drawer instances
         for drawer in self._drawers.values():
             if drawer:
                 drawer.panel_ref = value
@@ -70,10 +70,6 @@ class LevelBarComboDisplayer(ComboBase):
 
     @staticmethod
     def get_config_model():
-        """
-        Returns an empty model. All UI for this complex displayer is built
-        inside the get_configure_callback method to handle the notebook layout.
-        """
         return {}
 
     def get_configure_callback(self):
@@ -216,6 +212,14 @@ class LevelBarComboDisplayer(ComboBase):
                 build_ui_from_model(tab_box, panel_config, prefixed_model, widgets)
                 dialog.dynamic_models.append(prefixed_model)
 
+                # --- FIX: Manually invoke the visibility callback for each bar ---
+                temp_lb = LevelBarDisplayer(None, panel_config)
+                lb_cb = temp_lb.get_configure_callback()
+                if lb_cb:
+                    # Pass the specific prefix for this bar (e.g. "bar1")
+                    lb_cb(dialog, tab_box, widgets, available_sources, panel_config, prefix=f"bar{i}")
+
+
             def on_bar_count_changed(spinner):
                 count = spinner.get_value_as_int()
                 source_bar_combo.remove_all(); grad_start_bar_combo.remove_all(); grad_end_bar_combo.remove_all()
@@ -229,7 +233,6 @@ class LevelBarComboDisplayer(ComboBase):
                 for i, content_widget in enumerate(bar_tabs_content):
                     content_widget.set_visible(i < count)
 
-            # --- NEW: Find the spinner from the other tab and connect to it ---
             bar_count_spinner = widgets.get("number_of_bars")
             if bar_count_spinner:
                 bar_count_spinner.connect("value-changed", on_bar_count_changed)
@@ -381,7 +384,6 @@ class LevelBarComboDisplayer(ComboBase):
                 
     def close(self):
         self._stop_animation_timer()
-        # --- FIX: Close all drawer instances ---
         for drawer in self._drawers.values():
             drawer.close()
         self._drawers.clear()

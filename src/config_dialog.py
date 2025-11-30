@@ -1,7 +1,8 @@
 # /config_dialog.py
 import gi
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gtk, Gdk, GLib, Pango
+gi.require_version("PangoCairo", "1.0")
+from gi.repository import Gtk, Gdk, GLib, Pango, PangoCairo
 
 # Import the clipboard singletons from the new unified module
 from ui_clipboard import font_clipboard, color_clipboard
@@ -16,12 +17,11 @@ _active_font_button = None # Stores the Gtk.Button that was clicked
 def get_global_font_dialog(parent_window):
     """
     Gets (or creates) the singleton Gtk.FontChooserDialog.
+    MUST BE CALLED ON THE MAIN THREAD.
     """
     global _global_font_dialog
     if _global_font_dialog is None:
-        # --- FIX: Removed the invalid 'parent' argument from the constructor ---
         _global_font_dialog = Gtk.FontChooserDialog(title="Select Font")
-        # --- END FIX ---
         _global_font_dialog.connect("response", on_global_font_dialog_response)
         # Hide the dialog on close instead of destroying it
         _global_font_dialog.connect("close-request", lambda d: d.hide() or True)
@@ -30,6 +30,20 @@ def get_global_font_dialog(parent_window):
     if parent_window:
         _global_font_dialog.set_transient_for(parent_window)
     return _global_font_dialog
+
+def warm_up_font_cache():
+    """
+    Forces Pango to enumerate system fonts.
+    This performs the expensive disk I/O of scanning font files.
+    This function IS safe to call from a background thread.
+    """
+    try:
+        # Getting the default font map and listing families triggers the scan
+        font_map = PangoCairo.FontMap.get_default()
+        font_map.list_families()
+        print("Font cache warmed up via Pango.")
+    except Exception as e:
+        print(f"Error warming up font cache: {e}")
 
 def on_global_font_dialog_response(dialog, response_id):
     """
@@ -63,6 +77,46 @@ def on_custom_font_button_clicked(button):
     dialog.present()
 # --- End Singleton Font Dialog ---
 
+# --- Custom Color Button Logic ---
+def _draw_color_swatch(area, ctx, w, h, rgba_str_ptr):
+    """Draws the color swatch on the custom color button."""
+    # Access the color string stored in the list/pointer
+    color_str = rgba_str_ptr[0]
+    
+    # Draw checkerboard (for alpha)
+    ctx.set_source_rgb(0.8, 0.8, 0.8)
+    ctx.rectangle(0, 0, w, h)
+    ctx.fill()
+    ctx.set_source_rgb(0.6, 0.6, 0.6)
+    ctx.rectangle(0, 0, w/2, h/2)
+    ctx.rectangle(w/2, h/2, w/2, h/2)
+    ctx.fill()
+    
+    # Draw color
+    try:
+        rgba = Gdk.RGBA()
+        rgba.parse(color_str)
+        ctx.set_source_rgba(rgba.red, rgba.green, rgba.blue, rgba.alpha)
+        ctx.rectangle(0, 0, w, h)
+        ctx.fill()
+    except:
+        pass # Invalid color
+
+def on_custom_color_button_clicked(button, color_ptr, drawing_area):
+    """Opens the custom singleton color dialog."""
+    # Defer import to avoid circular dependency:
+    # config_dialog -> ui_color_dialog -> ui_helpers -> config_dialog
+    from ui_color_dialog import ColorChooserDialog
+    
+    dialog = ColorChooserDialog(button.get_ancestor(Gtk.Window))
+    
+    def on_color_selected(new_color_str):
+        color_ptr[0] = new_color_str
+        drawing_area.queue_draw()
+        
+    dialog.present_for_widget(button, color_ptr[0], on_color_selected)
+
+# --- End Custom Color Logic ---
 
 class ConfigOption:
     """
@@ -187,7 +241,6 @@ def build_ui_from_model(parent_box, config, model, widgets=None):
 def _build_option_widgets(parent_box, config, options, widgets):
     """
     Internal helper to build the actual widgets for a list of ConfigOption objects.
-    This is extracted from the main function to be reusable for static and dynamic parts.
     """
     for option in options:
         widget = None
@@ -224,27 +277,44 @@ def _build_option_widgets(parent_box, config, options, widgets):
 
         elif option.type == "bool":
             widget = Gtk.Switch(active=str(config.get(option.key, str(option.default))).lower() == 'true', halign=Gtk.Align.END)
+        
         elif option.type == "color":
+            # --- NEW CUSTOM COLOR BUTTON ---
             color_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, hexpand=True)
             
-            rgba = Gdk.RGBA()
-            rgba.parse(str(config.get(option.key, option.default)))
-            widget = Gtk.ColorButton.new_with_rgba(rgba)
-            widget.set_use_alpha(True)
+            # Use a simple Button instead of ColorButton
+            widget = Gtk.Button()
             widget.set_hexpand(True)
+            
+            # Current color state - mutable list so inner functions can update it
+            current_val = str(config.get(option.key, option.default))
+            color_ptr = [current_val] 
+            
+            # Drawing area for swatch
+            area = Gtk.DrawingArea()
+            area.set_draw_func(_draw_color_swatch, color_ptr)
+            widget.set_child(area)
+            
+            # Connect click to custom dialog
+            widget.connect("clicked", on_custom_color_button_clicked, color_ptr, area)
+            
+            # We store the pointer on the widget so we can retrieve the value later
+            widget.color_val_ptr = color_ptr
+            
             color_box.append(widget)
 
             copy_button = Gtk.Button(icon_name="edit-copy-symbolic", tooltip_text="Copy Color")
             paste_button = Gtk.Button(icon_name="edit-paste-symbolic", tooltip_text="Paste Color")
 
-            copy_button.connect("clicked", lambda btn, color_btn=widget: color_clipboard.copy_color(color_btn.get_rgba().to_string()))
+            copy_button.connect("clicked", lambda btn, ptr=color_ptr: color_clipboard.copy_color(ptr[0]))
             
-            def on_paste_clicked(btn, color_btn=widget):
+            def on_paste_clicked(btn, ptr=color_ptr, area_ref=area):
                 color_to_paste_str = color_clipboard.get_color()
                 if color_to_paste_str:
-                    new_rgba = Gdk.RGBA()
-                    if new_rgba.parse(color_to_paste_str):
-                        color_btn.set_rgba(new_rgba)
+                    rgba = Gdk.RGBA()
+                    if rgba.parse(color_to_paste_str):
+                        ptr[0] = color_to_paste_str
+                        area_ref.queue_draw()
 
             paste_button.connect("clicked", on_paste_clicked)
             
@@ -254,9 +324,6 @@ def _build_option_widgets(parent_box, config, options, widgets):
             row.append(color_box)
 
         elif option.type == "font":
-            # --- FONT BUTTON PERFORMANCE FIX ---
-            # Replaced slow Gtk.FontButton with a Gtk.Button that uses
-            # a single, shared Gtk.FontChooserDialog instance.
             font_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, hexpand=True)
             
             font_desc_str = str(config.get(option.key, option.default))
@@ -274,25 +341,20 @@ def _build_option_widgets(parent_box, config, options, widgets):
             widget.connect("clicked", on_custom_font_button_clicked)
             
             font_box.append(widget)
-            # --- END FONT BUTTON FIX ---
 
             copy_button = Gtk.Button(icon_name="edit-copy-symbolic", tooltip_text="Copy Font")
             paste_button = Gtk.Button(icon_name="edit-paste-symbolic", tooltip_text="Paste Font")
 
-            # --- FONT BUTTON FIX: Update copy/paste handlers ---
-            # Read from our custom 'font_desc' attribute
             copy_button.connect("clicked", lambda btn, font_btn=widget: font_clipboard.copy_font(font_btn.font_desc.to_string()))
             
             def on_paste_clicked(btn, font_btn=widget):
                 font_to_paste_str = font_clipboard.get_font()
                 if font_to_paste_str:
                     new_font_desc = Pango.FontDescription.from_string(font_to_paste_str)
-                    # Store the new description and update the button label
                     font_btn.font_desc = new_font_desc
                     font_btn.set_label(new_font_desc.to_string())
             
             paste_button.connect("clicked", on_paste_clicked)
-            # --- END FONT BUTTON FIX ---
             
             font_box.append(copy_button)
             font_box.append(paste_button)
@@ -419,12 +481,10 @@ def get_config_from_widgets(widgets, models_list):
     all_option_defs = {}
     for model in models_list:
         for option in _get_all_options_from_model(model):
-            # Ensure it's a valid ConfigOption object before adding
             if hasattr(option, 'key') and isinstance(option.key, str):
                 all_option_defs[option.key] = option
 
     for key, widget in widgets.items():
-        # Skip derivative widgets like buttons
         if key.endswith("_button"):
             continue
 
@@ -444,16 +504,17 @@ def get_config_from_widgets(widgets, models_list):
 
         elif option_def.type == "bool":
             new_config[key] = str(widget.get_active())
+        
         elif option_def.type == "color":
-            new_config[key] = widget.get_rgba().to_string()
+            # Retrieve custom color string from our pointer
+            if hasattr(widget, 'color_val_ptr'):
+                new_config[key] = widget.color_val_ptr[0]
+        
         elif option_def.type == "font":
-            # --- FONT BUTTON FIX: Read from our custom 'font_desc' attribute ---
             if hasattr(widget, 'font_desc') and widget.font_desc:
                 new_config[key] = widget.font_desc.to_string()
             else:
-                # Fallback in case something is very wrong
                 new_config[key] = option_def.default
-            # --- END FONT BUTTON FIX ---
         elif option_def.type == "scale" or option_def.type == "spinner":
             new_config[key] = f"{widget.get_value():.{option_def.digits}f}"
         elif option_def.type == "dropdown":

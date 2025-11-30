@@ -342,6 +342,7 @@ class SystemMonitorApp(Gtk.Application):
         self.window = None
         self.sensors_ready_event = threading.Event()
         self.command_line_options = {} # To store parsed options
+        self._is_background = False
         
         # --- FIX: Register options in __init__ ---
         # This must be done *before* app.run() is called.
@@ -365,18 +366,42 @@ class SystemMonitorApp(Gtk.Application):
         self.add_main_option(
             "version", ord("v"), GLib.OptionFlags.NONE, GLib.OptionArg.NONE,
             "Show application version and exit", None)
+        # --- NEW: Background option ---
+        self.add_main_option(
+            "background", ord("b"), GLib.OptionFlags.NONE, GLib.OptionArg.NONE,
+            "Launch in background (hidden).", None)
 
     def do_activate(self):
         """
         Called when the application is activated without command-line args,
         or after do_command_line finishes.
         """
-        if not self.window or not self.window.is_visible():
-            self.window = MainWindow(self, 
-                                     sensors_ready_event=self.sensors_ready_event,
-                                     cli_options=self.command_line_options)
-        self.window.present()
-        # Clear options after passing them to the window
+        # If launched in background mode initially, don't show window unless
+        # re-activated without the flag.
+        if self.command_line_options.get('background'):
+            if not self.window:
+                print("Initializing gSens in background mode...")
+                self.window = MainWindow(self, 
+                                         sensors_ready_event=self.sensors_ready_event,
+                                         cli_options=self.command_line_options)
+                # Hold the application so it doesn't exit when no windows are shown
+                self.hold()
+                self._is_background = True
+        else:
+            # Normal activation (or re-activation from second instance)
+            if not self.window:
+                self.window = MainWindow(self, 
+                                         sensors_ready_event=self.sensors_ready_event,
+                                         cli_options=self.command_line_options)
+            
+            if self._is_background:
+                print("Background instance summoned.")
+                self.release() # Release the background hold
+                self._is_background = False
+                
+            self.window.present()
+            
+        # Clear options after passing them to the window logic
         self.command_line_options = {}
 
     def do_command_line(self, command_line):
@@ -386,40 +411,31 @@ class SystemMonitorApp(Gtk.Application):
         options = options.end().unpack()
 
         # Handle --version
-        # --- FIX: Only check for the long name 'version' ---
         if 'version' in options:
-            print("gSens System Monitor 1.0.0") # You can update this version
-            return 0 # Exit successfully
+            print("gSens System Monitor 1.0.0") 
+            return 0 
 
         # Handle --list-monitors
-        # --- FIX: Only check for the long name 'list-monitors' ---
         if 'list-monitors' in options:
             self._list_monitors()
-            return 0 # Exit successfully
-        
-        # Gtk.Application handles --help and -h automatically
+            return 0 
         
         # Handle --config
         if 'config' in options:
             config_path = options['config']
             if os.path.exists(config_path) and os.path.isfile(config_path):
                 print(f"Loading configuration from: {config_path}")
-                # Load the user-specified config. This will overwrite the default
-                # one loaded by config_manager's __init__.
                 if not config_manager.load(config_path):
                     print(f"Error: Could not parse config file: {config_path}. Exiting.")
-                    return 1 # Exit with error
+                    return 1 
             else:
                 print(f"Error: Config file not found: {config_path}. Exiting.")
-                return 1 # Exit with error
-        else:
-            # No config specified, load default (which config_manager already did)
-            pass
+                return 1 
 
-        # Store other options to be passed to MainWindow
+        # Store options to be passed to do_activate
         self.command_line_options = options
         
-        # Call do_activate() to build and show the window
+        # Call do_activate() to decide whether to show the window
         self.activate()
         return 0
 
@@ -460,6 +476,7 @@ class SystemMonitorApp(Gtk.Application):
         sensor_discovery_thread.start()
 
         # --- NEW: Pre-load the font dialog in the background ---
+        # Use our new thread-safe strategy
         font_cache_thread = threading.Thread(target=self._initialize_font_dialog_background,
                                              daemon=True)
         font_cache_thread.start()
@@ -475,20 +492,32 @@ class SystemMonitorApp(Gtk.Application):
 
     def _initialize_font_dialog_background(self):
         """
-        In a background thread, creates the singleton font dialog.
-        This pre-caches the system font list, so the first time
-        the user clicks a font button, it appears instantly.
+        In a background thread, warms up Pango's font cache.
+        Then schedules the actual widget creation on the main thread.
         """
         print("Starting background font cache initialization...")
         try:
-            # Calling this function will create the singleton instance
-            # in the background, triggering the initial (slow) font scan.
-            # We pass None for the parent, which is fine for creation.
-            config_dialog.get_global_font_dialog(None)
-            print("Background font cache initialized.")
+            # 1. Heavy I/O (scanning fonts) - Safe in background
+            config_dialog.warm_up_font_cache()
+            
+            # 2. Create the Widget - MUST happen on Main Thread
+            # We schedule it with low priority so it doesn't block startup animation
+            GLib.idle_add(self._create_dialog_on_main_thread, priority=GLib.PRIORITY_LOW)
+            
         except Exception as e:
-            # This might fail in headless environments, but shouldn't crash the app
             print(f"Warning: Background font cache initialization failed: {e}")
+
+    def _create_dialog_on_main_thread(self):
+        """
+        Called by GLib.idle_add to safely create the widget on the main thread.
+        """
+        try:
+            # This simply accesses the singleton getter, which creates the widget if needed
+            config_dialog.get_global_font_dialog(None)
+            print("Global font dialog created successfully.")
+        except Exception as e:
+             print(f"Error creating global font dialog: {e}")
+        return GLib.SOURCE_REMOVE
 
     def _discover_sensors_background(self, ready_event):
         """

@@ -2,6 +2,7 @@ import configparser
 import os
 import uuid
 import threading
+import io
 from gi.repository import GLib
 
 config_home = GLib.get_user_config_dir()
@@ -11,7 +12,6 @@ else:
     APP_CONFIG_DIR = os.path.expanduser("~/.config/gSens")
 
 DEFAULT_CONFIG_FILE = os.path.join(APP_CONFIG_DIR, "panel_settings.ini")
-# --- NEW: Define a separate theme file ---
 THEME_CONFIG_FILE = os.path.join(APP_CONFIG_DIR, "theme.ini")
 
 
@@ -22,7 +22,6 @@ class ConfigManager:
         self.config.optionxform = str 
         self.load() 
         
-        # --- NEW: Load the theme configuration ---
         self.theme_config = configparser.ConfigParser(interpolation=None)
         self.theme_config.optionxform = str
         if os.path.exists(THEME_CONFIG_FILE):
@@ -60,34 +59,39 @@ class ConfigManager:
 
     def save(self, filepath=None, immediate=False):
         """
-        Saves configuration. 
-        If immediate=False, debounces the save to prevent disk thrashing.
+        Saves configuration safely.
         """
-        if filepath:
-            # Always save immediately if a specific path is provided (Save As...)
-            return self._write_to_disk(filepath)
-        
-        if immediate:
+        # Serialize config to string immediately (Main Thread)
+        config_data = io.StringIO()
+        self.config.write(config_data)
+        serialized_data = config_data.getvalue()
+        config_data.close()
+
+        target_path = filepath if filepath else DEFAULT_CONFIG_FILE
+
+        if filepath or immediate:
             with self._save_lock:
                 if self._save_timer:
                     self._save_timer.cancel()
                     self._save_timer = None
-            return self._write_to_disk(DEFAULT_CONFIG_FILE)
+            return self._write_to_disk(target_path, serialized_data)
             
-        # Debounce logic for default file
+        # Debounce logic for background saves
         with self._save_lock:
             if self._save_timer:
                 self._save_timer.cancel()
-            self._save_timer = threading.Timer(1.0, self._write_to_disk, args=[DEFAULT_CONFIG_FILE])
+            
+            # Pass the PRE-SERIALIZED data to the thread
+            self._save_timer = threading.Timer(1.0, self._write_to_disk, args=[target_path, serialized_data])
             self._save_timer.start()
         return True
 
-    def _write_to_disk(self, save_path):
-        """Helper to perform the actual synchronous write operation."""
+    def _write_to_disk(self, save_path, data_string):
+        """Helper to perform the actual synchronous write operation using pre-serialized data."""
         try:
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
             with open(save_path, "w", encoding='utf-8') as f:
-                self.config.write(f)
+                f.write(data_string)
             print(f"Configuration saved to {save_path}")
             return True
         except IOError as e:
@@ -180,20 +184,13 @@ class ConfigManager:
         for key, value in window_config_dict.items():
             self.config.set("window", str(key), str(value))
 
-    # --- NEW AND MODIFIED THEME METHODS ---
-
     def get_displayer_defaults(self, displayer_key):
-        """Gets the default style configuration for a given displayer type."""
         section_name = f"defaults_{displayer_key}"
         if self.theme_config.has_section(section_name):
             return dict(self.theme_config.items(section_name))
         return {}
 
     def save_displayer_defaults(self, displayer_key, panel_config, displayer_class):
-        """
-        Saves the relevant style settings from a panel's config as the new
-        default for that displayer type.
-        """
         if not displayer_key or not displayer_class:
             return False
 
@@ -218,18 +215,16 @@ class ConfigManager:
             if key in panel_config:
                 defaults_to_save[key] = panel_config[key]
         
-        # --- FIX: Only use prefixes explicitly provided by the displayer class ---
         prefixes_to_check = []
         if hasattr(displayer_class, 'get_config_key_prefixes'):
             prefixes_to_check = displayer_class.get_config_key_prefixes()
 
-        # Use the collected prefixes to find all relevant dynamic keys
         if prefixes_to_check:
             for key, value in panel_config.items():
-                for prefix in set(prefixes_to_check): # Use set to avoid duplicates
+                for prefix in set(prefixes_to_check): 
                     if key.startswith(prefix):
                         defaults_to_save[key] = value
-                        break # Move to next key once matched
+                        break 
 
         section_name = f"defaults_{displayer_key}"
         if self.theme_config.has_section(section_name):
@@ -247,5 +242,37 @@ class ConfigManager:
         except IOError as e:
             print(f"Error writing theme file {THEME_CONFIG_FILE}: {e}")
             return False
+
+    # --- NEW: Custom Color Persistence ---
+    def get_custom_colors(self):
+        """Retrieves the list of saved custom colors from theme.ini."""
+        if self.theme_config.has_section("CustomColors"):
+            # Read 32 slots
+            colors = []
+            for i in range(32):
+                col = self.theme_config.get("CustomColors", f"color_{i}", fallback=None)
+                if col: colors.append(col)
+            # Pad with defaults if less than 32
+            while len(colors) < 32:
+                colors.append("rgba(255,255,255,1)")
+            return colors
+        else:
+            # Return a default gray scale palette if no config exists
+            return [f"rgba({v},{v},{v},1)" for v in range(0, 256, 8)][:32]
+
+    def save_custom_colors(self, colors):
+        """Saves the list of custom colors to theme.ini."""
+        if not self.theme_config.has_section("CustomColors"):
+            self.theme_config.add_section("CustomColors")
+        
+        for i, color in enumerate(colors):
+            if i >= 32: break
+            self.theme_config.set("CustomColors", f"color_{i}", str(color))
+            
+        try:
+            with open(THEME_CONFIG_FILE, "w", encoding='utf-8') as f:
+                self.theme_config.write(f)
+        except IOError as e:
+            print(f"Error saving custom colors: {e}")
 
 config_manager = ConfigManager()

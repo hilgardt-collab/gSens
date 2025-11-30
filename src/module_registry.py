@@ -42,10 +42,11 @@ def discover_and_load_modules():
     _load_modules_from_directory('data_sources', DataSource, ALL_SOURCE_CLASSES)
     _load_modules_from_directory('data_displayers', DataDisplayer, ALL_DISPLAYER_CLASSES)
 
+    # --- Added 'cpu_multicore' to displayers list for 'cpu' source ---
     SOURCE_METADATA = sorted([
         {'key': 'analog_clock', 'class_name': 'AnalogClockDataSource', 'name': 'Clock', "displayers": ["analog_clock", "text"], "default_size": (16, 16)},
         {'key': 'combo', 'class_name': 'ComboDataSource', 'name': 'Combo Panel', "displayers": ["arc_combo", "level_bar_combo", "lcars_combo", "dashboard_combo"], "default_size": (24, 20)},
-        {'key': 'cpu', 'class_name': 'CPUDataSource', 'name': 'CPU Monitor', "displayers": ["text", "graph", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (16, 16)},
+        {'key': 'cpu', 'class_name': 'CPUDataSource', 'name': 'CPU Monitor', "displayers": ["text", "graph", "bar", "arc_gauge", "indicator", "level_bar", "speedometer", "cpu_multicore"], "default_size": (16, 16)},
         {'key': 'disk_usage', 'class_name': 'DiskUsageDataSource', 'name': 'Disk Usage', "displayers": ["text", "bar", "arc_gauge", "indicator", "level_bar", "speedometer", "graph"], "default_size": (16, 16)},
         {'key': 'fan_speed', 'class_name': 'FanSpeedDataSource', 'name': 'Fan Speed', "displayers": ["text", "graph", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (16, 16)},
         {'key': 'gpu', 'class_name': 'GPUDataSource', 'name': 'GPU Monitor', "displayers": ["text", "graph", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (16, 16)},
@@ -57,6 +58,7 @@ def discover_and_load_modules():
         {'key': 'system_temp', 'class_name': 'SystemTempDataSource', 'name': 'System Temperature', "displayers": ["graph", "text", "bar", "arc_gauge", "indicator", "level_bar", "speedometer"], "default_size": (16, 16)},
     ], key=lambda x: x['name'])
 
+    # --- Added 'cpu_multicore' entry ---
     DISPLAYER_METADATA = sorted([
         {'key': 'analog_clock', 'class_name': 'AnalogClockDisplayer', 'name': 'Analog Clock'},
         {'key': 'arc_gauge', 'class_name': 'ArcGaugeDisplayer', 'name': 'Arc Gauge'},
@@ -72,6 +74,7 @@ def discover_and_load_modules():
         {'key': 'static', 'class_name': 'StaticDisplayer', 'name': 'Static Image/Text'},
         {'key': 'text', 'class_name': 'TextDisplayer', 'name': 'Text'},
         {'key': 'table', 'class_name': 'TableDisplayer', 'name': 'Table'},
+        {'key': 'cpu_multicore', 'class_name': 'CpuMultiCoreDisplayer', 'name': 'Multi-Core Bars'},
     ], key=lambda x: x['name'])
 
     for meta in SOURCE_METADATA:
@@ -85,4 +88,3 @@ def discover_and_load_modules():
         if class_name in ALL_DISPLAYER_CLASSES:
             AVAILABLE_DISPLAYERS[meta['key']] = meta.copy()
             AVAILABLE_DISPLAYERS[meta['key']]['class'] = ALL_DISPLAYER_CLASSES[class_name]
-
