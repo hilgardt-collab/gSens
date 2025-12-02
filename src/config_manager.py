@@ -62,6 +62,8 @@ class ConfigManager:
         Saves configuration safely.
         """
         # Serialize config to string immediately (Main Thread)
+        # This prevents race conditions where self.config is modified 
+        # while the background thread is writing it.
         config_data = io.StringIO()
         self.config.write(config_data)
         serialized_data = config_data.getvalue()
@@ -184,6 +186,7 @@ class ConfigManager:
         for key, value in window_config_dict.items():
             self.config.set("window", str(key), str(value))
 
+    # --- Theme Methods ---
     def get_displayer_defaults(self, displayer_key):
         section_name = f"defaults_{displayer_key}"
         if self.theme_config.has_section(section_name):
@@ -243,7 +246,7 @@ class ConfigManager:
             print(f"Error writing theme file {THEME_CONFIG_FILE}: {e}")
             return False
 
-    # --- NEW: Custom Color Persistence ---
+    # --- Custom Color Persistence ---
     def get_custom_colors(self):
         """Retrieves the list of saved custom colors from theme.ini."""
         if self.theme_config.has_section("CustomColors"):

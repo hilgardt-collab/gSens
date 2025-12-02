@@ -113,7 +113,6 @@ class CpuMultiCoreDisplayer(DataDisplayer):
         start_idx = int(self.config.get("multicore_start_index", 0))
         requested_count = int(self.config.get("multicore_count", 8))
         
-        # --- FIX: Cap displayed cores to available data ---
         available_len = len(raw_list)
         if start_idx >= available_len:
             start_idx = 0 
@@ -141,7 +140,6 @@ class CpuMultiCoreDisplayer(DataDisplayer):
         if width <= 0 or height <= 0 or not self._core_currents:
             return
             
-        # --- Draw Main Caption ---
         show_caption = str(self.config.get("multicore_show_caption", "True")).lower() == 'true'
         caption_height = 0
         
@@ -177,7 +175,6 @@ class CpuMultiCoreDisplayer(DataDisplayer):
         num_pos = self.config.get("multicore_num_position", "bottom")
         start_idx = int(self.config.get("multicore_start_index", 0))
         
-        # Calculate max label width for consistent horizontal alignment
         max_num_w = 0
         if show_nums:
             if self._layout_num is None:
@@ -193,7 +190,6 @@ class CpuMultiCoreDisplayer(DataDisplayer):
                     _, num_log = self._layout_num.get_pixel_extents()
                     if num_log.width > max_num_w: max_num_w = num_log.width
 
-        # Calculate cell dimensions
         if orientation == "vertical":
             cell_width = (width - (spacing * (bar_count - 1))) / bar_count
             cell_height = height
@@ -206,7 +202,6 @@ class CpuMultiCoreDisplayer(DataDisplayer):
         bg_color = Gdk.RGBA(); bg_color.parse(self.config.get("multicore_bg_color", "rgba(40,40,40,0.5)"))
         color_mode = self.config.get("multicore_color_mode", "gradient")
         
-        # --- FIX: Parse custom colors for use in gradient mode too ---
         custom_colors = []
         custom_count = int(self.config.get("multicore_custom_color_count", 1))
         for i in range(1, custom_count + 1):
@@ -221,7 +216,6 @@ class CpuMultiCoreDisplayer(DataDisplayer):
             c = Gdk.RGBA(); c.parse(self.config.get("multicore_color_single", "rgba(0,200,255,1)"))
             colors = [c]
         elif color_mode == "gradient":
-            # Check if we should use custom sequence for gradient
             if len(custom_colors) >= 2:
                  colors = custom_colors
             else:
@@ -271,41 +265,31 @@ class CpuMultiCoreDisplayer(DataDisplayer):
                     txt_x = cell_x + bar_w + 4
                     txt_y = cell_y + (cell_height - num_h) / 2
 
-            # Background
             ctx.set_source_rgba(bg_color.red, bg_color.green, bg_color.blue, bg_color.alpha)
             ctx.rectangle(bar_x, bar_y, bar_w, bar_h)
             ctx.fill()
 
-            # Foreground Color
             if color_mode == "single":
                 c = colors[0]
                 ctx.set_source_rgba(c.red, c.green, c.blue, c.alpha)
             elif color_mode == "gradient":
-                # Interpolate across ALL colors in the list
                 total_stops = len(colors)
                 if total_stops < 2:
                      c = colors[0]
                      ctx.set_source_rgba(c.red, c.green, c.blue, c.alpha)
                 else:
                     global_progress = i / (bar_count - 1) if bar_count > 1 else 0
-                    
-                    # Find which two colors we are between
-                    # If 3 colors: 0.0-0.5 uses col 0-1, 0.5-1.0 uses col 1-2
                     segment_size = 1.0 / (total_stops - 1)
                     segment_idx = int(global_progress / segment_size)
                     if segment_idx >= total_stops - 1: segment_idx = total_stops - 2
-                    
                     local_progress = (global_progress - (segment_idx * segment_size)) / segment_size
-                    
                     c1, c2 = colors[segment_idx], colors[segment_idx + 1]
                     inter = self._interpolate_color(local_progress, c1, c2)
                     ctx.set_source_rgba(inter.red, inter.green, inter.blue, inter.alpha)
-                    
             elif color_mode == "custom":
                 c = colors[i % len(colors)]
                 ctx.set_source_rgba(c.red, c.green, c.blue, c.alpha)
 
-            # Draw Active Bar
             if style == "segments":
                 seg_spacing = 1
                 if orientation == "vertical":
@@ -383,7 +367,6 @@ class CpuMultiCoreDisplayer(DataDisplayer):
             ],
             "Core Labels": [
                 ConfigOption(nums_controller, "bool", "Show Core Numbers:", "False"),
-                
                 ConfigOption("multicore_num_position", "dropdown", "Position:", "bottom", options_dict=num_pos_opts),
                 ConfigOption("multicore_num_font", "font", "Font:", "Sans 8"),
                 ConfigOption("multicore_num_color", "color", "Color:", "rgba(200,200,200,1)"),
@@ -413,7 +396,6 @@ class CpuMultiCoreDisplayer(DataDisplayer):
         def build_multicore_config(dialog, content_box, widgets, available_sources, panel_config, prefix=None):
             key_prefix = f"{prefix}_" if prefix else ""
             
-            # --- 1. Dynamic Visibility for Colors ---
             color_mode_combo = widgets.get(f"{key_prefix}multicore_color_mode")
             count_spinner = widgets.get(f"{key_prefix}multicore_custom_color_count")
             
@@ -429,16 +411,12 @@ class CpuMultiCoreDisplayer(DataDisplayer):
                 
                 if single_row: single_row.set_visible(mode == "single")
                 
-                # Show simple start/end ONLY if gradient mode AND no custom sequence defined
                 is_simple_gradient = (mode == "gradient" and not has_custom)
                 if start_row: start_row.set_visible(is_simple_gradient)
                 if end_row: end_row.set_visible(is_simple_gradient)
                 
-                # Show count row if custom or gradient (to allow defining gradient stops)
                 if count_row: count_row.set_visible(mode == "custom" or mode == "gradient")
                 
-                # Handle custom color rows
-                # Show them if mode is custom OR (mode is gradient AND we have custom colors enabled by count > 1)
                 show_custom_rows = (mode == "custom") or (mode == "gradient" and has_custom)
                 
                 for i in range(1, 17):
@@ -455,7 +433,6 @@ class CpuMultiCoreDisplayer(DataDisplayer):
                 
                 GLib.idle_add(update_color_visibility)
 
-            # --- 2. Dynamic Visibility for Labels ---
             nums_switch = widgets.get(f"{key_prefix}multicore_show_nums")
             pos_row = widgets.get(f"{key_prefix}multicore_num_position").get_parent()
             font_row = widgets.get(f"{key_prefix}multicore_num_font").get_parent()
@@ -472,3 +449,7 @@ class CpuMultiCoreDisplayer(DataDisplayer):
                 GLib.idle_add(update_label_visibility, nums_switch, None)
 
         return build_multicore_config
+
+    def close(self):
+        self._stop_animation_timer()
+        super().close()

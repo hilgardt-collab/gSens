@@ -184,8 +184,8 @@ class ColorChooserDialog(Gtk.Window):
         try:
             if hasattr(Gtk, "ColorDialog"):
                 dialog = Gtk.ColorDialog()
-                # FIX: Explicitly pass None for cancellable and use keyword argument for callback
-                dialog.choose_rgba(self, None, callback=self._on_system_pick_finish)
+                # FIX: Explicitly pass None for cancellable to match signature
+                dialog.choose_rgba(self, None, self._on_system_pick_finish)
             else:
                 print("System screen picker not available (Requires GTK 4.10+)")
         except Exception as e:
@@ -220,7 +220,7 @@ class ColorChooserDialog(Gtk.Window):
 
     def _create_swatch_button(self, container, rgba):
         btn = Gtk.Button()
-        btn.set_size_request(30, 30) 
+        btn.set_size_request(30, 22) 
         btn.add_css_class("flat")
         area = Gtk.DrawingArea()
         area.set_draw_func(self._draw_swatch, rgba)
@@ -356,7 +356,6 @@ class ColorChooserDialog(Gtk.Window):
         self._update_from_map(x, y)
     
     def _on_map_drag(self, gesture, offset_x, offset_y):
-        # FIX: Unpack 3 values from get_start_point: success, x, y
         res, start_x, start_y = gesture.get_start_point()
         if res: self._update_from_map(start_x + offset_x, start_y + offset_y)
 

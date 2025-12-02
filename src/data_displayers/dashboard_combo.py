@@ -44,6 +44,7 @@ class DashboardComboDisplayer(ComboBase):
         }
 
         self._animation_timer_id = None
+        self._bar_values = {} # Animation state for simple bars managed by dashboard logic
         
         super().__init__(panel_ref, config)
         populate_defaults_from_model(self.config, self._get_full_config_model())
@@ -242,7 +243,7 @@ class DashboardComboDisplayer(ComboBase):
             
             if not DrawerClass: continue
             
-            # Check if existing drawer matches type
+            # Check existing instance
             existing = self._drawer_instances.get(slot)
             if existing:
                 if not isinstance(existing, DrawerClass):
@@ -270,6 +271,10 @@ class DashboardComboDisplayer(ComboBase):
             
             drawer.config = instance_config
             drawer.apply_styles()
+            
+            # Force update for multi-core to recalculate layout targets if needed
+            if isinstance(drawer, CpuMultiCoreDisplayer):
+                 drawer._core_currents = [] 
 
     def apply_styles(self):
         super().apply_styles()
@@ -389,6 +394,6 @@ class DashboardComboDisplayer(ComboBase):
     def close(self):
         self._stop_animation_timer()
         for drawer in self._drawer_instances.values():
-            if drawer: drawer.close()
+            drawer.close()
         self._drawer_instances.clear()
         super().close()

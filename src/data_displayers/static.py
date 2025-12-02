@@ -31,7 +31,7 @@ class StaticDisplayer(DataDisplayer):
         drawing_area.set_draw_func(self.on_draw)
         return drawing_area
 
-    def update_display(self, data):
+    def update_display(self, data, **kwargs):
         """Receives data from the source, updates internal state, and triggers a redraw."""
         if isinstance(data, dict) and data.get("content_type") == 'text':
             self._text_to_draw = data.get("text", "")
@@ -186,4 +186,3 @@ class StaticDisplayer(DataDisplayer):
             dialog.dynamic_models.append(model)
 
         return build_dynamic_display_config
-

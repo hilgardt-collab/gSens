@@ -19,7 +19,7 @@ class LCARSComboDisplayer(ComboBase, LcarsDrawMixin):
     featuring a highly configurable frame and a main content area.
     """
     def __init__(self, panel_ref, config):
-        # FIX: Use a dictionary to hold unique instances for each slot
+        # Use a dictionary to hold unique instances for each slot
         self._drawer_instances = {}
         
         self._drawer_classes = {
@@ -108,6 +108,9 @@ class LCARSComboDisplayer(ComboBase, LcarsDrawMixin):
                     self._drawer_instances[slot] = TargetClass(self.panel_ref, self.config.copy())
                     if isinstance(self._drawer_instances[slot], GraphDisplayer):
                         self._drawer_instances[slot].is_drawer = True
+                    # FIX: Force realization check to pass for embedded drawers
+                    if hasattr(self._drawer_instances[slot], 'widget'):
+                        self._drawer_instances[slot].widget.get_realized = lambda: True
             else:
                 self._drawer_instances[slot] = TargetClass(self.panel_ref, self.config.copy())
                 if isinstance(self._drawer_instances[slot], GraphDisplayer):
@@ -130,6 +133,10 @@ class LCARSComboDisplayer(ComboBase, LcarsDrawMixin):
             
             drawer.config = instance_config
             drawer.apply_styles()
+            
+            # Force update for multi-core to recalculate layout targets if needed
+            if isinstance(drawer, CpuMultiCoreDisplayer):
+                 drawer._core_currents = [] 
 
     def apply_styles(self):
         super().apply_styles()
@@ -236,7 +243,9 @@ class LCARSComboDisplayer(ComboBase, LcarsDrawMixin):
             if hasattr(drawer, '_animation_tick'):
                 drawer._animation_tick()
         
-        if needs_redraw: self.widget.queue_draw()
+        if needs_redraw or self._drawer_instances:
+            self.widget.queue_draw()
+            
         return GLib.SOURCE_CONTINUE
 
     def on_draw(self, area, ctx, width, height):
@@ -244,9 +253,34 @@ class LCARSComboDisplayer(ComboBase, LcarsDrawMixin):
         self._draw_frame_and_sidebar(ctx, width, height)
         self._draw_content_widgets(ctx, width, height)
 
+    def _draw_secondary_graph(self, ctx, x, y, w, h, prefix, data):
+        drawer = self._drawer_instances.get(prefix)
+        if not drawer: return
+        padding = 10
+        ctx.save(); ctx.rectangle(x+padding, y, w-2*padding, h); ctx.clip(); ctx.translate(x+padding,y)
+        
+        lcars_bg_color = self.config.get(f"{prefix}_graph_lcars_bg_color", "rgba(0,0,0,1)")
+        drawer.config['graph_bg_color'] = lcars_bg_color
+        drawer.config['graph_bg_type'] = 'solid'
+
+        drawer.on_draw(None, ctx, w-2*padding, h)
+        
+        text_overlay_enabled = str(self.config.get(f"{prefix}_text_overlay_enabled", "False")).lower() == 'true'
+        if text_overlay_enabled and prefix in self._text_overlay_lines:
+            self._draw_text_overlay(ctx, 0, 0, w-2*padding, h, prefix)
+        ctx.restore()
+
     def close(self):
+        """
+        Safely stops all animations and closes sub-displayers to prevent leaks.
+        """
         self._stop_animation_timer()
-        for drawer in self._drawer_instances.values():
-            drawer.close()
-        self._drawer_instances.clear()
+        
+        # Close all sub-displayer instances
+        if self._drawer_instances:
+            for drawer in self._drawer_instances.values():
+                if hasattr(drawer, 'close'):
+                    drawer.close()
+            self._drawer_instances.clear()
+            
         super().close()
